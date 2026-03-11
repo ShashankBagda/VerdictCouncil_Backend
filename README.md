@@ -1,1 +1,1 @@
-# VerdictCouncil - Frontend Repo
+# VerdictCouncil - Backend Repo
