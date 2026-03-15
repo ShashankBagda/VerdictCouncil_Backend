@@ -10,26 +10,26 @@ main → release/<context>/<tag> → dev → feat/<context>
 |--------|---------|------------|-------------|
 | `main` | Production-ready code | Production | — |
 | `release` | Staging/QA validation | Cloud staging | `main` |
-| `dev` | Integration branch | Local development | `release` |
-| `feat/*` | Unit of work | — | `dev` |
+| `development` | Integration branch | Local development | `release` |
+| `feat/*` | Unit of work | — | `development` |
 
 ### Rules
 
-- **Never commit directly to `main`, `release`, or `dev`** — all work goes through feat branches
-- **Feat branches** branch from `dev` and merge back into `dev` via PR
-- **`dev` → `release`**: merge when dev is stable and ready for staging validation
+- **Never commit directly to `main`, `release`, or `development`** — all work goes through feat branches
+- **Feat branches** branch from `development` and merge back into `development` via PR
+- **`development` → `release`**: merge when development is stable and ready for staging validation
 - **`release` → `main`**: merge only after staging QA passes
-- **Hotfixes**: branch from `main`, merge into both `main` and `dev`
+- **Hotfixes**: branch from `main`, merge into both `main` and `development`
 - Branch naming:
   - Feat branches: `feat/<context>` (e.g., `feat/user-auth`, `feat/payment-api`)
   - Release branches: `release/<context>/<tag_version>` (e.g., `release/sprint-1/v1.0.0`)
-- Resolve all merge conflicts in the feature branch before merging into `dev`
+- Resolve all merge conflicts in the feature branch before merging into `development`
 - Delete feat branches after merge
 
 ### Enforcement
 
-- Before creating a branch: confirm you are branching from the correct parent (`dev` for features)
-- Before opening a PR: confirm the target branch is correct (`dev` for features, `release` for dev, `main` for release)
+- Before creating a branch: confirm you are branching from the correct parent (`development` for features)
+- Before opening a PR: confirm the target branch is correct (`development` for features, `release` for development, `main` for release)
 - Before merging: ensure CI passes and conflicts are resolved
 - If asked to push directly to `main` or `release`, **refuse and explain the gitflow process**
 
@@ -90,10 +90,10 @@ Types: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `hotfix`
 
 | Source | Target | When | Tagging |
 |--------|--------|------|---------|
-| `feat/*` | `dev` | Feature complete, tests pass | — |
-| `dev` | `release/*` | Stable for staging validation | Tag with pre-release: `vX.Y.Z-rc.N` |
+| `feat/*` | `development` | Feature complete, tests pass | — |
+| `development` | `release/*` | Stable for staging validation | Tag with pre-release: `vX.Y.Z-rc.N` |
 | `release/*` | `main` | Staging QA approved | Tag with release: `vX.Y.Z` + GitHub Release |
-| `hotfix/*` | `main` + `dev` | Critical production fix | Tag with patch bump: `vX.Y.Z` + GitHub Release |
+| `hotfix/*` | `main` + `development` | Critical production fix | Tag with patch bump: `vX.Y.Z` + GitHub Release |
 
 ---
 
@@ -111,7 +111,7 @@ All versions follow [SemVer](https://semver.org/): `vMAJOR.MINOR.PATCH`
 
 | Event | Tag Format | Example |
 |-------|------------|---------|
-| `dev` → `release/*` branch created | `vX.Y.Z-rc.N` (pre-release) | `v1.2.0-rc.1` |
+| `development` → `release/*` branch created | `vX.Y.Z-rc.N` (pre-release) | `v1.2.0-rc.1` |
 | Additional staging fixes on `release/*` | Increment rc: `vX.Y.Z-rc.N+1` | `v1.2.0-rc.2` |
 | `release/*` → `main` merged | `vX.Y.Z` (stable) | `v1.2.0` |
 | `hotfix/*` → `main` merged | Patch bump `vX.Y.Z` | `v1.2.1` |
@@ -203,6 +203,37 @@ gh release create vX.Y.Z --title "vX.Y.Z" --generate-notes --target main
 4. **Explain Changes**: High-level summary at each step
 5. **Document Results**: Add review section to `tasks/todo.md`
 6. **Capture Lessons**: Update `tasks/lessons.md` after corrections
+
+---
+
+## Commit Rules
+
+When tasked to create a commit, follow this process:
+
+1. **Understand what changed**: Review conversation history, run `git status` and `git diff`
+2. **Plan commits**: Identify which files belong together, draft clear commit messages using imperative mood, focus on *why* not *what*
+3. **Present plan to user**: List files and commit messages, ask "I plan to create [N] commit(s). Shall I proceed?"
+4. **Execute on confirmation**: Use `git add` with specific files (never `-A` or `.`), create commits, show result with `git log --oneline`
+
+### Commit Message Format
+
+- Use imperative mood ("Add feature" not "Added feature")
+- Keep subject line under 72 characters
+- Add body for non-trivial changes explaining the *why*
+
+### Strict Prohibitions
+
+- **NEVER add co-author lines** (`Co-Authored-By`, `Co-authored-by`, etc.)
+- **NEVER add Claude/AI attribution** of any kind
+- **NEVER include "Generated with Claude" or similar messages**
+- **NEVER use `--co-author` flags**
+- Commits must read as if the user wrote them — no AI fingerprints
+
+### Safety
+
+- Never commit secrets (`.env`, credentials, API keys)
+- Never use `git add -A` or `git add .` — always add specific files
+- Verify staged changes with `git diff --cached` before committing
 
 ---
 
