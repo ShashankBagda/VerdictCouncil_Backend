@@ -1,14 +1,44 @@
 # Part 6: CI/CD Pipeline
 
-## 6.1 Workflow Overview
+## 6.1 Platform Overview
 
-Three GitHub Actions workflows aligned with the gitflow branching strategy:
+VerdictCouncil deploys to **DigitalOcean** using the following managed services:
+
+| Service | Purpose | Why |
+|---|---|---|
+| **DOKS** (DigitalOcean Kubernetes Service) | Container orchestration | Managed control plane, automatic upgrades, integrated load balancer |
+| **DOCR** (DigitalOcean Container Registry) | Docker image storage | Native DOKS integration, no image pull secrets needed |
+| **DO Managed PostgreSQL** | Case records, audit logs | Automated backups, failover, connection pooling — no StatefulSet to manage |
+| **DO Managed Redis** | Precedent caching, session state | Managed HA, eviction policies, TLS — no StatefulSet to manage |
+| **DO Load Balancer** | HTTPS ingress | Auto-provisioned by K8s ingress controller, Let's Encrypt integration |
+| **DO Spaces** | Backup storage, artifacts | S3-compatible object storage for database exports and CI artifacts |
+
+### CI/CD Platform
+
+**GitHub Actions** drives all automation, using `doctl` (DigitalOcean CLI) for deployment:
 
 | Workflow | Trigger | Purpose | Target |
 |---|---|---|---|
 | `ci.yml` | Push to `feat/*`, PR to `development` | Lint, test, security scan, build verification | — |
-| `staging-deploy.yml` | Push to `release/*` | Build images, deploy to staging, smoke test | Staging cluster |
-| `production-deploy.yml` | Push to `main` | Build release images, deploy to production, create GitHub Release | Production cluster |
+| `staging-deploy.yml` | Push to `release/*` | Build images, push to DOCR, deploy to DOKS staging | DOKS staging namespace |
+| `production-deploy.yml` | Push to `main` | Build release images, deploy to DOKS production, create GitHub Release | DOKS production namespace |
+
+### GitHub Secrets Required
+
+| Secret | Description | Used By |
+|---|---|---|
+| `DIGITALOCEAN_ACCESS_TOKEN` | DO API token (read/write) | All deploy workflows |
+| `DOCR_REGISTRY_NAME` | Container registry name (e.g., `verdictcouncil`) | Build & push jobs |
+| `DOKS_CLUSTER_ID_STAGING` | DOKS cluster ID for staging | Staging deploy |
+| `DOKS_CLUSTER_ID_PRODUCTION` | DOKS cluster ID for production | Production deploy |
+| `STAGING_URL` | Staging gateway URL (e.g., `https://staging-api.verdictcouncil.sg`) | Smoke tests |
+| `STAGING_TEST_PASSWORD` | Test account password for staging | Smoke tests |
+| `PRODUCTION_URL` | Production gateway URL (e.g., `https://api.verdictcouncil.sg`) | Canary tests |
+| `CANARY_TEST_PASSWORD` | Canary test account password | Canary tests |
+
+Application secrets (OPENAI_API_KEY, database credentials, etc.) are stored as Kubernetes Secrets in each DOKS cluster — not as GitHub Secrets. See [Part 8: Infrastructure Setup](08-infrastructure-setup.md) for provisioning instructions.
+
+---
 
 ## 6.2 CI Workflow
 
@@ -226,6 +256,8 @@ jobs:
           cache-to: type=gha,mode=max
 ```
 
+---
+
 ## 6.3 Docker Strategy
 
 ### Base Dockerfile
@@ -315,23 +347,41 @@ ENTRYPOINT ["python", "-m", "solace_agent_mesh.main", "--config", "/app/configs/
 
 ### Image Naming Convention
 
+Images are stored in DigitalOcean Container Registry (DOCR):
+
 ```
-ghcr.io/verdictcouncil/web-gateway:{tag}
-ghcr.io/verdictcouncil/case-processing:{tag}
-ghcr.io/verdictcouncil/complexity-routing:{tag}
-ghcr.io/verdictcouncil/evidence-analysis:{tag}
-ghcr.io/verdictcouncil/fact-reconstruction:{tag}
-ghcr.io/verdictcouncil/witness-analysis:{tag}
-ghcr.io/verdictcouncil/legal-knowledge:{tag}
-ghcr.io/verdictcouncil/argument-construction:{tag}
-ghcr.io/verdictcouncil/deliberation:{tag}
-ghcr.io/verdictcouncil/governance-verdict:{tag}
+registry.digitalocean.com/{registry_name}/web-gateway:{tag}
+registry.digitalocean.com/{registry_name}/case-processing:{tag}
+registry.digitalocean.com/{registry_name}/complexity-routing:{tag}
+registry.digitalocean.com/{registry_name}/evidence-analysis:{tag}
+registry.digitalocean.com/{registry_name}/fact-reconstruction:{tag}
+registry.digitalocean.com/{registry_name}/witness-analysis:{tag}
+registry.digitalocean.com/{registry_name}/legal-knowledge:{tag}
+registry.digitalocean.com/{registry_name}/argument-construction:{tag}
+registry.digitalocean.com/{registry_name}/deliberation:{tag}
+registry.digitalocean.com/{registry_name}/governance-verdict:{tag}
+registry.digitalocean.com/{registry_name}/layer2-aggregator:{tag}
+registry.digitalocean.com/{registry_name}/whatif-controller:{tag}
 ```
 
 Tag formats:
 - Feature builds: `feat-{branch}-{sha}` (never pushed)
-- Staging: `rc-{sha}`
-- Production: `v1.2.0` (semver from git tag)
+- Staging: `rc-{sha}` + `staging-latest`
+- Production: `v1.2.0` (semver from git tag) + `latest`
+
+### DOCR Integration with DOKS
+
+DOCR registries can be integrated directly with DOKS clusters, eliminating the need for image pull secrets:
+
+```bash
+doctl registry kubernetes-manifest | kubectl apply -f -
+# or
+doctl kubernetes cluster registry add <cluster-id>
+```
+
+Once integrated, DOKS nodes can pull images from DOCR without authentication configuration.
+
+---
 
 ## 6.4 Staging Deploy Workflow
 
@@ -345,16 +395,13 @@ on:
       - 'release/**'
 
 env:
-  REGISTRY: ghcr.io
-  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}
+  REGISTRY: registry.digitalocean.com
+  REGISTRY_NAME: ${{ secrets.DOCR_REGISTRY_NAME }}
 
 jobs:
   build-and-push:
     name: Build & Push Images
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
     strategy:
       matrix:
         agent:
@@ -374,15 +421,16 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Install doctl
+        uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+
+      - name: Log in to DOCR
+        run: doctl registry login --expiry-seconds 600
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract short SHA
         id: sha
@@ -395,13 +443,13 @@ jobs:
           file: ./docker/${{ matrix.agent }}/Dockerfile
           push: true
           tags: |
-            ${{ env.IMAGE_PREFIX }}/${{ matrix.agent }}:rc-${{ steps.sha.outputs.short }}
-            ${{ env.IMAGE_PREFIX }}/${{ matrix.agent }}:staging-latest
+            ${{ env.REGISTRY }}/${{ env.REGISTRY_NAME }}/${{ matrix.agent }}:rc-${{ steps.sha.outputs.short }}
+            ${{ env.REGISTRY }}/${{ env.REGISTRY_NAME }}/${{ matrix.agent }}:staging-latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
   deploy-staging:
-    name: Deploy to Staging
+    name: Deploy to DOKS Staging
     runs-on: ubuntu-latest
     needs: build-and-push
     environment: staging
@@ -409,15 +457,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Configure kubectl
-        uses: azure/setup-kubectl@v3
+      - name: Install doctl
+        uses: digitalocean/action-doctl@v2
         with:
-          version: 'v1.28.0'
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
 
-      - name: Set kubeconfig
-        run: |
-          mkdir -p $HOME/.kube
-          echo "${{ secrets.STAGING_KUBECONFIG }}" | base64 -d > $HOME/.kube/config
+      - name: Configure kubectl for DOKS staging
+        run: doctl kubernetes cluster kubeconfig save ${{ secrets.DOKS_CLUSTER_ID_STAGING }}
 
       - name: Extract short SHA
         id: sha
@@ -436,15 +482,16 @@ jobs:
             argument-construction
             deliberation
             governance-verdict
+            layer2-aggregator
+            whatif-controller
           )
           for agent in "${AGENTS[@]}"; do
-            sed -i "s|image:.*${agent}:.*|image: ${{ env.IMAGE_PREFIX }}/${agent}:rc-${{ steps.sha.outputs.short }}|" \
+            sed -i "s|image:.*${agent}:.*|image: ${{ env.REGISTRY }}/${{ env.REGISTRY_NAME }}/${agent}:rc-${{ steps.sha.outputs.short }}|" \
               k8s/staging/${agent}-deployment.yaml
           done
 
       - name: Apply Kubernetes manifests
-        run: |
-          kubectl apply -f k8s/staging/ --namespace verdictcouncil-staging
+        run: kubectl apply -f k8s/staging/ --namespace verdictcouncil-staging
 
       - name: Wait for rollout
         run: |
@@ -465,7 +512,7 @@ jobs:
       - name: Wait for services to stabilise
         run: sleep 15
 
-      - name: Health check all agents
+      - name: Health check gateway
         run: |
           STAGING_URL="${{ secrets.STAGING_URL }}"
           response=$(curl -s -o /dev/null -w "%{http_code}" "${STAGING_URL}/health")
@@ -531,6 +578,8 @@ jobs:
           fi
 ```
 
+---
+
 ## 6.5 Production Deploy Workflow
 
 ```yaml
@@ -543,16 +592,13 @@ on:
       - main
 
 env:
-  REGISTRY: ghcr.io
-  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}
+  REGISTRY: registry.digitalocean.com
+  REGISTRY_NAME: ${{ secrets.DOCR_REGISTRY_NAME }}
 
 jobs:
   build-and-push:
     name: Build & Push Release Images
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
     outputs:
       version: ${{ steps.version.outputs.tag }}
     strategy:
@@ -583,15 +629,16 @@ jobs:
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "Building version: ${TAG}"
 
+      - name: Install doctl
+        uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+
+      - name: Log in to DOCR
+        run: doctl registry login --expiry-seconds 600
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push
         uses: docker/build-push-action@v5
@@ -600,13 +647,13 @@ jobs:
           file: ./docker/${{ matrix.agent }}/Dockerfile
           push: true
           tags: |
-            ${{ env.IMAGE_PREFIX }}/${{ matrix.agent }}:${{ steps.version.outputs.tag }}
-            ${{ env.IMAGE_PREFIX }}/${{ matrix.agent }}:latest
+            ${{ env.REGISTRY }}/${{ env.REGISTRY_NAME }}/${{ matrix.agent }}:${{ steps.version.outputs.tag }}
+            ${{ env.REGISTRY }}/${{ env.REGISTRY_NAME }}/${{ matrix.agent }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
   deploy-production:
-    name: Deploy to Production
+    name: Deploy to DOKS Production
     runs-on: ubuntu-latest
     needs: build-and-push
     environment: production
@@ -616,15 +663,13 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Configure kubectl
-        uses: azure/setup-kubectl@v3
+      - name: Install doctl
+        uses: digitalocean/action-doctl@v2
         with:
-          version: 'v1.28.0'
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
 
-      - name: Set kubeconfig
-        run: |
-          mkdir -p $HOME/.kube
-          echo "${{ secrets.PRODUCTION_KUBECONFIG }}" | base64 -d > $HOME/.kube/config
+      - name: Configure kubectl for DOKS production
+        run: doctl kubernetes cluster kubeconfig save ${{ secrets.DOKS_CLUSTER_ID_PRODUCTION }}
 
       - name: Get version
         id: version
@@ -645,15 +690,16 @@ jobs:
             argument-construction
             deliberation
             governance-verdict
+            layer2-aggregator
+            whatif-controller
           )
           for agent in "${AGENTS[@]}"; do
-            sed -i "s|image:.*${agent}:.*|image: ${{ env.IMAGE_PREFIX }}/${agent}:${{ steps.version.outputs.tag }}|" \
+            sed -i "s|image:.*${agent}:.*|image: ${{ env.REGISTRY }}/${{ env.REGISTRY_NAME }}/${agent}:${{ steps.version.outputs.tag }}|" \
               k8s/production/${agent}-deployment.yaml
           done
 
       - name: Apply Kubernetes manifests (rolling update)
-        run: |
-          kubectl apply -f k8s/production/ --namespace verdictcouncil
+        run: kubectl apply -f k8s/production/ --namespace verdictcouncil
 
       - name: Wait for rollout
         run: |
@@ -668,7 +714,7 @@ jobs:
     needs: deploy-production
     environment: production
     steps:
-      - name: Health check all pods
+      - name: Health check gateway
         run: |
           PROD_URL="${{ secrets.PRODUCTION_URL }}"
           response=$(curl -s -o /dev/null -w "%{http_code}" "${PROD_URL}/health")
@@ -739,7 +785,33 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-## 6.6 Kubernetes Manifest Examples
+---
+
+## 6.6 Kubernetes Manifests for DOKS
+
+With DigitalOcean Managed PostgreSQL and Redis, the K8s manifests are simpler — no StatefulSets for databases. The cluster runs only application containers and the Solace broker.
+
+### Deployment Containers (DOKS)
+
+| Container | Type | Replicas | Notes |
+|---|---|---|---|
+| web-gateway | Deployment | 2-5 (HPA) | Public-facing, auto-scaled |
+| case-processing | Deployment | 1 | Lightweight agent |
+| complexity-routing | Deployment | 1 | Lightweight agent |
+| evidence-analysis | Deployment | 1 | GPU-optional, high memory |
+| fact-reconstruction | Deployment | 1 | High memory |
+| witness-analysis | Deployment | 1 | Medium resources |
+| legal-knowledge | Deployment | 1 | Medium resources |
+| argument-construction | Deployment | 1 | High memory |
+| deliberation | Deployment | 1 | High memory |
+| governance-verdict | Deployment | 1 | High memory |
+| layer2-aggregator | Deployment | 1 | Stateless fan-in barrier |
+| whatif-controller | Deployment | 1 | Scenario orchestrator |
+| solace-broker | StatefulSet | 1 | Event broker (self-hosted) |
+
+**Total: 13 pods** (12 Deployments + 1 StatefulSet for Solace)
+
+PostgreSQL and Redis run as DO Managed Services outside the cluster and are accessed via private networking connection strings.
 
 ### Agent Deployment + Service (Template)
 
@@ -770,7 +842,7 @@ spec:
       serviceAccountName: verdictcouncil-agent
       containers:
         - name: case-processing
-          image: ghcr.io/verdictcouncil/case-processing:latest
+          image: registry.digitalocean.com/verdictcouncil/case-processing:latest
           ports:
             - containerPort: 9090
               name: metrics
@@ -820,191 +892,6 @@ spec:
       name: metrics
 ```
 
-### PostgreSQL StatefulSet
-
-```yaml
-# k8s/base/postgresql-statefulset.yaml
-apiVersion: apps/v1
-kind: StatefulSet
-metadata:
-  name: postgresql
-  namespace: verdictcouncil
-  labels:
-    app: postgresql
-    component: database
-spec:
-  serviceName: postgresql-svc
-  replicas: 1
-  selector:
-    matchLabels:
-      app: postgresql
-  template:
-    metadata:
-      labels:
-        app: postgresql
-        component: database
-    spec:
-      containers:
-        - name: postgresql
-          image: postgres:16
-          ports:
-            - containerPort: 5432
-              name: postgres
-          env:
-            - name: POSTGRES_DB
-              value: verdictcouncil
-            - name: POSTGRES_USER
-              valueFrom:
-                secretKeyRef:
-                  name: verdictcouncil-secrets
-                  key: POSTGRES_USER
-            - name: POSTGRES_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: verdictcouncil-secrets
-                  key: POSTGRES_PASSWORD
-            - name: PGDATA
-              value: /var/lib/postgresql/data/pgdata
-          resources:
-            requests:
-              cpu: 500m
-              memory: 512Mi
-            limits:
-              cpu: "1"
-              memory: 1Gi
-          volumeMounts:
-            - name: postgresql-data
-              mountPath: /var/lib/postgresql/data
-          readinessProbe:
-            exec:
-              command:
-                - pg_isready
-                - -U
-                - $(POSTGRES_USER)
-            initialDelaySeconds: 10
-            periodSeconds: 10
-          livenessProbe:
-            exec:
-              command:
-                - pg_isready
-                - -U
-                - $(POSTGRES_USER)
-            initialDelaySeconds: 30
-            periodSeconds: 30
-  volumeClaimTemplates:
-    - metadata:
-        name: postgresql-data
-      spec:
-        accessModes:
-          - ReadWriteOnce
-        resources:
-          requests:
-            storage: 50Gi
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: postgresql-svc
-  namespace: verdictcouncil
-  labels:
-    app: postgresql
-spec:
-  type: ClusterIP
-  selector:
-    app: postgresql
-  ports:
-    - port: 5432
-      targetPort: 5432
-      name: postgres
-```
-
-### Redis StatefulSet
-
-```yaml
-# k8s/base/redis-statefulset.yaml
-apiVersion: apps/v1
-kind: StatefulSet
-metadata:
-  name: redis
-  namespace: verdictcouncil
-  labels:
-    app: redis
-    component: cache
-spec:
-  serviceName: redis-svc
-  replicas: 1
-  selector:
-    matchLabels:
-      app: redis
-  template:
-    metadata:
-      labels:
-        app: redis
-        component: cache
-    spec:
-      containers:
-        - name: redis
-          image: redis:7
-          ports:
-            - containerPort: 6379
-              name: redis
-          command:
-            - redis-server
-            - --maxmemory
-            - 256mb
-            - --maxmemory-policy
-            - allkeys-lru
-          resources:
-            requests:
-              cpu: 100m
-              memory: 128Mi
-            limits:
-              cpu: 250m
-              memory: 300Mi
-          readinessProbe:
-            exec:
-              command:
-                - redis-cli
-                - ping
-            initialDelaySeconds: 5
-            periodSeconds: 10
-          livenessProbe:
-            exec:
-              command:
-                - redis-cli
-                - ping
-            initialDelaySeconds: 15
-            periodSeconds: 20
-          volumeMounts:
-            - name: redis-data
-              mountPath: /data
-  volumeClaimTemplates:
-    - metadata:
-        name: redis-data
-      spec:
-        accessModes:
-          - ReadWriteOnce
-        resources:
-          requests:
-            storage: 5Gi
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: redis-svc
-  namespace: verdictcouncil
-  labels:
-    app: redis
-spec:
-  type: ClusterIP
-  selector:
-    app: redis
-  ports:
-    - port: 6379
-      targetPort: 6379
-      name: redis
-```
-
 ### ConfigMap for Agent Configuration
 
 ```yaml
@@ -1019,16 +906,14 @@ metadata:
 data:
   SOLACE_BROKER_URL: "tcp://solace-broker-svc:55555"
   SOLACE_BROKER_VPN: "verdictcouncil"
-  # NOTE: DATABASE_URL is NOT set here. Kubernetes ConfigMaps do not perform
-  # $(VAR) interpolation — those are literal strings, not resolved references.
-  # DATABASE_URL is constructed at container startup via an entrypoint script
-  # that reads POSTGRES_USER and POSTGRES_PASSWORD from the Secret and builds
-  # the connection string dynamically. See the entrypoint.sh in each agent's
-  # Docker image.
-  POSTGRES_HOST: "postgresql-svc"
-  POSTGRES_PORT: "5432"
+  # DATABASE_URL and REDIS_URL point to DO Managed Services via private network.
+  # Connection strings use the private hostname provided by DigitalOcean
+  # (e.g., private-db-verdictcouncil-do-user-xxxxx-0.db.ondigitalocean.com).
+  # Credentials are in the Secret, not here.
+  POSTGRES_HOST: "private-db-verdictcouncil-do-user-xxxxx-0.db.ondigitalocean.com"
+  POSTGRES_PORT: "25060"
   POSTGRES_DB: "verdictcouncil"
-  REDIS_URL: "redis://redis-svc:6379/0"
+  REDIS_URL: "rediss://private-redis-verdictcouncil-do-user-xxxxx-0.db.ondigitalocean.com:25061/0"
   FASTAPI_HOST: "0.0.0.0"
   FASTAPI_PORT: "8000"
   LOG_LEVEL: "INFO"
@@ -1037,6 +922,8 @@ data:
   JUDICIARY_BASE_URL: "https://www.judiciary.gov.sg"
   PAIR_BASE_URL: "https://search.pair.gov.sg"
 ```
+
+**Note:** DO Managed PostgreSQL uses port `25060` (default) and Managed Redis uses port `25061` with TLS (`rediss://` scheme). The private hostnames are auto-assigned when the databases are created and are only reachable from resources in the same VPC.
 
 ### Secret for Credentials
 
@@ -1057,6 +944,107 @@ data:
   POSTGRES_USER: "BASE64_ENCODED_VALUE"
   POSTGRES_PASSWORD: "BASE64_ENCODED_VALUE"
   JWT_SECRET: "BASE64_ENCODED_VALUE"
+```
+
+### Solace Broker StatefulSet
+
+The Solace PubSub+ Event Broker runs as a StatefulSet within DOKS since DigitalOcean does not offer a managed Solace service:
+
+```yaml
+# k8s/base/solace-broker-statefulset.yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: solace-broker
+  namespace: verdictcouncil
+  labels:
+    app: solace-broker
+    component: broker
+spec:
+  serviceName: solace-broker-svc
+  replicas: 1
+  selector:
+    matchLabels:
+      app: solace-broker
+  template:
+    metadata:
+      labels:
+        app: solace-broker
+        component: broker
+    spec:
+      containers:
+        - name: solace
+          image: solace/solace-pubsub-standard:latest
+          ports:
+            - containerPort: 55555
+              name: smf
+            - containerPort: 8080
+              name: semp
+            - containerPort: 1883
+              name: mqtt
+            - containerPort: 5672
+              name: amqp
+          env:
+            - name: username_admin_globalaccesslevel
+              value: admin
+            - name: username_admin_password
+              valueFrom:
+                secretKeyRef:
+                  name: verdictcouncil-secrets
+                  key: SOLACE_BROKER_PASSWORD
+            - name: system_scaling_maxconnectioncount
+              value: "100"
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "1"
+              memory: 2Gi
+          volumeMounts:
+            - name: solace-data
+              mountPath: /var/lib/solace
+          readinessProbe:
+            httpGet:
+              path: /health-check/guaranteed-active
+              port: 5550
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health-check/guaranteed-active
+              port: 5550
+            initialDelaySeconds: 60
+            periodSeconds: 30
+  volumeClaimTemplates:
+    - metadata:
+        name: solace-data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: do-block-storage
+        resources:
+          requests:
+            storage: 20Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: solace-broker-svc
+  namespace: verdictcouncil
+  labels:
+    app: solace-broker
+spec:
+  type: ClusterIP
+  selector:
+    app: solace-broker
+  ports:
+    - port: 55555
+      targetPort: 55555
+      name: smf
+    - port: 8080
+      targetPort: 8080
+      name: semp
 ```
 
 ### HorizontalPodAutoscaler for Web Gateway
@@ -1105,7 +1093,9 @@ spec:
           periodSeconds: 120
 ```
 
-### Ingress
+### Ingress with DO Load Balancer
+
+DOKS auto-provisions a DigitalOcean Load Balancer when an Ingress resource is created. TLS termination is handled via cert-manager with Let's Encrypt:
 
 ```yaml
 # k8s/base/ingress.yaml
@@ -1115,11 +1105,18 @@ metadata:
   name: verdictcouncil-ingress
   namespace: verdictcouncil
   annotations:
-    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # DO Load Balancer annotations
+    kubernetes.digitalocean.com/load-balancer-id: ""
+    service.beta.kubernetes.io/do-loadbalancer-protocol: "http"
+    service.beta.kubernetes.io/do-loadbalancer-tls-ports: "443"
+    service.beta.kubernetes.io/do-loadbalancer-redirect-http-to-https: "true"
+    service.beta.kubernetes.io/do-loadbalancer-size-unit: "1"
+    # cert-manager for TLS
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    # Nginx ingress controller settings
     nginx.ingress.kubernetes.io/proxy-body-size: "50m"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
-    cert-manager.io/cluster-issuer: letsencrypt-prod
 spec:
   ingressClassName: nginx
   tls:
@@ -1138,6 +1135,8 @@ spec:
                 port:
                   number: 8000
 ```
+
+---
 
 ## 6.7 Environment Promotion Diagram
 
@@ -1161,15 +1160,15 @@ flowchart LR
 
     subgraph Staging["Staging Pipeline"]
         REL["release/* branch"]
-        SBUILD["Build & Push<br/>rc-{sha} tags"]
-        SDEPLOY["Deploy Staging<br/>K8s namespace:<br/>verdictcouncil-staging"]
+        SBUILD["Build & Push to DOCR<br/>rc-{sha} tags"]
+        SDEPLOY["Deploy to DOKS<br/>namespace:<br/>verdictcouncil-staging"]
         SMOKE["Smoke Test"]
     end
 
     subgraph Production["Production Pipeline"]
         MAIN["main branch"]
-        PBUILD["Build & Push<br/>v{semver} tags"]
-        PDEPLOY["Deploy Production<br/>K8s namespace:<br/>verdictcouncil"]
+        PBUILD["Build & Push to DOCR<br/>v{semver} tags"]
+        PDEPLOY["Deploy to DOKS<br/>namespace:<br/>verdictcouncil"]
         VERIFY["Verify & Canary"]
         RELEASE["GitHub Release<br/>+ Auto Notes"]
     end
@@ -1201,5 +1200,81 @@ flowchart LR
     style RELEASE fill:#2ecc71,color:#fff
 ```
 
----
+## 6.8 DigitalOcean Architecture Diagram
 
+```mermaid
+flowchart TB
+    subgraph Internet
+        USER["Judge UI / Browser"]
+    end
+
+    subgraph DO["DigitalOcean Cloud"]
+        subgraph LB["DO Load Balancer"]
+            DOLB["HTTPS :443<br/>TLS Termination"]
+        end
+
+        subgraph DOKS["DOKS Cluster"]
+            subgraph NS["Namespace: verdictcouncil"]
+                INGRESS["Nginx Ingress Controller"]
+                GW["Web Gateway<br/>(2-5 replicas, HPA)"]
+
+                subgraph L1["Layer 1: Case Prep"]
+                    CP["Case Processing"]
+                    CR["Complexity Routing"]
+                end
+
+                subgraph L2["Layer 2: Evidence"]
+                    EA["Evidence Analysis"]
+                    FR["Fact Reconstruction"]
+                    WA["Witness Analysis"]
+                    AGG["Layer2 Aggregator"]
+                end
+
+                subgraph L3["Layer 3: Legal"]
+                    LK["Legal Knowledge"]
+                    AC["Argument Construction"]
+                end
+
+                subgraph L4["Layer 4: Verdict"]
+                    DL["Deliberation"]
+                    GV["Governance & Verdict"]
+                end
+
+                WC["What-If Controller"]
+
+                subgraph Broker["Solace PubSub+"]
+                    SOL["Broker Pod<br/>+ PVC (do-block-storage)"]
+                end
+            end
+        end
+
+        subgraph Managed["DO Managed Services (Private VPC)"]
+            PG["Managed PostgreSQL 16<br/>Primary + Standby"]
+            RD["Managed Redis 7<br/>HA with TLS"]
+        end
+
+        subgraph Storage["DO Spaces"]
+            S3["Backups & Artifacts<br/>(S3-compatible)"]
+        end
+
+        subgraph Registry["DOCR"]
+            REG["Container Images<br/>12 agent images"]
+        end
+    end
+
+    USER --> DOLB
+    DOLB --> INGRESS
+    INGRESS --> GW
+    GW --> SOL
+    SOL --> CP & CR & EA & FR & WA & AGG & LK & AC & DL & GV & WC
+    CP & CR & EA & FR & WA & LK & AC & DL & GV --> PG
+    AGG & LK & GW --> RD
+    REG -.->|"image pull"| DOKS
+    PG -.->|"daily backup"| S3
+
+    style DO fill:#0069ff,color:#fff
+    style DOKS fill:#326ce5,color:#fff
+    style Managed fill:#1a1a2e,color:#fff
+```
+
+---

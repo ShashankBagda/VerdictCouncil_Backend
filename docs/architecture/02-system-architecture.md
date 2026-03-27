@@ -426,13 +426,13 @@ Agent 2 ─── fan-out ──┬── Agent 3 ──┐
 
 ### Deployment
 
-The Layer2Aggregator runs as an additional pod in the K8s cluster (or container in docker-compose). It is stateless except for the Redis-backed pending map, so it can be restarted without data loss.
+The Layer2Aggregator runs as an additional pod in the DOKS cluster (or container in docker-compose for local development). It is stateless except for the Redis-backed pending map, so it can be restarted without data loss.
 
 | Component | Container Name | Port | Image |
 |---|---|---|---|
-| Layer2Aggregator | vc-layer2-aggregator | 8090 (health) | ghcr.io/verdictcouncil/layer2-aggregator |
+| Layer2Aggregator | vc-layer2-aggregator | 8090 (health) | registry.digitalocean.com/verdictcouncil/layer2-aggregator |
 
-This brings the total deployment to: **9 agent pods + 1 gateway + 1 What-If Controller + 1 Layer2Aggregator + 1 Solace broker + PostgreSQL + Redis = 14 containers**.
+This brings the total DOKS deployment to: **9 agent pods + 1 gateway + 1 What-If Controller + 1 Layer2Aggregator + 1 Solace broker = 13 pods**. PostgreSQL and Redis run as DigitalOcean Managed Services outside the cluster, accessed via private VPC networking.
 
 ---
 

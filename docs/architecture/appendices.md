@@ -17,22 +17,30 @@
 | 9 | GovernanceVerdict | gpt-5.4 | ~10,000 | ~3,000 | $0.070 |
 | | **Total LLM per case** | | **~87,000** | **~31,500** | **$0.40 - $0.55** |
 
-### Infrastructure Costs
+### Infrastructure Costs (DigitalOcean)
 
-| Item | Cost | Notes |
-|---|---|---|
-| OpenAI Vector Store | ~$0.005/day | 50MB statute corpus at $0.10/GB/day |
-| search_precedents (live) | Negligible | Results cached in Redis for 24h; judiciary.gov.sg and PAIR are free public APIs |
-| Solace PubSub+ | $0/month | Community edition for development; enterprise licensing for production |
-| Kubernetes cluster | Variable | Cloud-provider dependent; estimated 3-5 nodes for production |
+| Item | Staging | Production | Notes |
+|---|---|---|---|
+| DOKS Nodes | $96/mo (2× s-4vcpu-8gb) | $144/mo (3× s-4vcpu-8gb) | Control plane is free; auto-scale adds $48/node |
+| DOKS Load Balancer | $12/mo | $12/mo | Auto-provisioned by ingress controller |
+| Managed PostgreSQL | $30/mo (s-1vcpu-2gb) | $60/mo (s-2vcpu-4gb) | Daily backups included; +$60 for HA standby |
+| Managed Redis | $15/mo (s-1vcpu-1gb) | $15/mo (s-1vcpu-2gb) | TLS included; eviction policy: allkeys-lru |
+| DOCR (Professional) | — | $12/mo | Shared registry, 50 GB storage |
+| DO Spaces | — | $5/mo | Backups & artifacts, 250 GB included |
+| Block Storage (Solace) | $4/mo (20 GB) | $4/mo (20 GB) | $0.10/GB/mo for Solace PVC |
+| OpenAI Vector Store | ~$0.15/mo | ~$0.15/mo | 50 MB statute corpus at $0.10/GB/day |
+| search_precedents (live) | Negligible | Negligible | Results cached in Redis; judiciary.gov.sg and PAIR are free public APIs |
+| **Subtotal Infrastructure** | **~$157/mo** | **~$252/mo** | Combined: ~$409/mo |
 
-### Monthly Projections
+### Monthly Projections (Infrastructure + LLM)
 
-| Volume | Cases/Month | Est. LLM Cost | Vector Store | Total |
+| Volume | Cases/Month | Est. LLM Cost | Infrastructure | Total |
 |---|---|---|---|---|
-| Low | 50 | $105 - $130 | $0.15 | ~$130 |
-| Medium | 200 | $420 - $520 | $0.15 | ~$520 |
-| High | 500 | $1,050 - $1,300 | $0.15 | ~$1,300 |
+| Low | 50 | $105 - $130 | ~$409 | ~$540 |
+| Medium | 200 | $420 - $520 | ~$409 | ~$930 |
+| High | 500 | $1,050 - $1,300 | ~$409 | ~$1,710 |
+
+> See [Part 8: Infrastructure Setup](08-infrastructure-setup.md) for detailed sizing and provisioning instructions.
 
 ## Appendix B: Environment Variables Reference
 
@@ -45,8 +53,8 @@
 | `SOLACE_BROKER_VPN` | Solace message VPN name | `verdictcouncil` | All agents, web-gateway |
 | `SOLACE_BROKER_USERNAME` | Solace broker username | `vc-agent` | All agents, web-gateway |
 | `SOLACE_BROKER_PASSWORD` | Solace broker password | `(secret)` | All agents, web-gateway |
-| `DATABASE_URL` | PostgreSQL connection string | `postgresql://user:pass@postgresql-svc:5432/verdictcouncil` | All agents, web-gateway |
-| `REDIS_URL` | Redis connection string | `redis://redis-svc:6379/0` | legal-knowledge, web-gateway |
+| `DATABASE_URL` | DO Managed PostgreSQL connection string | `postgresql://vc_app:pass@private-db-xxx.db.ondigitalocean.com:25060/verdictcouncil?sslmode=require` | All agents, web-gateway |
+| `REDIS_URL` | DO Managed Redis connection string | `rediss://default:pass@private-redis-xxx.db.ondigitalocean.com:25061/0` | legal-knowledge, web-gateway |
 | `JWT_SECRET` | Secret key for JWT signing | `(secret, 256-bit)` | web-gateway |
 
 ### Application Configuration
@@ -72,14 +80,14 @@
 | `OPENAI_MODEL_STRONG_REASONING` | Model for strong reasoning | `gpt-5` | evidence-analysis, fact-reconstruction, legal-knowledge |
 | `OPENAI_MODEL_FRONTIER_REASONING` | Model for frontier reasoning | `gpt-5.4` | argument-construction, deliberation, governance-verdict |
 
-### Database Configuration (PostgreSQL pod)
+### DigitalOcean-Specific Notes
 
-| Variable | Description | Example |
-|---|---|---|
-| `POSTGRES_DB` | Database name | `verdictcouncil` |
-| `POSTGRES_USER` | Database superuser | `vc_admin` |
-| `POSTGRES_PASSWORD` | Database password | `(secret)` |
-| `PGDATA` | Data directory path | `/var/lib/postgresql/data/pgdata` |
+| Topic | Detail |
+|---|---|
+| **PostgreSQL port** | DO Managed PostgreSQL uses port `25060` (not 5432). Connection strings from `doctl databases connection` include this. |
+| **Redis TLS** | DO Managed Redis requires TLS. Use `rediss://` (double-s) scheme, not `redis://`. |
+| **Private networking** | Use the private hostname (`private-db-...`) for connections from within the same VPC. The public hostname works but routes through the internet. |
+| **SSL mode** | PostgreSQL connections should include `?sslmode=require` for encrypted connections. |
 
 ## Appendix C: Glossary
 
@@ -98,12 +106,15 @@
 | **VPN** | Message VPN | Solace virtual partition for isolating message traffic (not a network VPN) |
 | **HPA** | Horizontal Pod Autoscaler | Kubernetes resource that automatically scales pod replicas based on metrics |
 | **PVC** | Persistent Volume Claim | Kubernetes abstraction for requesting persistent storage |
-| **GHCR** | GitHub Container Registry | Container image registry integrated with GitHub |
+| **DOCR** | DigitalOcean Container Registry | Private Docker image registry with native DOKS integration and vulnerability scanning |
+| **DOKS** | DigitalOcean Kubernetes Service | Managed Kubernetes with free control plane, automatic upgrades, and integrated load balancing |
+| **DO** | DigitalOcean | Cloud infrastructure provider hosting all VerdictCouncil services |
+| **doctl** | DigitalOcean CLI | Command-line tool for managing DigitalOcean resources; used in CI/CD for deployment |
 | **SemVer** | Semantic Versioning | Versioning scheme: MAJOR.MINOR.PATCH |
 | **PAIR** | Platform for AI-assisted Research | Singapore government legal research platform |
 | **JWT** | JSON Web Token | Compact, URL-safe token format for authentication claims |
 | **OCR** | Optical Character Recognition | Technology to extract text from images and scanned documents |
 | **TTL** | Time to Live | Duration for which cached data remains valid before expiry |
+| **VPC** | Virtual Private Cloud | Isolated private network within DigitalOcean for secure inter-service communication |
 
 ---
-

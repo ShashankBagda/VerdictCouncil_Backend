@@ -12,16 +12,18 @@
 | **Message Broker** | Solace PubSub+ Event Broker | latest | Enterprise-grade event mesh with guaranteed delivery, topic hierarchy, message replay, and built-in audit trail |
 | **RAG Pipeline** | OpenAI Vector Stores | — | Fully managed RAG: automatic parsing, chunking, embedding (text-embedding-3-large), and hybrid retrieval (semantic + keyword) |
 | **Document Storage** | OpenAI Files API | — | Native PDF, image, and text parsing with no custom extraction libraries required |
-| **Database** | PostgreSQL | 16 | Case records, audit logs, session persistence; JSONB support for flexible nested data |
-| **Cache** | Redis | 7 | search_precedents caching (24h TTL), session token storage, rate limiting counters |
+| **Database** | DigitalOcean Managed PostgreSQL | 16 | Automated daily backups, point-in-time recovery, read replicas, connection pooling; accessed via private VPC networking |
+| **Cache** | DigitalOcean Managed Redis | 7 | Managed HA with automatic failover, TLS encryption, eviction policies; accessed via private VPC networking |
 | **Authentication** | PyJWT | — | Lightweight JWT generation and validation; tokens transported via HTTP-only cookies |
 | **HTTP Client** | httpx | — | Async HTTP client for search_precedents tool calls to judiciary.gov.sg and PAIR |
 | **Containerization** | Docker | — | Multi-stage builds; per-agent images for independent scaling and deployment |
-| **Container Registry** | GitHub Container Registry (GHCR) | — | Integrated with GitHub Actions CI/CD; organisation-scoped image access |
-| **Orchestration** | Kubernetes | 1.28+ | 11+ pods: 9 agents + 1 gateway + 1 broker + infrastructure (PostgreSQL, Redis) |
-| **CI/CD** | GitHub Actions | — | Build, test, deploy with environment promotion aligned to gitflow branching |
-| **Monitoring** | Prometheus + Grafana | — | Agent health metrics, pipeline latency histograms, LLM token usage and cost tracking |
-| **Logging** | Python stdout + Solace audit trail | — | Kubernetes collects stdout via log drivers; Solace provides message-level audit for every agent hop |
+| **Container Registry** | DigitalOcean Container Registry (DOCR) | — | Native DOKS integration (no image pull secrets needed); private registry with vulnerability scanning |
+| **Orchestration** | DigitalOcean Kubernetes Service (DOKS) | 1.31+ | Managed control plane, automatic upgrades, integrated load balancer, `do-block-storage` StorageClass for PVCs |
+| **Load Balancer** | DigitalOcean Load Balancer | — | Auto-provisioned by DOKS ingress; HTTPS termination, HTTP→HTTPS redirect, health checks |
+| **Object Storage** | DigitalOcean Spaces | — | S3-compatible storage for database backups, CI artifacts, and document archives |
+| **CI/CD** | GitHub Actions + doctl | — | Build, test, deploy with `digitalocean/action-doctl@v2` for DOKS/DOCR authentication |
+| **Monitoring** | DO Monitoring + Prometheus + Grafana | — | DO provides cluster-level metrics; Prometheus for agent-level metrics, Grafana for dashboards |
+| **Logging** | Python stdout + Solace audit trail | — | DOKS collects stdout via log drivers; Solace provides message-level audit for every agent hop |
 | **Code Quality** | ruff + mypy | — | Fast linting (ruff) and static type checking (mypy) enforced in CI |
 | **Security Scanning** | pip-audit + bandit | — | Dependency vulnerability scanning (pip-audit) and Python code security analysis (bandit) |
 | **Testing** | pytest | — | Unit and integration tests with mocked OpenAI calls; coverage target 80%+ |
@@ -45,8 +47,10 @@ Each agent is assigned a model based on reasoning depth requirements:
 | RAG approach | OpenAI Vector Stores | Self-hosted (Chroma, Weaviate, Pinecone) | Zero infrastructure overhead; automatic chunking and embedding; managed hybrid retrieval eliminates tuning |
 | Broker | Solace PubSub+ | RabbitMQ, Kafka, NATS | SAM-native integration; topic hierarchy maps to agent pipeline; enterprise audit trail for judicial compliance |
 | Agent framework | SAM | LangGraph, CrewAI, AutoGen | Purpose-built for Solace broker; YAML-driven agent config; built-in tool registration and message routing |
-| Database | PostgreSQL | MongoDB, DynamoDB | Relational integrity for case-party-evidence relationships; JSONB for flexible nested fields; mature ecosystem |
+| Database hosting | DO Managed PostgreSQL | Self-hosted StatefulSet | Automated backups, failover, and patching; no K8s StatefulSet management; private VPC access |
+| Cache hosting | DO Managed Redis | Self-hosted StatefulSet | Managed HA, TLS by default, no operational overhead; private VPC access |
+| Container registry | DOCR | GHCR, Docker Hub, ECR | Native DOKS integration eliminates image pull secrets; same-region pull latency; integrated vulnerability scanning |
+| Cloud platform | DigitalOcean | AWS, GCP, Azure | Simpler pricing model; managed K8s without enterprise complexity; sufficient for judicial workload scale; lower cost for small-to-medium deployments |
 | Auth transport | HTTP-only cookies | Bearer tokens in headers | XSS protection; automatic inclusion in browser requests; no client-side token storage |
 
 ---
-
