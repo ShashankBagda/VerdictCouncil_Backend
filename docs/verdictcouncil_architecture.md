@@ -909,7 +909,7 @@ verdictcouncil/a2a/v1/agent/request/complexity-routing
 
 **No Built-in Shared State.** SAM does not provide a shared state store. This is a deliberate architectural constraint — it forces all inter-agent communication to flow through the event broker, creating a complete audit trail. The CaseState object is passed as the event payload through the pipeline (see Section 2.4).
 
-**LiteLLM Wrapper for Model Abstraction.** SAM integrates with LLM providers through LiteLLM, allowing model specifications like `o3`, `o4-mini`, `gpt-4.1`, and `gpt-4.1-mini` to route to OpenAI's API without provider-specific code.
+**LiteLLM Wrapper for Model Abstraction.** SAM integrates with LLM providers through LiteLLM, allowing model specifications like `gpt-5.4`, `gpt-5`, `gpt-5-mini`, and `gpt-5.4-nano` to route to OpenAI's API without provider-specific code.
 
 **Built-in Web Gateway.** SAM provides an HTTP/SSE gateway module that exposes the agent mesh to external clients. This serves as both the production API endpoint and a debugging/tracing interface during development.
 
@@ -928,41 +928,41 @@ The 9 agents are organized into 4 logical layers reflecting the judicial reasoni
 │                    LAYER 1: CASE PREPARATION                    │
 │  ┌─────────────────────┐    ┌──────────────────────────────┐   │
 │  │  Case Processing     │───▶│  Complexity & Routing         │   │
-│  │  (gpt-4.1-mini)      │    │  (o4-mini)                    │   │
+│  │  (gpt-5.4-nano)      │    │  (gpt-5.4-nano)               │   │
 │  └─────────────────────┘    └──────────────────────────────┘   │
 ├─────────────────────────────────────────────────────────────────┤
 │                 LAYER 2: EVIDENCE RECONSTRUCTION                │
 │  ┌──────────────────┐ ┌──────────────────┐ ┌────────────────┐  │
 │  │ Evidence Analysis │ │Fact Reconstruction│ │Witness Analysis│  │
-│  │ (gpt-4.1)        │ │(gpt-4.1)         │ │(o4-mini)       │  │
+│  │ (gpt-5)          │ │(gpt-5)           │ │(gpt-5-mini)    │  │
 │  └──────────────────┘ └──────────────────┘ └────────────────┘  │
 ├─────────────────────────────────────────────────────────────────┤
 │                    LAYER 3: LEGAL REASONING                     │
 │  ┌──────────────────────┐    ┌──────────────────────────────┐  │
 │  │  Legal Knowledge      │───▶│  Argument Construction        │  │
-│  │  (gpt-4.1)            │    │  (o3)                         │  │
+│  │  (gpt-5)              │    │  (gpt-5.4)                    │  │
 │  └──────────────────────┘    └──────────────────────────────┘  │
 ├─────────────────────────────────────────────────────────────────┤
 │                   LAYER 4: JUDICIAL DECISION                    │
 │  ┌──────────────────────┐    ┌──────────────────────────────┐  │
 │  │  Deliberation         │───▶│  Governance & Verdict         │  │
-│  │  (o3)                 │    │  (o3)                         │  │
+│  │  (gpt-5.4)            │    │  (gpt-5.4)                    │  │
 │  └──────────────────────┘    └──────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
 | Layer | Agents | Purpose | Model Tier |
 |-------|--------|---------|------------|
-| **Layer 1: Case Preparation** | Case Processing, Complexity & Routing | Intake, structuring, jurisdiction validation, complexity assessment, routing | gpt-4.1-mini, o4-mini |
-| **Layer 2: Evidence Reconstruction** | Evidence Analysis, Fact Reconstruction, Witness Analysis | Analyze evidence, extract facts, build timeline, assess witnesses | gpt-4.1, gpt-4.1, o4-mini |
-| **Layer 3: Legal Reasoning** | Legal Knowledge, Argument Construction | Retrieve applicable law and precedents, construct both sides' arguments | gpt-4.1, o3 |
-| **Layer 4: Judicial Decision** | Deliberation, Governance & Verdict | Reason from evidence to conclusion, audit for fairness, produce recommendation | o3, o3 |
+| **Layer 1: Case Preparation** | Case Processing, Complexity & Routing | Intake, structuring, jurisdiction validation, complexity assessment, routing | gpt-5.4-nano, gpt-5.4-nano |
+| **Layer 2: Evidence Reconstruction** | Evidence Analysis, Fact Reconstruction, Witness Analysis | Analyze evidence, extract facts, build timeline, assess witnesses | gpt-5, gpt-5, gpt-5-mini |
+| **Layer 3: Legal Reasoning** | Legal Knowledge, Argument Construction | Retrieve applicable law and precedents, construct both sides' arguments | gpt-5, gpt-5.4 |
+| **Layer 4: Judicial Decision** | Deliberation, Governance & Verdict | Reason from evidence to conclusion, audit for fairness, produce recommendation | gpt-5.4, gpt-5.4 |
 
 **Model assignment rationale:**
-- **gpt-4.1-mini** for administrative tasks (parsing, structuring) — fast and cost-efficient.
-- **o4-mini** for classification and assessment tasks requiring moderate reasoning — good balance of reasoning capability and speed.
-- **gpt-4.1** for evidence analysis and legal retrieval — strong instruction-following for structured extraction with large context windows.
-- **o3** for deep reasoning tasks (argument construction, deliberation, governance) — maximum reasoning capability for high-stakes judicial analysis.
+- **gpt-5.4-nano** for administrative tasks (parsing, structuring, complexity classification) — fast and cost-efficient.
+- **gpt-5-mini** for witness analysis requiring efficient reasoning — good balance of reasoning capability and speed.
+- **gpt-5** for evidence analysis and legal retrieval — strong instruction-following for structured extraction with large context windows.
+- **gpt-5.4** for deep reasoning tasks (argument construction, deliberation, governance) — maximum reasoning capability for high-stakes judicial analysis.
 
 ---
 
@@ -1666,23 +1666,23 @@ No recommendation reaches the Judge without passing the Governance audit. The Ju
 # ──────────────────────────────────────────────
 
 models:
-  o3: &o3_model
-    model: o3
+  gpt54: &gpt54_model
+    model: gpt-5.4
     api_key: ${OPENAI_API_KEY}
     api_base: https://api.openai.com/v1
 
-  o4_mini: &o4_mini_model
-    model: o4-mini
+  gpt5: &gpt5_model
+    model: gpt-5
     api_key: ${OPENAI_API_KEY}
     api_base: https://api.openai.com/v1
 
-  gpt41: &gpt41_model
-    model: gpt-4.1
+  gpt5_mini: &gpt5_mini_model
+    model: gpt-5-mini
     api_key: ${OPENAI_API_KEY}
     api_base: https://api.openai.com/v1
 
-  gpt41_mini: &gpt41_mini_model
-    model: gpt-4.1-mini
+  gpt54_nano: &gpt54_nano_model
+    model: gpt-5.4-nano
     api_key: ${OPENAI_API_KEY}
     api_base: https://api.openai.com/v1
 
@@ -1730,7 +1730,7 @@ apps:
       agent_name: "CaseProcessing"
       display_name: "Case Processing Agent"
       model:
-        <<: *gpt41_mini_model
+        <<: *gpt54_nano_model
       instruction: |
         You are the Case Processing Agent for VerdictCouncil, a judicial decision-support system for Singapore lower courts.
 
@@ -1816,7 +1816,7 @@ apps:
       agent_name: "ComplexityRouting"
       display_name: "Complexity & Routing Agent"
       model:
-        <<: *o4_mini_model
+        <<: *gpt54_nano_model
       instruction: |
         You are the Complexity & Routing Agent for VerdictCouncil.
 
@@ -1872,7 +1872,7 @@ apps:
       agent_name: "EvidenceAnalysis"
       display_name: "Evidence Analysis Agent"
       model:
-        <<: *gpt41_model
+        <<: *gpt5_model
       instruction: |
         You are the Evidence Analysis Agent for VerdictCouncil. You serve the presiding judicial officer with IMPARTIAL analysis.
 
@@ -1965,7 +1965,7 @@ apps:
       agent_name: "FactReconstruction"
       display_name: "Fact Reconstruction Agent"
       model:
-        <<: *gpt41_model
+        <<: *gpt5_model
       instruction: |
         You are the Fact Reconstruction Agent for VerdictCouncil.
 
@@ -2065,7 +2065,7 @@ apps:
       agent_name: "WitnessAnalysis"
       display_name: "Witness Analysis Agent"
       model:
-        <<: *o4_mini_model
+        <<: *gpt5_mini_model
       instruction: |
         You are the Witness Analysis Agent for VerdictCouncil.
 
@@ -2178,7 +2178,7 @@ apps:
       agent_name: "LegalKnowledge"
       display_name: "Legal Knowledge Agent"
       model:
-        <<: *gpt41_model
+        <<: *gpt5_model
       instruction: |
         You are the Legal Knowledge Agent for VerdictCouncil.
 
@@ -2269,7 +2269,7 @@ apps:
       agent_name: "ArgumentConstruction"
       display_name: "Argument Construction Agent"
       model:
-        <<: *o3_model
+        <<: *gpt54_model
       instruction: |
         You are the Argument Construction Agent for VerdictCouncil. You serve the JUDGE, not either party. All output is INTERNAL.
 
@@ -2367,7 +2367,7 @@ apps:
       agent_name: "Deliberation"
       display_name: "Deliberation Agent"
       model:
-        <<: *o3_model
+        <<: *gpt54_model
       instruction: |
         You are the Deliberation Agent for VerdictCouncil. You are the judicial reasoning core of the system.
 
@@ -2427,7 +2427,7 @@ apps:
       agent_name: "GovernanceVerdict"
       display_name: "Governance & Verdict Agent"
       model:
-        <<: *o3_model
+        <<: *gpt54_model
       instruction: |
         You are the Governance & Verdict Agent for VerdictCouncil. You are the final checkpoint before a recommendation reaches the Judge.
 
@@ -2709,7 +2709,7 @@ def parse_document(
     ]
 
     response = client.chat.completions.create(
-        model="gpt-4.1-mini",
+        model="gpt-5.4-nano",
         messages=extraction_messages,
         response_format={"type": "json_object"},
     )
@@ -2810,7 +2810,7 @@ def cross_reference(
     }.get(check_type, "Identify contradictions, corroborations, and inconsistencies.")
 
     response = client.chat.completions.create(
-        model="gpt-4.1",
+        model="gpt-5",
         messages=[
             {
                 "role": "system",
@@ -2913,7 +2913,7 @@ def timeline_construct(
     events_text = json.dumps(events, indent=2)
 
     response = client.chat.completions.create(
-        model="gpt-4.1-mini",
+        model="gpt-5.4-nano",
         messages=[
             {
                 "role": "system",
@@ -3016,7 +3016,7 @@ def generate_questions(
     types_text = ", ".join(question_types)
 
     response = client.chat.completions.create(
-        model="gpt-4.1",
+        model="gpt-5",
         messages=[
             {
                 "role": "system",
@@ -3781,7 +3781,7 @@ def search_precedents(
 |---|---|---|---|
 | **Runtime** | Python | 3.12 | SAM is Python-native; 3.12 offers improved performance and better type hints |
 | **Agent Framework** | Solace Agent Mesh (SAM) | latest | Event-driven multi-agent orchestration with YAML-based agent configuration, built-in broker integration |
-| **LLM Provider** | OpenAI | API v1 | Multi-model strategy: o3 (deep reasoning), o4-mini (fast reasoning), gpt-4.1 (balanced), gpt-4.1-mini (lightweight tasks) |
+| **LLM Provider** | OpenAI | API v1 | Multi-model strategy: gpt-5.4 (frontier reasoning), gpt-5 (strong reasoning), gpt-5-mini (efficient reasoning), gpt-5.4-nano (lightweight tasks) |
 | **LLM Abstraction** | LiteLLM (via SAM) | — | SAM uses LiteLLM internally for unified model routing and fallback handling |
 | **Agent Protocol** | A2A via Solace topics | — | Asynchronous, decoupled inter-agent communication over publish/subscribe topics |
 | **Message Broker** | Solace PubSub+ Event Broker | latest | Enterprise-grade event mesh with guaranteed delivery, topic hierarchy, message replay, and built-in audit trail |
@@ -3807,10 +3807,11 @@ Each agent is assigned a model based on reasoning depth requirements:
 
 | Tier | Model | Use Case | Agents |
 |---|---|---|---|
-| **Lightweight** | gpt-4.1-mini | Parsing, classification, low-complexity extraction | CaseProcessing |
-| **Fast Reasoning** | o4-mini | Quick analytical decisions with reasoning traces | ComplexityRouting, WitnessAnalysis |
-| **Balanced** | gpt-4.1 | Detailed analysis requiring broad context | EvidenceAnalysis, FactReconstruction, LegalKnowledge |
-| **Deep Reasoning** | o3 | Complex legal reasoning, fairness auditing, final verdicts | ArgumentConstruction, Deliberation, GovernanceVerdict |
+| **Lightweight** | gpt-5.4-nano | Parsing, classification, low-complexity extraction | CaseProcessing |
+| **Fast Extraction** | gpt-5.4-nano | Quick analytical decisions, complexity routing | ComplexityRouting |
+| **Efficient Reasoning** | gpt-5-mini | Witness assessment with reasoning traces | WitnessAnalysis |
+| **Strong Reasoning** | gpt-5 | Detailed analysis requiring broad context | EvidenceAnalysis, FactReconstruction, LegalKnowledge |
+| **Frontier Reasoning** | gpt-5.4 | Complex legal reasoning, fairness auditing, final verdicts | ArgumentConstruction, Deliberation, GovernanceVerdict |
 
 ## 4.3 Key Design Decisions
 
@@ -4030,7 +4031,7 @@ sequenceDiagram
     SB ->>+ CP: Deliver message
     CP ->> OAI: parse_document (Files API per file)
     OAI -->> CP: Parsed document content
-    CP ->> OAI: gpt-4.1-mini — classify domain, validate jurisdiction
+    CP ->> OAI: gpt-5.4-nano — classify domain, validate jurisdiction
     OAI -->> CP: domain, jurisdiction_valid, parties[]
     CP ->> PG: UPDATE case (domain, jurisdiction, parties)
     CP ->>- SB: Publish verdictcouncil/complexity_routing/{case_id}
@@ -4038,7 +4039,7 @@ sequenceDiagram
     Note over SB, CR: Phase 3 — Complexity Routing
 
     SB ->>+ CR: Deliver message
-    CR ->> OAI: o4-mini (reasoning_effort: low) — assess complexity
+    CR ->> OAI: gpt-5.4-nano (reasoning_effort: low) — assess complexity
     OAI -->> CR: complexity, route
 
     alt route = escalate_human
@@ -4057,13 +4058,13 @@ sequenceDiagram
         SB ->>+ EA: Deliver message
         EA ->> OAI: parse_document (extract tables, OCR)
         OAI -->> EA: Structured content
-        EA ->> OAI: gpt-4.1 — analyze evidence strength, admissibility
+        EA ->> OAI: gpt-5 — analyze evidence strength, admissibility
         OAI -->> EA: evidence[], cross_references[]
         EA ->> PG: INSERT evidence records
         EA ->>- SB: Publish to aggregator
     and Fact Reconstruction
         SB ->>+ FR: Deliver message
-        FR ->> OAI: gpt-4.1 — extract facts, build timeline
+        FR ->> OAI: gpt-5 — extract facts, build timeline
         OAI -->> FR: facts[], timeline
         FR ->> OAI: cross_reference (consistency check)
         OAI -->> FR: contradictions[], corroborations[]
@@ -4071,9 +4072,9 @@ sequenceDiagram
         FR ->>- SB: Publish to aggregator
     and Witness Analysis
         SB ->>+ WA: Deliver message
-        WA ->> OAI: o4-mini — identify witnesses, assess credibility
+        WA ->> OAI: gpt-5-mini — identify witnesses, assess credibility
         OAI -->> WA: witnesses[], credibility_scores[]
-        WA ->> OAI: o4-mini — simulate testimony, generate questions
+        WA ->> OAI: gpt-5-mini — simulate testimony, generate questions
         OAI -->> WA: simulated_testimony[], questions[]
         WA ->> PG: INSERT witness records
         WA ->>- SB: Publish to aggregator
@@ -4097,7 +4098,7 @@ sequenceDiagram
     LK ->> JAPI: search_precedents (search.pair.gov.sg)
     JAPI -->> LK: pair_results[]
     LK ->> RD: Cache results (TTL: 24h)
-    LK ->> OAI: gpt-4.1 — rank relevance, extract reasoning
+    LK ->> OAI: gpt-5 — rank relevance, extract reasoning
     OAI -->> LK: legal_rules[], precedents[]
     LK ->> PG: INSERT legal_rules, precedents
     LK ->>- SB: Publish verdictcouncil/argument_construction/{case_id}
@@ -4105,11 +4106,11 @@ sequenceDiagram
     Note over SB, AC: Phase 8 — Argument Construction
 
     SB ->>+ AC: Deliver message
-    AC ->> OAI: o3 — build prosecution/claimant arguments
+    AC ->> OAI: gpt-5.4 — build prosecution/claimant arguments
     OAI -->> AC: prosecution_args
-    AC ->> OAI: o3 — build defense/respondent arguments
+    AC ->> OAI: gpt-5.4 — build defense/respondent arguments
     OAI -->> AC: defense_args
-    AC ->> OAI: o3 — balanced assessment, generate questions
+    AC ->> OAI: gpt-5.4 — balanced assessment, generate questions
     OAI -->> AC: balanced_assessment, questions[]
     AC ->> PG: INSERT arguments (2 per case)
     AC ->>- SB: Publish verdictcouncil/deliberation/{case_id}
@@ -4117,7 +4118,7 @@ sequenceDiagram
     Note over SB, DL: Phase 9 — Deliberation
 
     SB ->>+ DL: Deliver message
-    DL ->> OAI: o3 — synthesize reasoning chain
+    DL ->> OAI: gpt-5.4 — synthesize reasoning chain
     OAI -->> DL: reasoning_chain[], preliminary_conclusion, uncertainty_flags[]
     DL ->> PG: INSERT deliberation
     DL ->>- SB: Publish verdictcouncil/governance_verdict/{case_id}
@@ -4125,7 +4126,7 @@ sequenceDiagram
     Note over SB, GV: Phase 10 — Governance & Verdict
 
     SB ->>+ GV: Deliver message
-    GV ->> OAI: o3 — fairness audit (bias detection)
+    GV ->> OAI: gpt-5.4 — fairness audit (bias detection)
     OAI -->> GV: fairness_report
 
     alt critical_bias_detected
@@ -4136,7 +4137,7 @@ sequenceDiagram
     else audit_passes
         GV ->> OAI: confidence_calc (weighted scoring)
         OAI -->> GV: confidence_score
-        GV ->> OAI: o3 — generate final verdict recommendation
+        GV ->> OAI: gpt-5.4 — generate final verdict recommendation
         OAI -->> GV: verdict_recommendation
         GV ->> SB: Publish verdictcouncil/gateway/verdict/{case_id}
     end
@@ -5750,16 +5751,16 @@ flowchart LR
 
 | # | Agent | Model | Est. Input Tokens | Est. Output Tokens | Est. Cost (USD) |
 |---|---|---|---|---|---|
-| 1 | CaseProcessing | gpt-4.1-mini | ~5,000 | ~2,000 | $0.010 |
-| 2 | ComplexityRouting | o4-mini | ~2,000 | ~500 | $0.010 |
-| 3 | EvidenceAnalysis | gpt-4.1 | ~15,000 | ~5,000 | $0.030 |
-| 4 | FactReconstruction | gpt-4.1 | ~10,000 | ~3,000 | $0.020 |
-| 5 | WitnessAnalysis | o4-mini | ~8,000 | ~3,000 | $0.020 |
-| 6 | LegalKnowledge | gpt-4.1 | ~10,000 | ~5,000 | $0.030 |
-| 7 | ArgumentConstruction | o3 | ~12,000 | ~5,000 | $0.050 |
-| 8 | Deliberation | o3 | ~15,000 | ~5,000 | $0.050 |
-| 9 | GovernanceVerdict | o3 | ~10,000 | ~3,000 | $0.040 |
-| | **Total LLM per case** | | **~87,000** | **~31,500** | **$2.10 - $2.60** |
+| 1 | CaseProcessing | gpt-5.4-nano | ~5,000 | ~2,000 | $0.004 |
+| 2 | ComplexityRouting | gpt-5.4-nano | ~2,000 | ~500 | $0.001 |
+| 3 | EvidenceAnalysis | gpt-5 | ~15,000 | ~5,000 | $0.069 |
+| 4 | FactReconstruction | gpt-5 | ~10,000 | ~3,000 | $0.043 |
+| 5 | WitnessAnalysis | gpt-5-mini | ~8,000 | ~3,000 | $0.008 |
+| 6 | LegalKnowledge | gpt-5 | ~10,000 | ~5,000 | $0.063 |
+| 7 | ArgumentConstruction | gpt-5.4 | ~12,000 | ~5,000 | $0.105 |
+| 8 | Deliberation | gpt-5.4 | ~15,000 | ~5,000 | $0.113 |
+| 9 | GovernanceVerdict | gpt-5.4 | ~10,000 | ~3,000 | $0.070 |
+| | **Total LLM per case** | | **~87,000** | **~31,500** | **$0.40 - $0.55** |
 
 ### Infrastructure Costs
 
@@ -5811,10 +5812,10 @@ flowchart LR
 | Variable | Description | Default | Used By |
 |---|---|---|---|
 | `OPENAI_VECTOR_STORE_ID` | Vector store ID for statute corpus | `vs_...` | legal-knowledge |
-| `OPENAI_MODEL_LIGHTWEIGHT` | Model for lightweight tasks | `gpt-4.1-mini` | case-processing |
-| `OPENAI_MODEL_FAST_REASONING` | Model for fast reasoning | `o4-mini` | complexity-routing, witness-analysis |
-| `OPENAI_MODEL_BALANCED` | Model for balanced analysis | `gpt-4.1` | evidence-analysis, fact-reconstruction, legal-knowledge |
-| `OPENAI_MODEL_DEEP_REASONING` | Model for deep reasoning | `o3` | argument-construction, deliberation, governance-verdict |
+| `OPENAI_MODEL_LIGHTWEIGHT` | Model for lightweight tasks | `gpt-5.4-nano` | case-processing, complexity-routing |
+| `OPENAI_MODEL_EFFICIENT_REASONING` | Model for efficient reasoning | `gpt-5-mini` | witness-analysis |
+| `OPENAI_MODEL_STRONG_REASONING` | Model for strong reasoning | `gpt-5` | evidence-analysis, fact-reconstruction, legal-knowledge |
+| `OPENAI_MODEL_FRONTIER_REASONING` | Model for frontier reasoning | `gpt-5.4` | argument-construction, deliberation, governance-verdict |
 
 ### Database Configuration (PostgreSQL pod)
 
@@ -5961,10 +5962,10 @@ The stability score is computed **asynchronously**:
 
 | Component | Cost per Run | N=5 Total |
 |---|---|---|
-| Agent 7 (Argument Construction, o3) | ~$0.50 | $2.50 |
-| Agent 8 (Deliberation, o3) | ~$0.50 | $2.50 |
-| Agent 9 (Governance & Verdict, o3) | ~$0.40 | $2.00 |
-| **Total** | **~$1.40** | **~$7.00** |
+| Agent 7 (Argument Construction, gpt-5.4) | ~$1.05 | $5.25 |
+| Agent 8 (Deliberation, gpt-5.4) | ~$1.13 | $5.65 |
+| Agent 9 (Governance & Verdict, gpt-5.4) | ~$0.70 | $3.50 |
+| **Total** | **~$2.88** | **~$14.40** |
 
 ---
 
