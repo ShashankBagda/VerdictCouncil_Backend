@@ -420,13 +420,14 @@ As a judicial officer, I want to review similar past cases with citations, outco
 
 **Actor:** Tribunal Magistrate / Judge
 
-As a judicial officer, I want to trigger a live search of judiciary.gov.sg and search.pair.gov.sg, so that I can access the most recent and comprehensive case law beyond the curated vector store.
+As a judicial officer, I want to trigger a live search of the PAIR Search API (search.pair.gov.sg), so that I can access binding higher court case law from eLitigation beyond the curated vector store.
 
 **Acceptance Criteria:**
 - Judge can initiate a live precedent search from the case analysis view
-- Search queries judiciary.gov.sg and search.pair.gov.sg using the search_precedents tool on Agent 6
+- Search queries the PAIR Search API using the search_precedents tool on Agent 6
 - Results are tagged "live_search" to distinguish them from "curated" vector store results
-- Live results include: case citation, court, date, summary, and a relevance/similarity score
+- Live results include: case citation, court, date, catch words, snippet, relevance score, and eLitigation URL
+- Results are clearly labelled as higher court authority (SGHC, SGCA, etc.) — PAIR does not cover SCT or lower State Courts
 - Results are integrated into the precedents list alongside curated results (US-015)
 - Search accepts custom keywords or uses AI-generated search terms based on case facts
 - System indicates when the live search was last performed and its result count
@@ -436,8 +437,8 @@ As a judicial officer, I want to trigger a live search of judiciary.gov.sg and s
 2. Judge clicks "Search Live Database" from the Precedents tab.
 3. System presents a search panel with AI-suggested search terms based on the case facts (e.g., "defective goods sale satisfactory quality SCT") and an option to enter custom keywords.
 4. Judge accepts the suggested terms and adds a custom keyword: "latent defect".
-5. System executes the search_precedents tool on Agent 6, querying judiciary.gov.sg and search.pair.gov.sg.
-6. Results are returned and displayed, each tagged "live_search" — e.g., "Ong Siew Kee v FurnitureMart Pte Ltd [2025] SGSCT 61 — live_search — Relevance: 74%".
+5. System executes the search_precedents tool on Agent 6, querying the PAIR Search API (search.pair.gov.sg/api/v1/search).
+6. Results are returned and displayed, each tagged "live_search" — e.g., "Ong Siew Kee v FurnitureMart Pte Ltd [2025] SGSCT 61 — live_search — Relevance: 74%", with a link to the full judgment on eLitigation.
 7. Judge reviews the new results and finds a recent precedent directly on point. The result is now integrated into the precedents list alongside curated results.
 8. System records the search timestamp ("Live search performed: 27 Mar 2026, 14:32 — 8 results returned") for audit purposes.
 

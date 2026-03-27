@@ -919,8 +919,7 @@ data:
   LOG_LEVEL: "INFO"
   NAMESPACE: "verdictcouncil"
   PRECEDENT_CACHE_TTL_SECONDS: "86400"
-  JUDICIARY_BASE_URL: "https://www.judiciary.gov.sg"
-  PAIR_BASE_URL: "https://search.pair.gov.sg"
+  PAIR_API_URL: "https://search.pair.gov.sg/api/v1/search"
 ```
 
 **Note:** DO Managed PostgreSQL uses port `25060` (default) and Managed Redis uses port `25061` with TLS (`rediss://` scheme). The private hostnames are auto-assigned when the databases are created and are only reachable from resources in the same VPC.

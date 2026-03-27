@@ -266,10 +266,8 @@ sequenceDiagram
     OAI -->> LK: matching statutes[]
     LK ->> RD: Check precedent cache
     RD -->> LK: Cache miss
-    LK ->> JAPI: search_precedents (judiciary.gov.sg)
-    JAPI -->> LK: live_results[]
-    LK ->> JAPI: search_precedents (search.pair.gov.sg)
-    JAPI -->> LK: pair_results[]
+    LK ->> JAPI: search_precedents (PAIR API)
+    JAPI -->> LK: searchResults[] (eLitigation corpus)
     LK ->> RD: Cache results (TTL: 24h)
     LK ->> OAI: gpt-5 — rank relevance, extract reasoning
     OAI -->> LK: legal_rules[], precedents[]
@@ -333,8 +331,8 @@ sequenceDiagram
 flowchart TB
     subgraph External["External Services"]
         OAI["OpenAI API<br/>api.openai.com"]
-        JUD["judiciary.gov.sg"]
-        PAIR["search.pair.gov.sg"]
+        PAIR["PAIR Search API<br/>search.pair.gov.sg"]
+        ELIT["eLitigation<br/>elitigation.sg"]
     end
 
     subgraph K8s["Kubernetes Cluster — namespace: verdictcouncil"]

@@ -788,15 +788,118 @@ apps:
           Traffic: Road Traffic Act, Road Traffic Rules, Motor Vehicles Act.
 
         PART B - PRECEDENT CASES:
-        1. Use file_search to find cases with matching fact patterns from curated knowledge base.
-        2. Use search_precedents to query live judiciary databases for recent rulings.
-        3. For each precedent: citation, outcome, reasoning summary, similarity score, distinguishing factors, and source (curated or live_search).
+        Step 1: Use file_search to find cases with matching fact patterns from
+                the curated vector store. This is the PRIMARY source for domain-
+                specific content (statutes, curated lower court summaries).
+        Step 2: Use search_precedents to query PAIR for binding higher court
+                authority. Follow the QUERY STRATEGY below.
+        Step 3: For each precedent: citation, outcome, reasoning summary,
+                similarity score, distinguishing factors, and source
+                (curated or live_search).
+
+        ════════════════════════════════════════════════════════════════
+        PAIR SEARCH — COURT COVERAGE & QUERY STRATEGY
+        ════════════════════════════════════════════════════════════════
+
+        WHAT PAIR COVERS:
+        The search_precedents tool queries the PAIR Search API, which indexes
+        published judgments from Singapore's higher courts on eLitigation:
+          SGHC (High Court), SGCA (Court of Appeal), SGHCF (Family Division),
+          SGHCR (General Division), SGHC(I) (SICC), SGHC(A) (Appellate Division),
+          SGCA(I) (Court of Appeal - SICC).
+
+        WHAT PAIR DOES NOT COVER:
+        Small Claims Tribunals (SCT) and lower State Courts (District Court,
+        Magistrate Court). SCT proceedings are informal and do not produce
+        published written grounds. Lower traffic court decisions are similarly
+        unpublished.
+
+        WHY PAIR IS STILL ESSENTIAL:
+        Higher court rulings are BINDING on lower courts. When SCT or traffic
+        court decisions are appealed, the High Court writes published grounds
+        that interpret the same statutes in the same types of disputes. A SGHC
+        ruling on SOGA s.14 ("satisfactory quality") directly governs how every
+        SCT case involving defective goods must be decided.
+
+        TWO-TIER PRECEDENT STRATEGY:
+        ┌─────────────────────────────────────────────────────────────┐
+        │ Tier 1: Curated Vector Store (file_search)                 │
+        │   → Statutes verbatim (SCTA, RTA, SOGA, CPFTA)            │
+        │   → Manually curated case summaries & sentencing tables    │
+        │   → Always searched FIRST                                  │
+        ├─────────────────────────────────────────────────────────────┤
+        │ Tier 2: PAIR Search API (search_precedents)                │
+        │   → Binding higher court authority interpreting statutes    │
+        │   → Sentencing benchmarks & appeal outcomes                │
+        │   → Searched SECOND to supplement curated results          │
+        └─────────────────────────────────────────────────────────────┘
+
+        QUERY FORMULATION — CRITICAL:
+        Do NOT search for court names or case types. Search for the
+        LEGAL CONCEPTS and STATUTORY PROVISIONS at issue. The query
+        carries the domain context.
+
+        SCT query examples:
+          ✗ BAD:  "small claims tribunal defective product"
+          ✓ GOOD: "sale of goods satisfactory quality section 14"
+
+          ✗ BAD:  "SCT contractor dispute refund"
+          ✓ GOOD: "supply of services reasonable care and skill"
+
+          ✗ BAD:  "consumer complaint unfair seller"
+          ✓ GOOD: "consumer protection unfair practice CPFTA"
+
+          ✓ GOOD: "small claims tribunal appeal"
+                   (finds SGHC decisions reviewing SCT outcomes)
+
+          ✓ GOOD: "quantum damages defective goods assessment"
+                   (finds SGHC guidance on damage calculation)
+
+        Traffic query examples:
+          ✗ BAD:  "traffic court speeding fine"
+          ✓ GOOD: "road traffic act speeding sentence benchmark"
+
+          ✗ BAD:  "drunk driving penalty"
+          ✓ GOOD: "drink driving disqualification sentencing framework"
+
+          ✗ BAD:  "reckless driving case"
+          ✓ GOOD: "dangerous driving causing death sentence appeal"
+
+          ✓ GOOD: "road traffic act magistrate appeal sentence"
+                   (finds SGHC sentencing guideline decisions)
+
+          ✓ GOOD: "demerit points disqualification judicial review"
+                   (finds SGHC review of traffic administrative decisions)
+
+        MULTIPLE QUERIES PER CASE:
+        For each case, issue 2-4 targeted search_precedents calls:
+          1. Core statutory provision query (e.g., "SOGA section 14
+             satisfactory quality implied condition")
+          2. Specific fact pattern query (e.g., "second-hand vehicle
+             latent defect undisclosed")
+          3. Appeal/sentencing query (e.g., "small claims tribunal
+             appeal quantum" or "speeding sentencing benchmark")
+          4. (If relevant) Procedural query (e.g., "limitation period
+             consumer claim" or "composition offer traffic offence")
+
+        FRAMING RESULTS:
+        When presenting PAIR results for SCT or traffic cases:
+          ✓ "The High Court held in [citation] that..."
+          ✓ "This is binding authority from the SGHC on appeal from
+             a similar consumer dispute..."
+          ✓ "The Court of Appeal established the sentencing framework
+             for this category of offence in [citation]..."
+          ✗ Do NOT imply the result is from SCT or traffic court.
+
+        ════════════════════════════════════════════════════════════════
 
         CONSTRAINTS:
         - ONLY cite statutes and cases from the curated knowledge base or verified live search results.
         - Do NOT hallucinate citations or section numbers.
         - Present precedents supporting BOTH possible outcomes.
         - Always note distinguishing factors. No precedent is a perfect match.
+        - When citing PAIR results, explicitly identify them as binding higher court authority.
+        - Issue multiple targeted queries rather than one broad query.
 
         GUARDRAILS:
         - Must ONLY cite sources from the curated knowledge base or verified live search. No hallucinated citations.
@@ -813,15 +916,15 @@ apps:
           type: python
           module: tools.search_precedents
           function: search_precedents
-          description: "Query live judiciary databases (judiciary.gov.sg, search.pair.gov.sg) for recent rulings matching case patterns. Results are Redis-cached with 24h TTL."
+          description: "Query the PAIR Search API (search.pair.gov.sg) for binding higher court case law (SGHC, SGCA, SGHCF, SGHCR, SGHC(I), SGHC(A), SGCA(I)) matching fact patterns. Does NOT cover SCT or lower State Courts. Returns results from the eLitigation corpus with citations, catch words, and relevance scores. Results are Redis-cached with 24h TTL."
           parameters:
             - name: query
               type: string
-              description: "Semantic search query describing the legal issue or fact pattern"
+              description: "Targeted query for legal concepts, statutory provisions, or fact patterns — NOT court names. E.g., 'sale of goods satisfactory quality section 14' or 'drink driving sentencing framework'. Issue multiple focused queries per case."
               required: true
             - name: domain
               type: string
-              description: "Legal domain: 'small_claims' | 'traffic'"
+              description: "Legal domain for context: 'small_claims' | 'traffic'. Used for logging and cache keying — does not filter courts (PAIR only covers higher courts)."
               required: true
             - name: max_results
               type: integer
@@ -1851,97 +1954,82 @@ def _cache_key(query: str, domain: str, max_results: int, date_range: dict) -> s
     return f"vc:precedents:{hashlib.sha256(key_data.encode()).hexdigest()}"
 
 
-def _search_judiciary_sg(query: str, domain: str, max_results: int,
-                         date_range: dict) -> list:
-    """Query judiciary.gov.sg for judgments."""
-    _rate_limit(_get_redis_client())
-
-    base_url = "https://www.judiciary.gov.sg/api/search"
-    params = {
-        "q": query,
-        "court": "sct" if domain == "small_claims" else "traffic",
-        "limit": max_results,
-    }
-    if date_range:
-        if "start" in date_range:
-            params["from"] = date_range["start"]
-        if "end" in date_range:
-            params["to"] = date_range["end"]
-
-    try:
-        resp = requests.get(
-            base_url,
-            params=params,
-            timeout=30,
-            headers={"User-Agent": "VerdictCouncil/1.0 (judicial-research)"},
-        )
-        resp.raise_for_status()
-        data = resp.json()
-
-        results = []
-        for item in data.get("results", [])[:max_results]:
-            results.append({
-                "citation": item.get("citation", ""),
-                "title": item.get("title", ""),
-                "outcome": item.get("outcome", ""),
-                "reasoning_summary": item.get("summary", ""),
-                "date": item.get("date", ""),
-                "court": item.get("court", ""),
-                "source": "judiciary_sg",
-            })
-        return results
-    except requests.RequestException as e:
-        # Flag failed lookups explicitly — never silently return empty results
-        return [{"error": f"judiciary.gov.sg search failed: {str(e)}",
-                 "source": "judiciary_sg",
-                 "source_status": "search_failed"}]
-
-
 def _search_pair_sg(query: str, domain: str, max_results: int,
                     date_range: dict) -> list:
-    """Query search.pair.gov.sg for legal precedents."""
+    """Query PAIR Search API (search.pair.gov.sg) for Singapore case law.
+
+    PAIR (Platform for AI-assisted Research) is a Singapore government legal
+    research platform. Its search API provides hybrid retrieval (BM25 + semantic
+    embedding) over the full corpus of Singapore judiciary decisions hosted on
+    eLitigation (elitigation.sg).
+
+    COURT COVERAGE LIMITATION: PAIR only indexes higher court decisions:
+      - SGHC (High Court), SGCA (Court of Appeal)
+      - SGHCF (Family Division), SGHCR (General Division)
+      - SGHC(I) (SICC), SGHC(A) (Appellate Division), SGCA(I) (SICC Appeal)
+
+    It does NOT cover Small Claims Tribunals or lower State Courts (District
+    Court, Magistrate Court). SCT proceedings are informal and rarely produce
+    published written grounds. However, higher court rulings are binding on
+    lower courts, making these results directly applicable as precedent.
+
+    The API was discovered via network inspection of search.pair.gov.sg. It
+    accepts POST requests with a JSON payload and returns structured results
+    including case citations, court, catch words, dates, snippets, and direct
+    links to full judgments on eLitigation.
+    """
     _rate_limit(_get_redis_client())
 
     base_url = "https://search.pair.gov.sg/api/v1/search"
+
+    # No domain-based court filtering — PAIR only covers higher courts.
+    # The query itself carries the domain context (e.g., "sale of goods
+    # satisfactory quality" for SCT, "speeding demerit points" for traffic).
+    case_filters = {}
+
     payload = {
+        "id": "",
+        "hits": max_results,
         "query": query,
+        "offset": 0,
         "filters": {
-            "domain": domain,
+            "hansardFilters": {},
+            "caseJudgementFilters": case_filters,
+            "legislationFilters": {},
         },
-        "limit": max_results,
+        "sources": ["judiciary"],
+        "isLoggingEnabled": False,
     }
-    if date_range:
-        payload["filters"]["date_range"] = date_range
 
     try:
         resp = requests.post(
             base_url,
             json=payload,
             timeout=30,
-            headers={
-                "User-Agent": "VerdictCouncil/1.0 (judicial-research)",
-                "Content-Type": "application/json",
-            },
+            headers={"Content-Type": "application/json"},
         )
         resp.raise_for_status()
         data = resp.json()
 
         results = []
-        for item in data.get("results", [])[:max_results]:
+        for item in data.get("searchResults", [])[:max_results]:
             results.append({
-                "citation": item.get("citation", ""),
+                "citation": item.get("citationNum", ""),
                 "title": item.get("title", ""),
-                "outcome": item.get("outcome", ""),
-                "reasoning_summary": item.get("summary", ""),
-                "similarity_score": item.get("score", 0),
+                "case_number": item.get("caseNum", ""),
+                "outcome": "",  # Not in search results; available in full judgment
+                "reasoning_summary": item.get("snippet", ""),
+                "similarity_score": item.get("matchScore", {}).get("score", 0),
                 "date": item.get("date", ""),
                 "court": item.get("court", ""),
+                "catch_words": item.get("catchWords", []),
+                "elitigation_url": item.get("url", ""),
                 "source": "pair_sg",
             })
         return results
     except requests.RequestException as e:
         # Flag failed lookups explicitly — never silently return empty results
-        return [{"error": f"search.pair.gov.sg search failed: {str(e)}",
+        return [{"error": f"PAIR search failed: {str(e)}",
                  "source": "pair_sg",
                  "source_status": "search_failed"}]
 
@@ -1953,20 +2041,23 @@ def search_precedents(
     date_range: dict = None,
     tool_context: Any = None,
 ) -> dict:
-    """Query live judiciary databases for recent rulings matching case patterns.
+    """Query PAIR Search API for binding higher court case law.
 
-    Searches judiciary.gov.sg and search.pair.gov.sg for precedent cases
-    with matching fact patterns. Results are cached in Redis with a 24-hour
-    TTL to reduce external API load. Rate-limited to 2 requests per second
-    per source.
+    Searches search.pair.gov.sg for published judiciary decisions from
+    Singapore's higher courts (SGHC, SGCA, etc.). Results are cached in
+    Redis with a 24-hour TTL. Rate-limited to 2 requests per second.
+
+    The agent should call this tool multiple times per case with targeted
+    queries (statutory provisions, fact patterns, appeal/sentencing terms)
+    rather than a single broad query. See the QUERY FORMULATION section in
+    the agent instruction for examples.
 
     Args:
         query: Semantic search query describing the legal issue or fact
             pattern to search for.
         domain: Legal domain to search within. One of "small_claims" or
             "traffic". Defaults to "small_claims".
-        max_results: Maximum number of precedents to return (total across
-            both sources). Defaults to 10.
+        max_results: Maximum number of precedents to return. Defaults to 10.
         date_range: Optional date range filter. Dictionary with keys:
             - start (str): Start date in "YYYY-MM-DD" format.
             - end (str): End date in "YYYY-MM-DD" format.
@@ -1975,9 +2066,10 @@ def search_precedents(
     Returns:
         A dictionary containing:
             - precedents: List of matching precedent cases, each with
-              citation, title, outcome, reasoning_summary,
-              similarity_score, date, court, and source.
-            - sources_queried: List of databases that were searched.
+              citation, title, case_number, reasoning_summary,
+              similarity_score, date, court, catch_words,
+              elitigation_url, and source.
+            - sources_queried: List of APIs that were searched.
             - total_results: Total number of results found.
             - cached: Whether results were served from cache.
             - cache_ttl_remaining: Seconds remaining on cache entry (if cached).
@@ -1999,26 +2091,13 @@ def search_precedents(
     except (redis.RedisError, json.JSONDecodeError):
         pass  # Cache miss or connection failure; proceed with live search
 
-    # Query both sources
-    per_source_limit = max(1, max_results // 2)
-    judiciary_results = _search_judiciary_sg(query, domain, per_source_limit,
-                                            date_range)
-    pair_results = _search_pair_sg(query, domain, per_source_limit, date_range)
+    # Query PAIR Search API (sole live source)
+    pair_results = _search_pair_sg(query, domain, max_results, date_range)
 
-    # Merge and deduplicate by citation
-    all_results = []
-    seen_citations = set()
-    for item in judiciary_results + pair_results:
-        if "error" in item:
-            continue
-        citation = item.get("citation", "")
-        if citation and citation not in seen_citations:
-            seen_citations.add(citation)
-            all_results.append(item)
-        elif not citation:
-            all_results.append(item)
+    # Filter out error entries
+    all_results = [item for item in pair_results if "error" not in item]
 
-    # Sort by similarity_score descending (if available)
+    # Sort by similarity_score descending
     all_results.sort(
         key=lambda x: x.get("similarity_score", 0), reverse=True
     )
@@ -2026,7 +2105,7 @@ def search_precedents(
 
     result = {
         "precedents": all_results,
-        "sources_queried": ["judiciary_sg", "pair_sg"],
+        "sources_queried": ["pair_sg"],
         "total_results": len(all_results),
         "cached": False,
         "cache_ttl_remaining": None,
@@ -2322,22 +2401,22 @@ def search_precedents(
   "type": "function",
   "function": {
     "name": "search_precedents",
-    "description": "Query live Singapore judiciary databases (judiciary.gov.sg, search.pair.gov.sg) for recent rulings matching case fact patterns. Results are Redis-cached with 24-hour TTL. Rate-limited to 2 requests per second per source.",
+    "description": "Query the PAIR Search API (search.pair.gov.sg) for binding higher court case law (SGHC, SGCA, SGHCF, SGHCR, SGHC(I), SGHC(A), SGCA(I)) matching fact patterns. Does NOT cover SCT or lower State Courts — use file_search for domain-specific curated content. Returns results from the eLitigation corpus with citations, court, catch words, and relevance scores. Results are Redis-cached with 24-hour TTL. Rate-limited to 2 requests per second.",
     "parameters": {
       "type": "object",
       "properties": {
         "query": {
           "type": "string",
-          "description": "Semantic search query describing the legal issue or fact pattern to search for"
+          "description": "Targeted query for legal concepts, statutory provisions, or fact patterns — NOT court names. E.g., 'sale of goods satisfactory quality section 14' or 'drink driving sentencing framework'. Issue multiple focused queries per case rather than one broad query."
         },
         "domain": {
           "type": "string",
           "enum": ["small_claims", "traffic"],
-          "description": "Legal domain to search within"
+          "description": "Legal domain for context and cache keying. Does not filter courts — PAIR only covers higher courts."
         },
         "max_results": {
           "type": "integer",
-          "description": "Maximum number of precedents to return (total across both sources)",
+          "description": "Maximum number of precedents to return per query",
           "default": 10,
           "minimum": 1,
           "maximum": 50

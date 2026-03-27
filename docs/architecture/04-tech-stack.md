@@ -15,7 +15,7 @@
 | **Database** | DigitalOcean Managed PostgreSQL | 16 | Automated daily backups, point-in-time recovery, read replicas, connection pooling; accessed via private VPC networking |
 | **Cache** | DigitalOcean Managed Redis | 7 | Managed HA with automatic failover, TLS encryption, eviction policies; accessed via private VPC networking |
 | **Authentication** | PyJWT | — | Lightweight JWT generation and validation; tokens transported via HTTP-only cookies |
-| **HTTP Client** | httpx | — | Async HTTP client for search_precedents tool calls to judiciary.gov.sg and PAIR |
+| **HTTP Client** | httpx | — | Async HTTP client for search_precedents tool calls to PAIR Search API (search.pair.gov.sg); covers higher courts only (SGHC, SGCA) — SCT/traffic decisions are not published on eLitigation |
 | **Containerization** | Docker | — | Multi-stage builds; per-agent images for independent scaling and deployment |
 | **Container Registry** | DigitalOcean Container Registry (DOCR) | — | Native DOKS integration (no image pull secrets needed); private registry with vulnerability scanning |
 | **Orchestration** | DigitalOcean Kubernetes Service (DOKS) | 1.31+ | Managed control plane, automatic upgrades, integrated load balancer, `do-block-storage` StorageClass for PVCs |
@@ -45,6 +45,7 @@ Each agent is assigned a model based on reasoning depth requirements:
 | Decision | Choice | Alternatives Considered | Rationale |
 |---|---|---|---|
 | RAG approach | OpenAI Vector Stores | Self-hosted (Chroma, Weaviate, Pinecone) | Zero infrastructure overhead; automatic chunking and embedding; managed hybrid retrieval eliminates tuning |
+| Live precedent source | PAIR Search API only | PAIR + judiciary.gov.sg scraping | judiciary.gov.sg has no usable search API; PAIR indexes the full eLitigation higher court corpus (SGHC, SGCA, SGHCF, SGHCR, SGHC(I), SGHC(A), SGCA(I)) with hybrid BM25 + semantic retrieval. Does not cover SCT or lower State Courts — those decisions are generally unpublished. Curated vector store fills this gap with manually sourced domain-specific content. |
 | Broker | Solace PubSub+ | RabbitMQ, Kafka, NATS | SAM-native integration; topic hierarchy maps to agent pipeline; enterprise audit trail for judicial compliance |
 | Agent framework | SAM | LangGraph, CrewAI, AutoGen | Purpose-built for Solace broker; YAML-driven agent config; built-in tool registration and message routing |
 | Database hosting | DO Managed PostgreSQL | Self-hosted StatefulSet | Automated backups, failover, and patching; no K8s StatefulSet management; private VPC access |

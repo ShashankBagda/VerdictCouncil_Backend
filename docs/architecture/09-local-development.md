@@ -86,8 +86,7 @@ FASTAPI_PORT=8000
 LOG_LEVEL=DEBUG
 JWT_SECRET=dev-secret-do-not-use-in-production
 PRECEDENT_CACHE_TTL_SECONDS=86400
-JUDICIARY_BASE_URL=https://www.judiciary.gov.sg
-PAIR_BASE_URL=https://search.pair.gov.sg
+PAIR_API_URL=https://search.pair.gov.sg/api/v1/search
 ```
 
 **Important:** The `.env` file contains secrets. It is gitignored and must never be committed.

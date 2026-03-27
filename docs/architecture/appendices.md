@@ -29,7 +29,7 @@
 | DO Spaces | — | $5/mo | Backups & artifacts, 250 GB included |
 | Block Storage (Solace) | $4/mo (20 GB) | $4/mo (20 GB) | $0.10/GB/mo for Solace PVC |
 | OpenAI Vector Store | ~$0.15/mo | ~$0.15/mo | 50 MB statute corpus at $0.10/GB/day |
-| search_precedents (live) | Negligible | Negligible | Results cached in Redis; judiciary.gov.sg and PAIR are free public APIs |
+| search_precedents (live) | Negligible | Negligible | Results cached in Redis; PAIR Search API (search.pair.gov.sg) is a free government API |
 | **Subtotal Infrastructure** | **~$157/mo** | **~$252/mo** | Combined: ~$409/mo |
 
 ### Monthly Projections (Infrastructure + LLM)
@@ -67,8 +67,7 @@
 | `LOG_LEVEL` | Python logging level | `INFO` | All agents |
 | `AGENT_NAME` | Agent identifier for logging/audit | `(per-agent)` | Each agent pod |
 | `PRECEDENT_CACHE_TTL_SECONDS` | Redis cache TTL for precedent searches | `86400` (24h) | legal-knowledge |
-| `JUDICIARY_BASE_URL` | Singapore judiciary website base URL | `https://www.judiciary.gov.sg` | legal-knowledge |
-| `PAIR_BASE_URL` | PAIR search API base URL | `https://search.pair.gov.sg` | legal-knowledge |
+| `PAIR_API_URL` | PAIR Search API endpoint for live case law retrieval | `https://search.pair.gov.sg/api/v1/search` | legal-knowledge |
 
 ### OpenAI Configuration
 
@@ -111,7 +110,8 @@
 | **DO** | DigitalOcean | Cloud infrastructure provider hosting all VerdictCouncil services |
 | **doctl** | DigitalOcean CLI | Command-line tool for managing DigitalOcean resources; used in CI/CD for deployment |
 | **SemVer** | Semantic Versioning | Versioning scheme: MAJOR.MINOR.PATCH |
-| **PAIR** | Platform for AI-assisted Research | Singapore government legal research platform |
+| **PAIR** | Platform for AI-assisted Research | Singapore government legal research platform; indexes higher court decisions only (SGHC, SGCA, etc.) — does not cover SCT or lower State Courts |
+| **eLitigation** | Electronic Litigation | Singapore judiciary's online platform for published judgments; source corpus indexed by PAIR |
 | **JWT** | JSON Web Token | Compact, URL-safe token format for authentication claims |
 | **OCR** | Optical Character Recognition | Technology to extract text from images and scanned documents |
 | **TTL** | Time to Live | Duration for which cached data remains valid before expiry |
