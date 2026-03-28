@@ -1,0 +1,54 @@
+# configs/shared_config.yaml
+# Shared YAML anchors referenced by all agent configuration files.
+# Usage: each agent config includes this file and references anchors with <<: *anchor_name
+
+# ──────────────────────────────────────────────
+# Solace Event Broker Connection
+# ──────────────────────────────────────────────
+
+broker: &broker_connection
+  broker_url: ${SOLACE_BROKER_URL}
+  broker_vpn: ${SOLACE_BROKER_VPN}
+  username: ${SOLACE_BROKER_USERNAME}
+  password: ${SOLACE_BROKER_PASSWORD}
+
+# ──────────────────────────────────────────────
+# Model Definitions (OpenAI via LiteLLM)
+# ──────────────────────────────────────────────
+
+models:
+  gpt54_nano: &gpt54_nano_model
+    model: gpt-5.4-nano
+    api_key: ${OPENAI_API_KEY}
+    api_base: https://api.openai.com/v1
+
+  gpt5_mini: &gpt5_mini_model
+    model: gpt-5-mini
+    api_key: ${OPENAI_API_KEY}
+    api_base: https://api.openai.com/v1
+
+  gpt5: &gpt5_model
+    model: gpt-5
+    api_key: ${OPENAI_API_KEY}
+    api_base: https://api.openai.com/v1
+
+  gpt54: &gpt54_model
+    model: gpt-5.4
+    api_key: ${OPENAI_API_KEY}
+    api_base: https://api.openai.com/v1
+
+# ──────────────────────────────────────────────
+# Session Service (PostgreSQL)
+# ──────────────────────────────────────────────
+
+session_service: &default_session_service
+  type: sql
+  database_url: ${DATABASE_URL}
+
+# ──────────────────────────────────────────────
+# Artifact Service (Filesystem)
+# ──────────────────────────────────────────────
+
+artifact_service: &default_artifact_service
+  type: filesystem
+  base_path: /tmp/verdictcouncil
