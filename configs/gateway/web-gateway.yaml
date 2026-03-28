@@ -1,0 +1,39 @@
+# SAM Web Gateway — handles HTTP routing, JWT auth, SSE streaming
+apps:
+  - name: web-gateway
+    app_module: solace_agent_mesh.gateway.http_sse.app
+    broker:
+      <<: *broker_connection
+    app_config:
+      namespace: ${NAMESPACE}
+      gateway_name: "VerdictCouncilGateway"
+      display_name: "VerdictCouncil Web Gateway"
+
+      http:
+        host: ${FASTAPI_HOST}
+        port: ${FASTAPI_PORT}
+        workers: 4
+
+      auth:
+        type: jwt
+        jwt:
+          secret: ${JWT_SECRET}
+          algorithm: HS256
+
+      cors:
+        allow_origins: ["*"]
+        allow_methods: ["*"]
+        allow_headers: ["*"]
+
+      sse:
+        enabled: true
+        heartbeat_interval: 15
+        max_connections: 100
+
+      routes:
+        - path: /api/v1/pipeline/cases
+          method: POST
+          target_agent: case-processing
+        - path: /api/v1/pipeline/cases/{case_id}/status
+          method: GET
+          sse: true

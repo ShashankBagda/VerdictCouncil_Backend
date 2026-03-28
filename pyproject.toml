@@ -1,0 +1,69 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "verdictcouncil"
+version = "0.1.0"
+description = "Multi-agent AI judicial decision-support system"
+requires-python = ">=3.12"
+dependencies = [
+    "solace-agent-mesh>=0.5.0",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.34.0",
+    "sqlalchemy[asyncio]>=2.0.35",
+    "asyncpg>=0.30.0",
+    "alembic>=1.14.0",
+    "psycopg2-binary>=2.9.10",
+    "redis>=5.2.0",
+    "pyjwt>=2.10.0",
+    "httpx>=0.28.0",
+    "openai>=1.60.0",
+    "pydantic[email]>=2.10.0",
+    "pydantic-settings>=2.7.0",
+    "passlib[bcrypt]>=1.7.4",
+    "python-multipart>=0.0.18",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.25.0",
+    "pytest-cov>=6.0.0",
+    "ruff>=0.8.0",
+    "mypy>=1.14.0",
+    "pip-audit>=2.7.0",
+    "bandit>=1.8.0",
+    "httpx",  # for FastAPI test client
+    "factory-boy>=3.3.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "A", "SIM"]
+ignore = [
+    "UP042",  # str+Enum pattern needed for Pydantic/SQLAlchemy compatibility
+    "B008",   # FastAPI uses function calls in defaults (Depends, Query)
+]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["solace_agent_mesh.*", "passlib.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

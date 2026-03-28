@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: witness-analysis
+  namespace: verdictcouncil
+  labels:
+    app: verdictcouncil
+    component: witness-analysis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: verdictcouncil
+      component: witness-analysis
+  template:
+    metadata:
+      labels:
+        app: verdictcouncil
+        component: witness-analysis
+    spec:
+      containers:
+        - name: witness-analysis
+          image: verdictcouncil:latest
+          args: ["--config", "/app/configs/agents/witness-analysis.yaml"]
+          envFrom:
+            - secretRef:
+                name: verdictcouncil-secrets
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            exec:
+              command: ["python", "-c", "import sys; sys.exit(0)"]
+            periodSeconds: 30

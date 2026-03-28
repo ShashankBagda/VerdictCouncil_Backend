@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: evidence-analysis
+  namespace: verdictcouncil
+  labels:
+    app: verdictcouncil
+    component: evidence-analysis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: verdictcouncil
+      component: evidence-analysis
+  template:
+    metadata:
+      labels:
+        app: verdictcouncil
+        component: evidence-analysis
+    spec:
+      containers:
+        - name: evidence-analysis
+          image: verdictcouncil:latest
+          args: ["--config", "/app/configs/agents/evidence-analysis.yaml"]
+          envFrom:
+            - secretRef:
+                name: verdictcouncil-secrets
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            exec:
+              command: ["python", "-c", "import sys; sys.exit(0)"]
+            periodSeconds: 30

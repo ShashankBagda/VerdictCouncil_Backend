@@ -1,0 +1,36 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install doctl
+        uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+
+      - name: Login to DOCR
+        run: doctl registry login
+
+      - name: Build and push image
+        run: |
+          TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "latest")
+          docker build -t ${{ secrets.DOCR_REGISTRY }}/verdictcouncil:$TAG .
+          docker tag ${{ secrets.DOCR_REGISTRY }}/verdictcouncil:$TAG ${{ secrets.DOCR_REGISTRY }}/verdictcouncil:latest
+          docker push ${{ secrets.DOCR_REGISTRY }}/verdictcouncil:$TAG
+          docker push ${{ secrets.DOCR_REGISTRY }}/verdictcouncil:latest
+
+      - name: Deploy to DOKS
+        run: |
+          TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "latest")
+          doctl kubernetes cluster kubeconfig save ${{ secrets.DOKS_PRODUCTION_CLUSTER_ID }}
+          kubectl apply -k k8s/overlays/production/
+          kubectl set image -n verdictcouncil deployment --all *=${{ secrets.DOCR_REGISTRY }}/verdictcouncil:$TAG
+          kubectl rollout status -n verdictcouncil deployment --timeout=300s
