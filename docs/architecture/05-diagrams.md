@@ -8,7 +8,7 @@ erDiagram
         uuid id PK
         varchar name
         varchar email UK
-        enum role "judge | admin"
+        enum role "judge | admin | clerk"
         varchar password_hash
         timestamp created_at
         timestamp updated_at
@@ -25,7 +25,7 @@ erDiagram
     cases {
         uuid id PK
         enum domain "small_claims | traffic_violation"
-        enum status "pending | processing | ready_for_review | decided | rejected | escalated"
+        enum status "pending | processing | ready_for_review | decided | rejected | escalated | closed | failed"
         boolean jurisdiction_valid
         enum complexity "low | medium | high"
         enum route "proceed_automated | proceed_with_review | escalate_human"
@@ -143,9 +143,13 @@ erDiagram
         uuid case_id FK
         varchar agent_name
         varchar action
-        varchar input_hash
-        varchar output_hash
+        jsonb input_payload
+        jsonb output_payload
+        text system_prompt
+        jsonb llm_response
         jsonb tool_calls
+        varchar model
+        jsonb token_usage
         varchar solace_message_id
         timestamp created_at
     }

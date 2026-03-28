@@ -122,9 +122,11 @@ Since SAM has no built-in shared state mechanism, the entire case context travel
 
 This pattern has three important properties:
 
-1. **Self-contained messages.** Each event contains the complete case context. No database lookups are needed during agent processing — the payload IS the state.
+1. **Self-contained messages.** Each event contains the complete case context. No database lookups are needed during agent processing ... the payload IS the runtime state.
 2. **Immutable audit trail.** Each published event is a snapshot of the CaseState at that pipeline stage. The Solace broker retains these, creating a full history of how the case evolved.
-3. **Stateless agents.** Agents hold no state between invocations. Any agent pod can process any case — enabling horizontal scaling and fault tolerance.
+3. **Stateless agents.** Agents hold no state between invocations. Any agent pod can process any case ... enabling horizontal scaling and fault tolerance.
+
+> **Dual-write pattern:** The CaseState payload is the runtime source of truth during pipeline execution. However, each agent also persists its output to PostgreSQL for queryability (case CRUD, search/filter, audit export). The payload drives the pipeline; the database serves the API. If these diverge, the payload is authoritative and the database should be reconciled from the Solace message log.
 
 ### CaseState Schema
 
@@ -145,7 +147,9 @@ class CaseState:
                                     # scenarios). None for initial pipeline runs.
                                     # Enables tracing the lineage of what-if analyses.
     domain: str                     # "small_claims" | "traffic_violation"
-    status: str                     # "PROCESSING" | "REJECTED" | "ESCALATED" | "COMPLETED" | "FAILED"
+    status: str                     # "pending" | "processing" | "ready_for_review"
+                                    # | "decided" | "rejected" | "escalated"
+                                    # | "closed" | "failed"
     parties: list[dict]             # [{name, role, contact, representation_status}]
     case_metadata: dict             # {
                                     #   filed_date, category, subcategory,
@@ -237,8 +241,11 @@ class CaseState:
     judge_decision: dict            # {accepted, modified, rejected, notes, final_order}
 
     # --- Audit (appended by every agent) ---
-    audit_log: list[dict]           # [{agent, timestamp, action, input_hash,
-                                    #   output_hash, model, token_usage}]
+    audit_log: list[dict]           # [{agent, timestamp, action,
+                                    #   input_payload, output_payload,
+                                    #   system_prompt, llm_response,
+                                    #   tool_calls, model, token_usage,
+                                    #   solace_message_id}]
 ```
 
 **Field ownership rules:**
@@ -414,7 +421,7 @@ Agent 2 ─── fan-out ──┬── Agent 3 ──┐
    - Atomically check if all three slots are populated (via Redis Lua script to prevent duplicate publishes).
    - If yes: deep-copy the original CaseState, merge the three agent outputs into their designated fields (`evidence_analysis`, `extracted_facts`, `witnesses`), publish the full merged CaseState to `verdictcouncil/a2a/v1/agent/request/legal-knowledge`, and remove the `case_id:run_id` from the pending map.
 
-4. **Timeout handling:** If fewer than 3 agents complete within 120 seconds, the aggregator halts the pipeline and sets the case status to FAILED. It logs which agents did not complete. Partial results are never forwarded to Agent 6 — incomplete analysis is worse than no analysis in a judicial context.
+4. **Timeout handling:** If fewer than 3 agents complete within 120 seconds, the aggregator halts the pipeline and sets the case status to `failed`. It logs which agents did not complete. Partial results are never forwarded to Agent 6 — incomplete analysis is worse than no analysis in a judicial context.
 
 5. **Duplicate handling:** If the same agent publishes twice for the same `case_id` (e.g., due to broker retry), the aggregator overwrites the existing slot with the newer payload (idempotent).
 
@@ -446,7 +453,7 @@ The pipeline has two explicit halt points where processing stops and the case is
 
 ```
 IF route == "escalate_human":
-    status = "ESCALATED"
+    status = "escalated"
     Pipeline HALTS
     Case queued for manual assignment
     Reason logged to audit_log
@@ -458,7 +465,7 @@ Triggers: high complexity, potential precedent-setting impact, vulnerable partie
 
 ```
 IF critical_issues_found == true:
-    status = "ESCALATED"
+    status = "escalated"
     Pipeline HALTS BEFORE verdict generation
     Fairness audit report sent to Judge
     No verdict recommendation is produced

@@ -196,9 +196,8 @@ docker compose -f docker-compose.infra.yml ps
 python3.12 -m venv .venv
 source .venv/bin/activate
 
-# Install dependencies
-pip install -r requirements.txt
-pip install -r requirements-dev.txt
+# Install dependencies (from pyproject.toml)
+pip install -e ".[dev]"
 
 # Run database migrations
 python -m alembic upgrade head
@@ -357,9 +356,7 @@ services:
 
   # ─── Database Migrations ──────────────────────
   migrations:
-    build:
-      context: .
-      dockerfile: docker/base/Dockerfile
+    build: .
     container_name: vc-migrations
     command: python -m alembic upgrade head
     env_file: .env
@@ -370,12 +367,14 @@ services:
         condition: service_healthy
     restart: "no"
 
-  # ─── Agents ───────────────────────────────────
+  # ─── Agents (single image, different configs) ──
+  # All agents use the same Docker image. Each service overrides the
+  # --config argument to point to its YAML config file.
+
   web-gateway:
-    build:
-      context: .
-      dockerfile: docker/web-gateway/Dockerfile
+    build: .
     container_name: vc-web-gateway
+    command: ["--config", "/app/configs/gateway/web-gateway.yaml"]
     ports:
       - "8000:8000"
     env_file: .env
@@ -394,168 +393,92 @@ services:
         condition: service_completed_successfully
 
   case-processing:
-    build:
-      context: .
-      dockerfile: docker/case-processing/Dockerfile
+    build: .
     container_name: vc-case-processing
+    command: ["--config", "/app/configs/agents/case-processing.yaml"]
     env_file: .env
-    environment:
+    environment: &agent-env
       SOLACE_BROKER_URL: tcp://solace:55555
       DATABASE_URL: postgresql://vc_dev:vc_dev_password@postgres:5432/verdictcouncil
       REDIS_URL: redis://redis:6379/0
-      AGENT_NAME: case-processing
-    depends_on:
+    depends_on: &agent-deps
       solace:
         condition: service_healthy
       migrations:
         condition: service_completed_successfully
 
   complexity-routing:
-    build:
-      context: .
-      dockerfile: docker/complexity-routing/Dockerfile
+    build: .
     container_name: vc-complexity-routing
+    command: ["--config", "/app/configs/agents/complexity-routing.yaml"]
     env_file: .env
-    environment:
-      SOLACE_BROKER_URL: tcp://solace:55555
-      DATABASE_URL: postgresql://vc_dev:vc_dev_password@postgres:5432/verdictcouncil
-      REDIS_URL: redis://redis:6379/0
-      AGENT_NAME: complexity-routing
-    depends_on:
-      solace:
-        condition: service_healthy
-      migrations:
-        condition: service_completed_successfully
+    environment: *agent-env
+    depends_on: *agent-deps
 
   evidence-analysis:
-    build:
-      context: .
-      dockerfile: docker/evidence-analysis/Dockerfile
+    build: .
     container_name: vc-evidence-analysis
+    command: ["--config", "/app/configs/agents/evidence-analysis.yaml"]
     env_file: .env
-    environment:
-      SOLACE_BROKER_URL: tcp://solace:55555
-      DATABASE_URL: postgresql://vc_dev:vc_dev_password@postgres:5432/verdictcouncil
-      REDIS_URL: redis://redis:6379/0
-      AGENT_NAME: evidence-analysis
-    depends_on:
-      solace:
-        condition: service_healthy
-      migrations:
-        condition: service_completed_successfully
+    environment: *agent-env
+    depends_on: *agent-deps
 
   fact-reconstruction:
-    build:
-      context: .
-      dockerfile: docker/fact-reconstruction/Dockerfile
+    build: .
     container_name: vc-fact-reconstruction
+    command: ["--config", "/app/configs/agents/fact-reconstruction.yaml"]
     env_file: .env
-    environment:
-      SOLACE_BROKER_URL: tcp://solace:55555
-      DATABASE_URL: postgresql://vc_dev:vc_dev_password@postgres:5432/verdictcouncil
-      REDIS_URL: redis://redis:6379/0
-      AGENT_NAME: fact-reconstruction
-    depends_on:
-      solace:
-        condition: service_healthy
-      migrations:
-        condition: service_completed_successfully
+    environment: *agent-env
+    depends_on: *agent-deps
 
   witness-analysis:
-    build:
-      context: .
-      dockerfile: docker/witness-analysis/Dockerfile
+    build: .
     container_name: vc-witness-analysis
+    command: ["--config", "/app/configs/agents/witness-analysis.yaml"]
     env_file: .env
-    environment:
-      SOLACE_BROKER_URL: tcp://solace:55555
-      DATABASE_URL: postgresql://vc_dev:vc_dev_password@postgres:5432/verdictcouncil
-      REDIS_URL: redis://redis:6379/0
-      AGENT_NAME: witness-analysis
-    depends_on:
-      solace:
-        condition: service_healthy
-      migrations:
-        condition: service_completed_successfully
+    environment: *agent-env
+    depends_on: *agent-deps
 
   legal-knowledge:
-    build:
-      context: .
-      dockerfile: docker/legal-knowledge/Dockerfile
+    build: .
     container_name: vc-legal-knowledge
+    command: ["--config", "/app/configs/agents/legal-knowledge.yaml"]
     env_file: .env
-    environment:
-      SOLACE_BROKER_URL: tcp://solace:55555
-      DATABASE_URL: postgresql://vc_dev:vc_dev_password@postgres:5432/verdictcouncil
-      REDIS_URL: redis://redis:6379/0
-      AGENT_NAME: legal-knowledge
-    depends_on:
-      solace:
-        condition: service_healthy
-      migrations:
-        condition: service_completed_successfully
+    environment: *agent-env
+    depends_on: *agent-deps
 
   argument-construction:
-    build:
-      context: .
-      dockerfile: docker/argument-construction/Dockerfile
+    build: .
     container_name: vc-argument-construction
+    command: ["--config", "/app/configs/agents/argument-construction.yaml"]
     env_file: .env
-    environment:
-      SOLACE_BROKER_URL: tcp://solace:55555
-      DATABASE_URL: postgresql://vc_dev:vc_dev_password@postgres:5432/verdictcouncil
-      REDIS_URL: redis://redis:6379/0
-      AGENT_NAME: argument-construction
-    depends_on:
-      solace:
-        condition: service_healthy
-      migrations:
-        condition: service_completed_successfully
+    environment: *agent-env
+    depends_on: *agent-deps
 
   deliberation:
-    build:
-      context: .
-      dockerfile: docker/deliberation/Dockerfile
+    build: .
     container_name: vc-deliberation
+    command: ["--config", "/app/configs/agents/deliberation.yaml"]
     env_file: .env
-    environment:
-      SOLACE_BROKER_URL: tcp://solace:55555
-      DATABASE_URL: postgresql://vc_dev:vc_dev_password@postgres:5432/verdictcouncil
-      REDIS_URL: redis://redis:6379/0
-      AGENT_NAME: deliberation
-    depends_on:
-      solace:
-        condition: service_healthy
-      migrations:
-        condition: service_completed_successfully
+    environment: *agent-env
+    depends_on: *agent-deps
 
   governance-verdict:
-    build:
-      context: .
-      dockerfile: docker/governance-verdict/Dockerfile
+    build: .
     container_name: vc-governance-verdict
+    command: ["--config", "/app/configs/agents/governance-verdict.yaml"]
     env_file: .env
-    environment:
-      SOLACE_BROKER_URL: tcp://solace:55555
-      DATABASE_URL: postgresql://vc_dev:vc_dev_password@postgres:5432/verdictcouncil
-      REDIS_URL: redis://redis:6379/0
-      AGENT_NAME: governance-verdict
-    depends_on:
-      solace:
-        condition: service_healthy
-      migrations:
-        condition: service_completed_successfully
+    environment: *agent-env
+    depends_on: *agent-deps
 
   layer2-aggregator:
-    build:
-      context: .
-      dockerfile: docker/layer2-aggregator/Dockerfile
+    build: .
     container_name: vc-layer2-aggregator
+    command: ["--config", "/app/configs/services/layer2-aggregator.yaml"]
     env_file: .env
     environment:
       SOLACE_BROKER_URL: tcp://solace:55555
       REDIS_URL: redis://redis:6379/0
-      AGENT_NAME: layer2-aggregator
     depends_on:
       solace:
         condition: service_healthy
@@ -563,16 +486,11 @@ services:
         condition: service_healthy
 
   whatif-controller:
-    build:
-      context: .
-      dockerfile: docker/whatif-controller/Dockerfile
+    build: .
     container_name: vc-whatif-controller
+    command: ["--config", "/app/configs/services/whatif-controller.yaml"]
     env_file: .env
-    environment:
-      SOLACE_BROKER_URL: tcp://solace:55555
-      DATABASE_URL: postgresql://vc_dev:vc_dev_password@postgres:5432/verdictcouncil
-      REDIS_URL: redis://redis:6379/0
-      AGENT_NAME: whatif-controller
+    environment: *agent-env
     depends_on:
       solace:
         condition: service_healthy
@@ -839,8 +757,7 @@ rebuild-%: ## Rebuild and restart a specific service (e.g., make rebuild-case-pr
 venv: ## Create virtual environment
 	python3.12 -m venv .venv
 	.venv/bin/pip install --upgrade pip
-	.venv/bin/pip install -r requirements.txt
-	.venv/bin/pip install -r requirements-dev.txt
+	.venv/bin/pip install -e ".[dev]"
 
 migrate: ## Run database migrations
 	.venv/bin/python -m alembic upgrade head
