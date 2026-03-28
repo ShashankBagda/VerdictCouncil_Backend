@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: deliberation
+  namespace: verdictcouncil
+  labels:
+    app: verdictcouncil
+    component: deliberation
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: verdictcouncil
+      component: deliberation
+  template:
+    metadata:
+      labels:
+        app: verdictcouncil
+        component: deliberation
+    spec:
+      containers:
+        - name: deliberation
+          image: verdictcouncil:latest
+          args: ["--config", "/app/configs/agents/deliberation.yaml"]
+          envFrom:
+            - secretRef:
+                name: verdictcouncil-secrets
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            exec:
+              command: ["python", "-c", "import sys; sys.exit(0)"]
+            periodSeconds: 30
