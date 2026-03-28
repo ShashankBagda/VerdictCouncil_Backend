@@ -12,7 +12,7 @@ instruction: |
 
   PART A - STATUTORY RULES:
   1. Formulate semantic queries from the case facts and dispute issues.
-  2. Use file_search to retrieve relevant statutes and regulations.
+  2. Use search_precedents to retrieve relevant statutes and regulations.
   3. For each rule: statute name, section, verbatim text, relevance score, and how it applies to the specific case facts.
 
   KNOWLEDGE BASE (by domain):
@@ -20,7 +20,7 @@ instruction: |
     Traffic: Road Traffic Act, Road Traffic Rules, Motor Vehicles Act.
 
   PART B - PRECEDENT CASES:
-  Step 1: Use file_search to find cases with matching fact patterns from
+  Step 1: Use search_precedents to find cases with matching fact patterns from
           the curated vector store. This is the PRIMARY source for domain-
           specific content (statutes, curated lower court summaries).
   Step 2: Use search_precedents to query PAIR for binding higher court
@@ -55,7 +55,7 @@ instruction: |
 
   TWO-TIER PRECEDENT STRATEGY:
   ┌─────────────────────────────────────────────────────────────┐
-  │ Tier 1: Curated Vector Store (file_search)                 │
+  │ Tier 1: Curated Vector Store (search_precedents)                 │
   │   → Statutes verbatim (SCTA, RTA, SOGA, CPFTA)            │
   │   → Manually curated case summaries & sentencing tables    │
   │   → Always searched FIRST                                  │

@@ -36,7 +36,7 @@ def _make_user(**overrides) -> MagicMock:
 def _make_case(created_by: uuid.UUID, **overrides) -> MagicMock:
     defaults = {
         "id": uuid.uuid4(),
-        "domain": CaseDomain.criminal,
+        "domain": CaseDomain.traffic_violation,
         "status": CaseStatus.pending,
         "jurisdiction_valid": True,
         "complexity": None,
@@ -123,12 +123,12 @@ class TestCreateCase:
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.post(
                 "/api/v1/cases/",
-                json={"domain": "criminal"},
+                json={"domain": "traffic_violation"},
             )
 
         assert resp.status_code == 201
         data = resp.json()
-        assert data["domain"] == "criminal"
+        assert data["domain"] == "traffic_violation"
         assert data["status"] == "pending"
         mock_db.add.assert_called_once()
 
@@ -161,8 +161,8 @@ class TestListCases:
         mock_db = _build_mock_session()
 
         cases = [
-            _make_case(user.id, domain=CaseDomain.criminal),
-            _make_case(user.id, domain=CaseDomain.civil),
+            _make_case(user.id, domain=CaseDomain.traffic_violation),
+            _make_case(user.id, domain=CaseDomain.small_claims),
         ]
         mock_db.execute.return_value = _mock_scalars_result(cases)
 
@@ -196,7 +196,7 @@ class TestGetCaseDetail:
         assert resp.status_code == 200
         data = resp.json()
         assert data["id"] == str(case.id)
-        assert data["domain"] == "criminal"
+        assert data["domain"] == "traffic_violation"
 
     async def test_get_case_not_found(self):
         """GET /api/v1/cases/{nonexistent_id} returns 404."""

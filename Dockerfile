@@ -17,6 +17,6 @@ RUN groupadd -r vcagent && useradd -r -g vcagent vcagent
 USER vcagent
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/app
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
-    CMD python -c "import sys; sys.exit(0)"
+    CMD python -c "import src.shared.config; print('ok')"
 ENTRYPOINT ["python", "-m", "solace_agent_mesh.main"]
 CMD ["--config", "/app/configs/agents/case-processing.yaml"]

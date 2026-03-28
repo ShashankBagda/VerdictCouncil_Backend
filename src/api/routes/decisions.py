@@ -49,7 +49,7 @@ async def record_decision(
     db: DBSession,
     current_user: User = require_role(UserRole.judge),
 ) -> dict:
-    result = await db.execute(select(Case).where(Case.id == case_id))
+    result = await db.execute(select(Case).where(Case.id == case_id).with_for_update())
     case = result.scalar_one_or_none()
 
     if not case:

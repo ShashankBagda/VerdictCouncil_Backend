@@ -3,7 +3,6 @@
 Usage: python -m scripts.seed_data
 """
 
-import hashlib
 import os
 import sys
 import uuid
@@ -40,8 +39,11 @@ DATABASE_URL = os.getenv(
 
 
 def _hash_password(password: str) -> str:
-    """Simple SHA-256 hash for seed data. Production should use bcrypt."""
-    return hashlib.sha256(password.encode()).hexdigest()
+    """Hash password using bcrypt (matches auth.py's pwd_context)."""
+    from passlib.context import CryptContext
+
+    ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
+    return ctx.hash(password)
 
 
 def seed() -> None:

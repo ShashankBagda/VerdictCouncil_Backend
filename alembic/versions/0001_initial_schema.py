@@ -21,7 +21,7 @@ def upgrade() -> None:
     # -----------------------------------------------------------------------
     user_role = sa.Enum("judge", "admin", "clerk", name="userrole", create_type=False)
     case_domain = sa.Enum(
-        "civil", "criminal", "family", "commercial", "administrative",
+        "small_claims", "traffic_violation",
         name="casedomain", create_type=False,
     )
     case_status = sa.Enum(

@@ -40,8 +40,11 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install pip-audit bandit
-      - run: pip-audit --require-hashes=false -r <(pip freeze) || true
-      - run: bandit -r src/ -c pyproject.toml || true
+      - run: pip install -e .
+      - run: pip-audit
+        continue-on-error: true
+      - run: bandit -r src/ -ll
+        continue-on-error: true
 
   docker:
     runs-on: ubuntu-latest

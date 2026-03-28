@@ -26,9 +26,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self._cleanup_interval = 300  # purge stale entries every 5 minutes
 
     def _client_ip(self, request: Request) -> str:
-        forwarded = request.headers.get("x-forwarded-for")
-        if forwarded:
-            return forwarded.split(",")[0].strip()
+        # Do NOT trust X-Forwarded-For from untrusted clients.
+        # In production behind a reverse proxy, configure the proxy
+        # to set a trusted header and read that instead.
         return request.client.host if request.client else "unknown"
 
     def _cleanup_expired(self, now: float) -> None:

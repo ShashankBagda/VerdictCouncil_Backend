@@ -221,35 +221,32 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "evidence_scores": {
+                    "evidence_strengths": {
                         "type": "array",
-                        "description": "List of evidence strength scores (0-100)",
+                        "items": {"type": "string"},
+                        "description": "List of evidence strength labels: strong, medium, weak",
                     },
-                    "rule_relevance_scores": {
+                    "fact_statuses": {
                         "type": "array",
-                        "description": "List of rule relevance scores (0-100)",
+                        "items": {"type": "string"},
+                        "description": "List of fact statuses: agreed, disputed, verified",
                     },
-                    "precedent_similarity_scores": {
+                    "witness_scores": {
                         "type": "array",
-                        "description": "List of precedent similarity scores (0-100)",
-                    },
-                    "witness_credibility_scores": {
-                        "type": "array",
+                        "items": {"type": "integer"},
                         "description": "List of witness credibility scores (0-100)",
                     },
-                    "weights": {
-                        "type": "object",
-                        "description": (
-                            "Weight distribution: {evidence, rules, precedents, witnesses}. "
-                            "Must sum to 1.0"
-                        ),
+                    "precedent_similarities": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "List of precedent similarity scores (0.0-1.0)",
                     },
                 },
                 "required": [
-                    "evidence_scores",
-                    "rule_relevance_scores",
-                    "precedent_similarity_scores",
-                    "witness_credibility_scores",
+                    "evidence_strengths",
+                    "fact_statuses",
+                    "witness_scores",
+                    "precedent_similarities",
                 ],
             },
         },
@@ -257,6 +254,36 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
 }
 
 CONFIGS_DIR = Path(__file__).resolve().parent.parent.parent / "configs" / "agents"
+
+
+# Required keys for critical agent output fields
+_REQUIRED_KEYS: dict[str, dict[str, list[str]]] = {
+    "governance-verdict": {
+        "fairness_check": ["critical_issues_found", "audit_passed"],
+        "verdict_recommendation": ["confidence_score"],
+    },
+}
+
+
+def _validate_agent_output_structure(agent_name: str, output: dict[str, Any]) -> None:
+    """Validate that critical agent output fields have expected keys.
+
+    Logs warnings for missing keys but does not block the pipeline,
+    since LLM output is inherently variable.
+    """
+    checks = _REQUIRED_KEYS.get(agent_name, {})
+    for field, keys in checks.items():
+        value = output.get(field)
+        if value is None or not isinstance(value, dict):
+            continue
+        missing = [k for k in keys if k not in value]
+        if missing:
+            logger.warning(
+                "Agent '%s' output field '%s' missing keys: %s",
+                agent_name,
+                field,
+                missing,
+            )
 
 
 class PipelineRunner:
@@ -309,11 +336,11 @@ class PipelineRunner:
             if tool_name == "parse_document":
                 from src.tools import parse_document
 
-                result = parse_document(**arguments)
+                result = await parse_document(**arguments)
             elif tool_name == "cross_reference":
                 from src.tools import cross_reference
 
-                result = cross_reference(**arguments)
+                result = await cross_reference(**arguments)
             elif tool_name == "timeline_construct":
                 from src.tools import timeline_construct
 
@@ -321,11 +348,11 @@ class PipelineRunner:
             elif tool_name == "generate_questions":
                 from src.tools import generate_questions
 
-                result = generate_questions(**arguments)
+                result = await generate_questions(**arguments)
             elif tool_name == "search_precedents":
                 from src.tools import search_precedents
 
-                result = search_precedents(**arguments)
+                result = await search_precedents(**arguments)
             elif tool_name == "confidence_calc":
                 from src.tools import confidence_calc
 
@@ -419,6 +446,9 @@ class PipelineRunner:
                 raw_content[:500],
             )
             agent_output = {}
+
+        # Validate critical output fields have expected structure
+        _validate_agent_output_structure(agent_name, agent_output)
 
         # Merge agent output into CaseState (respecting field ownership)
         original_dict = state.model_dump()

@@ -15,7 +15,7 @@ import logging
 import time
 from typing import Any
 
-import redis
+import redis.asyncio as redis
 
 logger = logging.getLogger(__name__)
 
@@ -87,10 +87,10 @@ class Layer2Aggregator:
         """Redis key scoped to both case and run to isolate concurrent executions."""
         return f"{self.REDIS_KEY_PREFIX}{case_id}:{run_id}"
 
-    def _ensure_lua_loaded(self) -> str:
+    async def _ensure_lua_loaded(self) -> str:
         """Load the Lua script into Redis and cache its SHA."""
         if self._lua_sha is None:
-            self._lua_sha = self.redis.script_load(_LUA_RECEIVE)
+            self._lua_sha = await self.redis.script_load(_LUA_RECEIVE)
         return self._lua_sha
 
     async def receive_output(
@@ -123,8 +123,8 @@ class Layer2Aggregator:
         key = self._key(case_id, run_id)
         now = str(time.time())
 
-        ready = self.redis.evalsha(
-            self._ensure_lua_loaded(),
+        ready = await self.redis.evalsha(
+            await self._ensure_lua_loaded(),
             2,
             key,
             key + ":created",
@@ -135,7 +135,7 @@ class Layer2Aggregator:
         )
 
         if ready == 1:
-            merged = self._merge_and_cleanup(case_id, run_id)
+            merged = await self._merge_and_cleanup(case_id, run_id)
             if self.publisher is not None:
                 topic = "verdictcouncil/a2a/v1/agent/request/legal-knowledge"
                 logger.info(
@@ -155,13 +155,13 @@ class Layer2Aggregator:
         Returns True if the barrier was met and the merged state was published.
         """
         key = self._key(case_id, run_id)
-        all_data = self.redis.hgetall(key)
+        all_data = await self.redis.hgetall(key)
         if not all_data:
             return False
 
         stored_agents = self._extract_agent_keys(all_data)
         if stored_agents >= self.REQUIRED_AGENTS:
-            merged = self._merge_and_cleanup(case_id, run_id)
+            merged = await self._merge_and_cleanup(case_id, run_id)
             if self.publisher is not None:
                 topic = "verdictcouncil/a2a/v1/agent/request/legal-knowledge"
                 self.publisher.publish(topic, merged)
@@ -181,12 +181,12 @@ class Layer2Aggregator:
         pattern = f"{self.REDIS_KEY_PREFIX}*:created"
         cursor = 0
         while True:
-            cursor, keys = self.redis.scan(cursor, match=pattern, count=100)
+            cursor, keys = await self.redis.scan(cursor, match=pattern, count=100)
             for created_key in keys:
                 created_key_str = (
                     created_key.decode() if isinstance(created_key, bytes) else created_key
                 )
-                created_raw = self.redis.get(created_key_str)
+                created_raw = await self.redis.get(created_key_str)
                 if not created_raw:
                     continue
 
@@ -200,7 +200,7 @@ class Layer2Aggregator:
                 parts = suffix.rsplit(":created", 1)[0]
                 hash_key = f"{self.REDIS_KEY_PREFIX}{parts}"
 
-                all_data = self.redis.hgetall(hash_key)
+                all_data = await self.redis.hgetall(hash_key)
                 stored_agents = self._extract_agent_keys(all_data)
                 missing = self.REQUIRED_AGENTS - stored_agents
 
@@ -213,13 +213,13 @@ class Layer2Aggregator:
 
                 # Cleanup Redis state — do NOT publish partial results.
                 # Incomplete analysis is worse than no analysis in a judicial context.
-                self.redis.delete(hash_key)
-                self.redis.delete(created_key_str)
+                await self.redis.delete(hash_key)
+                await self.redis.delete(created_key_str)
 
             if cursor == 0:
                 break
 
-    def _merge_and_cleanup(self, case_id: str, run_id: str) -> dict:
+    async def _merge_and_cleanup(self, case_id: str, run_id: str) -> dict:
         """Merge agent outputs into the original CaseState.
 
         Deep-copies the original CaseState received at pipeline entry, then
@@ -229,7 +229,7 @@ class Layer2Aggregator:
         are preserved.
         """
         key = self._key(case_id, run_id)
-        all_data = self.redis.hgetall(key)
+        all_data = await self.redis.hgetall(key)
 
         # Recover the original CaseState stored on first receipt
         original_raw = all_data.get(
@@ -253,8 +253,8 @@ class Layer2Aggregator:
                 merged[agent_key] = fragment.get(agent_key, fragment)
 
         # Cleanup
-        self.redis.delete(key)
-        self.redis.delete(key + ":created")
+        await self.redis.delete(key)
+        await self.redis.delete(key + ":created")
 
         return merged
 

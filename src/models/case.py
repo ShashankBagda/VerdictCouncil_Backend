@@ -28,11 +28,8 @@ from src.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
 
 class CaseDomain(str, enum.Enum):
-    civil = "civil"
-    criminal = "criminal"
-    family = "family"
-    commercial = "commercial"
-    administrative = "administrative"
+    small_claims = "small_claims"
+    traffic_violation = "traffic_violation"
 
 
 class CaseStatus(str, enum.Enum):

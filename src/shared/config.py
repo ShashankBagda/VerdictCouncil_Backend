@@ -10,7 +10,17 @@ class Settings(BaseSettings):
     solace_broker_password: str = "vc-agent-password"
     database_url: str = "postgresql://vc_dev:vc_dev_password@localhost:5432/verdictcouncil"
     redis_url: str = "redis://localhost:6379/0"
-    jwt_secret: str = "change-me-in-production"
+    jwt_secret: str = "change-me-in-production"  # validated at startup
+
+    def model_post_init(self, __context: object) -> None:
+        if self.jwt_secret == "change-me-in-production" and self.log_level != "DEBUG":
+            import warnings
+
+            warnings.warn(
+                "JWT_SECRET is using the default value. "
+                "Set a secure secret via the JWT_SECRET environment variable.",
+                stacklevel=2,
+            )
 
     # Application
     namespace: str = "verdictcouncil"

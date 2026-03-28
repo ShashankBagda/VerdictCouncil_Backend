@@ -40,7 +40,7 @@ def _make_case(
 ) -> MagicMock:
     defaults = {
         "id": uuid.uuid4(),
-        "domain": CaseDomain.criminal,
+        "domain": CaseDomain.traffic_violation,
         "status": status,
         "jurisdiction_valid": True,
         "complexity": None,

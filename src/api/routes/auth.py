@@ -82,7 +82,14 @@ async def register(body: RegisterRequest, db: DBSession) -> User:
         password_hash=pwd_context.hash(body.password),
     )
     db.add(user)
-    await db.flush()
+    try:
+        await db.flush()
+    except Exception:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Email already registered",
+        ) from None
     await db.refresh(user)
     return user
 
