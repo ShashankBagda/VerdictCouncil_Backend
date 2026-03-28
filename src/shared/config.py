@@ -3,7 +3,7 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     # Required
-    openai_api_key: str
+    openai_api_key: str = ""
     solace_broker_url: str = "tcp://localhost:55555"
     solace_broker_vpn: str = "verdictcouncil"
     solace_broker_username: str = "vc-agent"
