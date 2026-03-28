@@ -1,0 +1,12 @@
+web-gateway:          python -m solace_agent_mesh.main --config configs/gateway/web-gateway.yaml
+case-processing:      python -m solace_agent_mesh.main --config configs/agents/case-processing.yaml
+complexity-routing:   python -m solace_agent_mesh.main --config configs/agents/complexity-routing.yaml
+evidence-analysis:    python -m solace_agent_mesh.main --config configs/agents/evidence-analysis.yaml
+fact-reconstruction:  python -m solace_agent_mesh.main --config configs/agents/fact-reconstruction.yaml
+witness-analysis:     python -m solace_agent_mesh.main --config configs/agents/witness-analysis.yaml
+legal-knowledge:      python -m solace_agent_mesh.main --config configs/agents/legal-knowledge.yaml
+argument-construction: python -m solace_agent_mesh.main --config configs/agents/argument-construction.yaml
+deliberation:         python -m solace_agent_mesh.main --config configs/agents/deliberation.yaml
+governance-verdict:   python -m solace_agent_mesh.main --config configs/agents/governance-verdict.yaml
+layer2-aggregator:    python -m solace_agent_mesh.main --config configs/services/layer2-aggregator.yaml
+api:                  uvicorn src.api.app:app --host 0.0.0.0 --port 8001 --reload
