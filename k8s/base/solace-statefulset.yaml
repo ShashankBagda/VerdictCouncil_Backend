@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: solace-broker
+  namespace: verdictcouncil
+spec:
+  serviceName: solace-broker
+  replicas: 1
+  selector:
+    matchLabels:
+      app: solace-broker
+  template:
+    metadata:
+      labels:
+        app: solace-broker
+    spec:
+      containers:
+        - name: solace
+          image: solace/solace-pubsub-standard:latest
+          ports:
+            - containerPort: 55555
+            - containerPort: 8080
+            - containerPort: 5550
+          env:
+            - name: username_admin_globalaccesslevel
+              value: admin
+            - name: username_admin_password
+              value: admin
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "1"
+              memory: 2Gi
+          volumeMounts:
+            - name: solace-data
+              mountPath: /var/lib/solace
+          readinessProbe:
+            httpGet:
+              path: /health-check/guaranteed-active
+              port: 5550
+            initialDelaySeconds: 60
+            periodSeconds: 10
+  volumeClaimTemplates:
+    - metadata:
+        name: solace-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: do-block-storage
+        resources:
+          requests:
+            storage: 20Gi

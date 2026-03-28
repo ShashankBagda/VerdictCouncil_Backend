@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: verdictcouncil-staging
+resources:
+  - ../../base
+patches:
+  - target:
+      kind: Ingress
+      name: verdictcouncil-ingress
+    patch: |
+      - op: replace
+        path: /spec/rules/0/host
+        value: staging-api.verdictcouncil.sg
+      - op: replace
+        path: /spec/tls/0/hosts/0
+        value: staging-api.verdictcouncil.sg

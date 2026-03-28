@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-gateway
+  namespace: verdictcouncil
+  labels:
+    app: verdictcouncil
+    component: web-gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: verdictcouncil
+      component: web-gateway
+  template:
+    metadata:
+      labels:
+        app: verdictcouncil
+        component: web-gateway
+    spec:
+      containers:
+        - name: web-gateway
+          image: verdictcouncil:latest
+          args: ["--config", "/app/configs/services/web-gateway.yaml"]
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - secretRef:
+                name: verdictcouncil-secrets
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            exec:
+              command: ["python", "-c", "import sys; sys.exit(0)"]
+            periodSeconds: 30

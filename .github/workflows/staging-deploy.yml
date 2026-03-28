@@ -1,0 +1,43 @@
+name: Deploy to Staging
+
+on:
+  push:
+    branches: [development]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install doctl
+        uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+
+      - name: Login to DOCR
+        run: doctl registry login
+
+      - name: Build and push image
+        run: |
+          docker build -t ${{ secrets.DOCR_REGISTRY }}/verdictcouncil:rc-${{ github.sha }} .
+          docker push ${{ secrets.DOCR_REGISTRY }}/verdictcouncil:rc-${{ github.sha }}
+
+      - name: Deploy to DOKS
+        run: |
+          doctl kubernetes cluster kubeconfig save ${{ secrets.DOKS_STAGING_CLUSTER_ID }}
+          kubectl set image -n verdictcouncil-staging \
+            deployment/case-processing case-processing=${{ secrets.DOCR_REGISTRY }}/verdictcouncil:rc-${{ github.sha }} \
+            deployment/complexity-routing complexity-routing=${{ secrets.DOCR_REGISTRY }}/verdictcouncil:rc-${{ github.sha }} \
+            deployment/evidence-analysis evidence-analysis=${{ secrets.DOCR_REGISTRY }}/verdictcouncil:rc-${{ github.sha }} \
+            deployment/fact-reconstruction fact-reconstruction=${{ secrets.DOCR_REGISTRY }}/verdictcouncil:rc-${{ github.sha }} \
+            deployment/witness-analysis witness-analysis=${{ secrets.DOCR_REGISTRY }}/verdictcouncil:rc-${{ github.sha }} \
+            deployment/legal-knowledge legal-knowledge=${{ secrets.DOCR_REGISTRY }}/verdictcouncil:rc-${{ github.sha }} \
+            deployment/argument-construction argument-construction=${{ secrets.DOCR_REGISTRY }}/verdictcouncil:rc-${{ github.sha }} \
+            deployment/deliberation deliberation=${{ secrets.DOCR_REGISTRY }}/verdictcouncil:rc-${{ github.sha }} \
+            deployment/governance-verdict governance-verdict=${{ secrets.DOCR_REGISTRY }}/verdictcouncil:rc-${{ github.sha }} \
+            deployment/web-gateway web-gateway=${{ secrets.DOCR_REGISTRY }}/verdictcouncil:rc-${{ github.sha }} \
+            deployment/layer2-aggregator layer2-aggregator=${{ secrets.DOCR_REGISTRY }}/verdictcouncil:rc-${{ github.sha }} \
+            deployment/api-service api-service=${{ secrets.DOCR_REGISTRY }}/verdictcouncil:rc-${{ github.sha }}
+          kubectl rollout status -n verdictcouncil-staging deployment --timeout=300s
