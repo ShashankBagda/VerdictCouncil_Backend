@@ -40,7 +40,7 @@ Judge → WebGateway → WhatIfController → SolaceBroker → Agent(N) → ... 
 | Fact toggled (agreed ↔ disputed) | Agent 7 (Argument Construction) | 7 → 8 → 9 | Facts feed into argument framing; upstream evidence analysis is unaffected |
 | Evidence excluded/included | Agent 3 (Evidence Analysis) | 3 → 4 → 5 → 6 → 7 → 8 → 9 | Evidence exclusion changes the evidentiary foundation |
 | Witness credibility changed | Agent 7 (Argument Construction) | 7 → 8 → 9 | Credibility scores are consumed during argument weighting |
-| Legal interpretation changed | Agent 7 (Argument Construction) | 7 → 8 → 9 | Interpretive shifts affect argument construction |
+| Legal interpretation changed | Agent 6 (Legal Knowledge) | 6 → 7 → 8 → 9 | Interpretive shifts require re-retrieval of statutes and precedents before argument construction |
 
 ### 7.2.3 CaseState Mutation
 

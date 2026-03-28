@@ -223,21 +223,6 @@ jobs:
     name: Docker Build Verification
     runs-on: ubuntu-latest
     needs: [unit-tests, security-scan]
-    strategy:
-      matrix:
-        agent:
-          - web-gateway
-          - case-processing
-          - complexity-routing
-          - evidence-analysis
-          - fact-reconstruction
-          - witness-analysis
-          - legal-knowledge
-          - argument-construction
-          - deliberation
-          - governance-verdict
-          - layer2-aggregator
-          - whatif-controller
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -245,13 +230,13 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build image (no push)
+      - name: Build single image (no push)
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./docker/${{ matrix.agent }}/Dockerfile
+          file: ./Dockerfile
           push: false
-          tags: verdictcouncil/${{ matrix.agent }}:test
+          tags: verdictcouncil/verdictcouncil:test
           cache-from: type=gha
           cache-to: type=gha,mode=max
 ```
@@ -260,10 +245,12 @@ jobs:
 
 ## 6.3 Docker Strategy
 
-### Base Dockerfile
+### Single Image Architecture
+
+All SAM agents share the same runtime, tools, and dependencies. A single Docker image contains the full SAM installation with all YAML configs and Python tools. Each Kubernetes deployment mounts a different config file via the `--config` argument.
 
 ```dockerfile
-# docker/base/Dockerfile
+# Dockerfile
 # Stage 1: Builder — install all dependencies
 FROM python:3.12-slim AS builder
 
@@ -273,8 +260,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+COPY pyproject.toml .
+RUN pip install --no-cache-dir --prefix=/install .
 
 # Stage 2: Runtime — minimal image
 FROM python:3.12-slim AS runtime
@@ -284,54 +271,11 @@ WORKDIR /app
 # Copy installed packages from builder
 COPY --from=builder /install /usr/local
 
-# Copy shared source code
-COPY src/shared/ /app/src/shared/
-COPY src/models/ /app/src/models/
-COPY src/services/ /app/src/services/
-COPY src/tools/ /app/src/tools/
+# Copy all source code, tools, and configs
+COPY src/ /app/src/
+COPY configs/ /app/configs/
 
 # Non-root user for security
-RUN groupadd -r vcagent && useradd -r -g vcagent vcagent
-USER vcagent
-
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONPATH=/app
-```
-
-### Agent Dockerfile (example: case-processing)
-
-```dockerfile
-# docker/case-processing/Dockerfile
-# Stage 1: Builder
-FROM python:3.12-slim AS builder
-
-WORKDIR /build
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY requirements.txt .
-RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
-
-# Stage 2: Runtime
-FROM python:3.12-slim AS runtime
-
-WORKDIR /app
-
-COPY --from=builder /install /usr/local
-
-# Shared source
-COPY src/shared/ /app/src/shared/
-COPY src/models/ /app/src/models/
-COPY src/services/ /app/src/services/
-COPY src/tools/ /app/src/tools/
-
-# Agent-specific code and config
-COPY src/agents/case_processing/ /app/src/agents/case_processing/
-COPY configs/agents/case_processing.yaml /app/configs/agent.yaml
-
 RUN groupadd -r vcagent && useradd -r -g vcagent vcagent
 USER vcagent
 
@@ -342,7 +286,19 @@ ENV PYTHONUNBUFFERED=1 \
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
     CMD python -c "import sys; sys.exit(0)"
 
-ENTRYPOINT ["python", "-m", "solace_agent_mesh.main", "--config", "/app/configs/agent.yaml"]
+# Default entrypoint; override --config per deployment
+ENTRYPOINT ["python", "-m", "solace_agent_mesh.main"]
+CMD ["--config", "/app/configs/agents/case-processing.yaml"]
+```
+
+Each K8s deployment overrides the CMD to point to a different YAML config:
+
+```yaml
+# Example: case-processing deployment
+containers:
+  - name: case-processing
+    image: registry.digitalocean.com/{registry_name}/verdictcouncil:{tag}
+    args: ["--config", "/app/configs/agents/case-processing.yaml"]
 ```
 
 ### Image Naming Convention
@@ -350,18 +306,7 @@ ENTRYPOINT ["python", "-m", "solace_agent_mesh.main", "--config", "/app/configs/
 Images are stored in DigitalOcean Container Registry (DOCR):
 
 ```
-registry.digitalocean.com/{registry_name}/web-gateway:{tag}
-registry.digitalocean.com/{registry_name}/case-processing:{tag}
-registry.digitalocean.com/{registry_name}/complexity-routing:{tag}
-registry.digitalocean.com/{registry_name}/evidence-analysis:{tag}
-registry.digitalocean.com/{registry_name}/fact-reconstruction:{tag}
-registry.digitalocean.com/{registry_name}/witness-analysis:{tag}
-registry.digitalocean.com/{registry_name}/legal-knowledge:{tag}
-registry.digitalocean.com/{registry_name}/argument-construction:{tag}
-registry.digitalocean.com/{registry_name}/deliberation:{tag}
-registry.digitalocean.com/{registry_name}/governance-verdict:{tag}
-registry.digitalocean.com/{registry_name}/layer2-aggregator:{tag}
-registry.digitalocean.com/{registry_name}/whatif-controller:{tag}
+registry.digitalocean.com/{registry_name}/verdictcouncil:{tag}
 ```
 
 Tag formats:

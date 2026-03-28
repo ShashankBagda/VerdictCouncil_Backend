@@ -1249,13 +1249,30 @@ apps:
           token_expiry: 3600
 
       # Case-Level Authorization
-      # All case-scoped API endpoints MUST verify that request.user_id == case.created_by
-      # before returning data. The gateway enforces this via middleware that loads the case
-      # record and checks ownership before forwarding to the handler.
+      # Role-based access control for case-scoped endpoints.
+      # - judge: can view/decide cases assigned to them or cases they created
+      # - admin: can view all cases, manage escalations, assign cases
+      # - clerk: can create cases, upload documents, view own cases
       case_authorization:
         enabled: true
-        middleware: "verdictcouncil.middleware.CaseOwnershipMiddleware"
-        check: "request.user_id == case.created_by"
+        middleware: "verdictcouncil.middleware.CaseAuthorizationMiddleware"
+        roles:
+          judge:
+            - "view_own_cases"
+            - "view_assigned_cases"
+            - "record_decision"
+            - "request_what_if"
+            - "view_audit_trail"
+          admin:
+            - "view_all_cases"
+            - "assign_cases"
+            - "manage_escalations"
+            - "view_audit_trail"
+            - "export_reports"
+          clerk:
+            - "create_case"
+            - "upload_documents"
+            - "view_own_cases"
 
       # SSE Configuration for Pipeline Updates
       sse:
@@ -1348,8 +1365,13 @@ def parse_document(
             - filename: Original filename.
             - content_type: MIME type of the document.
             - text: Extracted plain text content.
+            - pages: List of per-page content dicts, each containing:
+              - page_number: 1-indexed page number.
+              - text: Plain text content for this page.
+              - tables: Tables found on this page.
             - tables: List of extracted tables (if extract_tables is True),
-              each as a list of rows where each row is a list of cell values.
+              each as a list of rows where each row is a list of cell values,
+              with a page_number field indicating which page it came from.
             - metadata: Document metadata including page count, word count,
               and creation date if available.
             - parsing_notes: Any warnings or issues encountered during parsing.
@@ -1435,6 +1457,7 @@ def parse_document(
         "filename": filename,
         "content_type": content_type,
         "text": extracted_text,
+        "pages": extracted_pages,       # per-page text + tables for source grounding
         "tables": extracted_tables,
         "metadata": metadata,
         "parsing_notes": parsing_notes,
