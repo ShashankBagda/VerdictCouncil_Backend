@@ -275,6 +275,11 @@ def _resolve_env_vars(value: str) -> str:
 def _load_yaml_with_includes(config_path: Path) -> dict:
     """Load a SAM-style YAML config that may start with ``!include``.
 
+    SAM natively supports ``!include`` in its evaluation config loader
+    (``solace_agent_mesh.evaluation.summary_builder``).  This function
+    mirrors that behaviour for the pipeline runner so configs work
+    identically in both local and SAM-hosted execution.
+
     Because ``!include <path>`` followed by additional YAML keys is not
     valid in a single YAML document, this function:
 
@@ -417,6 +422,13 @@ class PipelineRunner:
         # SAM format: model_name already resolved
         model_name = config.get("model_name")
         if model_name:
+            if "${" in model_name:
+                # Env var not set — fall back to settings default
+                model_name = getattr(settings, "openai_model_lightweight")
+                logger.warning(
+                    "Model env var not resolved, falling back to settings default: %s",
+                    model_name,
+                )
             return model_name
 
         # Legacy format: tier-based lookup

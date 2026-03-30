@@ -48,17 +48,20 @@ def _parse_date(date_str: str) -> datetime | None:
 
 
 def timeline_construct(
-    facts: Annotated[list[TimelineFact], "List of facts to order chronologically"],
+    events: Annotated[
+        list[TimelineFact],
+        "List of events to order. Each event: {date, description, source_ref, parties, location}",
+    ],
 ) -> list[dict]:
-    """Build a chronological timeline from extracted facts.
+    """Build a chronological timeline from extracted events.
 
-    Takes facts with date/time information, sorts them chronologically,
-    and returns an ordered timeline. Facts without parseable dates are
+    Takes events with date/time information, sorts them chronologically,
+    and returns an ordered timeline. Events without parseable dates are
     placed at the end with a note.
 
     Args:
-        facts: List of fact dictionaries. Each should contain:
-            - fact_id (str): Unique identifier for the fact.
+        events: List of event dictionaries. Each should contain:
+            - fact_id (str): Unique identifier for the event.
             - date (str): Date/time string in any recognizable format.
             - event (str): Description of what happened.
             - source_refs (list[str]): References to source documents.
@@ -71,13 +74,13 @@ def timeline_construct(
             - fact_id (str): Original fact identifier.
             - source_refs (list[str]): Source document references.
     """
-    if not facts:
+    if not events:
         return []
 
     dated_entries: list[tuple[datetime, dict]] = []
     undated_entries: list[dict] = []
 
-    for fact in facts:
+    for fact in events:
         fact_id = fact.get("fact_id", "")
         event = fact.get("event") or fact.get("description", "")
         source_refs = fact.get("source_refs", [])

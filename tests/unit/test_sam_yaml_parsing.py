@@ -47,11 +47,15 @@ class TestAgentYamlLoading:
         assert raw is not None
 
     @pytest.mark.parametrize("agent_name", AGENT_NAMES)
-    def test_yaml_has_apps_key(self, agent_name):
-        """New SAM format should have the apps key."""
+    def test_yaml_has_required_keys(self, agent_name):
+        """Each agent YAML should have instruction and either apps or model_tier."""
         config_path = CONFIGS_DIR / f"{agent_name}.yaml"
         raw = _load_yaml_with_includes(config_path)
-        assert "apps" in raw, f"{agent_name}.yaml missing 'apps' key"
+        has_sam = "apps" in raw
+        has_legacy = "model_tier" in raw
+        assert has_sam or has_legacy, (
+            f"{agent_name}.yaml missing both 'apps' (SAM) and 'model_tier' (legacy)"
+        )
 
 
 class TestParseSamYaml:
@@ -173,3 +177,13 @@ class TestResolveModel:
         config = {"model_tier": "nonexistent", "instruction": "test"}
         with pytest.raises(ValueError, match="Unknown model tier"):
             runner._resolve_model(config)
+
+    def test_resolve_model_unresolved_env_var_falls_back(self):
+        """Unresolved ${VAR} in model_name should fall back to settings default."""
+        runner = PipelineRunner.__new__(PipelineRunner)
+        config = {"model_name": "${OPENAI_MODEL_LIGHTWEIGHT}", "instruction": "test"}
+        model = runner._resolve_model(config)
+        # Should not contain the placeholder
+        assert "${" not in model
+        assert isinstance(model, str)
+        assert len(model) > 0

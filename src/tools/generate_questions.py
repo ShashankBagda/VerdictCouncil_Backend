@@ -29,11 +29,15 @@ class QuestionGenerationError(Exception):
 )
 async def _generate_via_openai(
     client: openai.AsyncOpenAI,
-    witnesses_text: str,
-    evidence_text: str,
-    facts_text: str,
+    argument_summary: str,
+    weaknesses: list[str],
+    question_types: list[str],
+    max_questions: int,
 ) -> dict:
     """Call OpenAI to generate judicial questions."""
+    types_str = ", ".join(question_types) if question_types else "clarification, challenge"
+    weaknesses_text = json.dumps(weaknesses, indent=2)
+
     response = await client.chat.completions.create(
         model=settings.openai_model_strong_reasoning,
         messages=[
@@ -51,16 +55,14 @@ async def _generate_via_openai(
             {
                 "role": "user",
                 "content": (
-                    "Based on the following witness profiles, evidence, and facts, "
-                    "generate targeted judicial questions for each witness.\n\n"
-                    f"WITNESSES:\n{witnesses_text}\n\n"
-                    f"EVIDENCE:\n{evidence_text}\n\n"
-                    f"FACTS:\n{facts_text}\n\n"
-                    "For each witness, generate questions that probe credibility "
-                    "gaps and inconsistencies.\n\n"
+                    "Based on the following argument summary and identified weaknesses, "
+                    f"generate up to {max_questions} targeted judicial questions.\n\n"
+                    f"ARGUMENT SUMMARY:\n{argument_summary}\n\n"
+                    f"WEAKNESSES:\n{weaknesses_text}\n\n"
+                    f"Question types to generate: {types_str}\n\n"
                     "Return JSON with key:\n"
-                    "- witnesses: [{witness_name: str, questions: ["
-                    "{question: str, rationale: str, targets_weakness: str}]}]"
+                    "- questions: [{question: str, rationale: str, "
+                    "targets_weakness: str, question_type: str}]"
                 ),
             },
         ],
@@ -70,77 +72,68 @@ async def _generate_via_openai(
 
 
 async def generate_questions(
-    witnesses: Annotated[list[dict], "List of witness profile dicts with credibility scores"],
-    evidence: Annotated[dict, "Evidence analysis output with strength assessments"],
-    facts: Annotated[dict, "Extracted facts from fact reconstruction"],
+    argument_summary: Annotated[str, "Summary of the argument or testimony"],
+    weaknesses: Annotated[list[str], "List of identified weaknesses or gaps to probe"],
+    question_types: Annotated[
+        list[str] | None,
+        "Types of questions: 'clarification' | 'challenge' | 'exploration' | 'credibility'",
+    ] = None,
+    max_questions: Annotated[int, "Maximum number of questions to generate"] = 5,
 ) -> list[dict]:
-    """Generate judicial questions for witness cross-examination.
+    """Generate suggested judicial questions based on argument analysis.
 
-    Analyzes witness profiles with credibility scores against evidence
-    and facts to produce probing questions targeting weaknesses.
+    Analyzes an argument summary and identified weaknesses to produce
+    probing questions for judicial hearings.
 
     Args:
-        witnesses: List of witness profile dicts. Each should contain:
-            - name (str): Witness name.
-            - credibility_score (int): Score from witness analysis (0-100).
-            - testimony_summary (str): Summary of their testimony.
-            - weaknesses (list[str]): Identified weaknesses or gaps.
-        evidence: Evidence analysis output dict with evidence items and
-            strength assessments.
-        facts: Extracted facts dict from fact reconstruction.
+        argument_summary: Summary of the argument or testimony to analyze.
+        weaknesses: List of identified weaknesses or gaps to probe.
+        question_types: Types of questions to generate. Defaults to
+            ['clarification', 'challenge'].
+        max_questions: Maximum number of questions to generate. Defaults to 5.
 
     Returns:
         List of dicts, each containing:
-            - witness_name (str): Name of the witness.
-            - questions (list[dict]): List of generated questions, each with:
-                - question (str): The question text.
-                - rationale (str): Why this question matters.
-                - targets_weakness (str): Which weakness this probes.
+            - question (str): The question text.
+            - rationale (str): Why this question matters.
+            - targets_weakness (str): Which weakness this probes.
+            - question_type (str): Type of question generated.
 
     Raises:
         QuestionGenerationError: If generation fails.
     """
-    if not witnesses:
+    if question_types is None:
+        question_types = ["clarification", "challenge"]
+
+    if not argument_summary:
         return []
 
     client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
 
-    witnesses_text = json.dumps(witnesses, indent=2, default=str)
-    evidence_text = json.dumps(evidence, indent=2, default=str)[:6000]
-    facts_text = json.dumps(facts, indent=2, default=str)[:6000]
-
     try:
-        result = await _generate_via_openai(client, witnesses_text, evidence_text, facts_text)
+        result = await _generate_via_openai(
+            client, argument_summary, weaknesses, question_types, max_questions
+        )
     except json.JSONDecodeError as exc:
         raise QuestionGenerationError(
             f"Failed to parse question generation response: {exc}"
         ) from exc
 
-    # Normalize the output: extract the witness-questions list
-    witness_questions = result.get("witnesses", [])
+    # Normalize the output: extract the questions list
+    raw_questions = result.get("questions", [])
 
     # Ensure each entry has the expected shape
     output: list[dict] = []
-    for entry in witness_questions:
+    for q in raw_questions[:max_questions]:
         output.append(
             {
-                "witness_name": entry.get("witness_name", "Unknown"),
-                "questions": [
-                    {
-                        "question": q.get("question", ""),
-                        "rationale": q.get("rationale", ""),
-                        "targets_weakness": q.get("targets_weakness", ""),
-                    }
-                    for q in entry.get("questions", [])
-                ],
+                "question": q.get("question", ""),
+                "rationale": q.get("rationale", ""),
+                "targets_weakness": q.get("targets_weakness", ""),
+                "question_type": q.get("question_type", ""),
             }
         )
 
-    total_questions = sum(len(w["questions"]) for w in output)
-    logger.info(
-        "Generated %d questions for %d witnesses",
-        total_questions,
-        len(output),
-    )
+    logger.info("Generated %d questions from argument analysis", len(output))
 
     return output

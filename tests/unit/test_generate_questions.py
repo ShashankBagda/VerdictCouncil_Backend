@@ -24,95 +24,64 @@ def _openai_client():
     return client
 
 
-def _witnesses_with_gaps():
-    return [
-        {
-            "name": "Alice Tan",
-            "credibility_score": 45,
-            "testimony_summary": "Claims she saw the accident from across the street.",
-            "weaknesses": ["Poor viewing angle", "Delayed report"],
-        }
-    ]
-
-
-def _witnesses_no_gaps():
-    return [
-        {
-            "name": "Bob Lee",
-            "credibility_score": 92,
-            "testimony_summary": "Provided CCTV footage from his shop.",
-            "weaknesses": [],
-        }
-    ]
-
-
-_EVIDENCE = {"items": [{"id": "e1", "description": "CCTV footage", "strength": "strong"}]}
-_FACTS = {"facts": [{"fact_id": "f1", "event": "Collision at junction"}]}
+_ARGUMENT_SUMMARY = (
+    "Alice Tan claims she witnessed the accident from across the street. "
+    "Her testimony places the collision at 3:15pm but CCTV shows 3:45pm."
+)
+_WEAKNESSES = ["Poor viewing angle", "Delayed report", "Time discrepancy with CCTV"]
 
 
 # ------------------------------------------------------------------ #
-# Witnesses with credibility gaps produce questions
+# Weaknesses produce targeted questions
 # ------------------------------------------------------------------ #
 @pytest.mark.asyncio
-async def test_witnesses_with_gaps_produce_questions(_openai_client):
+async def test_weaknesses_produce_questions(_openai_client):
     client = _openai_client
     api_payload = {
-        "witnesses": [
+        "questions": [
             {
-                "witness_name": "Alice Tan",
-                "questions": [
-                    {
-                        "question": "Can you describe your exact position?",
-                        "rationale": "Viewing angle is questionable.",
-                        "targets_weakness": "Poor viewing angle",
-                    },
-                    {
-                        "question": "Why did you wait 3 days to report?",
-                        "rationale": "Delay undermines reliability.",
-                        "targets_weakness": "Delayed report",
-                    },
-                ],
-            }
+                "question": "Can you describe your exact position?",
+                "rationale": "Viewing angle is questionable.",
+                "targets_weakness": "Poor viewing angle",
+                "question_type": "challenge",
+            },
+            {
+                "question": "Why did you wait 3 days to report?",
+                "rationale": "Delay undermines reliability.",
+                "targets_weakness": "Delayed report",
+                "question_type": "credibility",
+            },
         ]
     }
     client.chat.completions.create = AsyncMock(return_value=_make_chat_response(api_payload))
 
     with patch("src.tools.generate_questions.openai.AsyncOpenAI", return_value=client):
-        result = await generate_questions(_witnesses_with_gaps(), _EVIDENCE, _FACTS)
+        result = await generate_questions(_ARGUMENT_SUMMARY, _WEAKNESSES)
 
-    assert len(result) == 1
-    assert result[0]["witness_name"] == "Alice Tan"
-    assert len(result[0]["questions"]) == 2
-    assert result[0]["questions"][0]["targets_weakness"] == "Poor viewing angle"
+    assert len(result) == 2
+    assert result[0]["targets_weakness"] == "Poor viewing angle"
+    assert result[1]["question_type"] == "credibility"
 
 
 # ------------------------------------------------------------------ #
-# No gaps -> minimal questions
+# No weaknesses -> empty questions
 # ------------------------------------------------------------------ #
 @pytest.mark.asyncio
-async def test_no_gaps_produces_minimal_questions(_openai_client):
+async def test_no_weaknesses_produces_empty_questions(_openai_client):
     client = _openai_client
-    api_payload = {
-        "witnesses": [
-            {
-                "witness_name": "Bob Lee",
-                "questions": [],
-            }
-        ]
-    }
+    api_payload = {"questions": []}
     client.chat.completions.create = AsyncMock(return_value=_make_chat_response(api_payload))
 
     with patch("src.tools.generate_questions.openai.AsyncOpenAI", return_value=client):
-        result = await generate_questions(_witnesses_no_gaps(), _EVIDENCE, _FACTS)
+        result = await generate_questions(_ARGUMENT_SUMMARY, [])
 
-    assert len(result) == 1
-    assert result[0]["questions"] == []
+    assert result == []
 
 
 # ------------------------------------------------------------------ #
-# Empty witnesses list returns empty
+# Empty argument summary returns empty
 # ------------------------------------------------------------------ #
 @pytest.mark.asyncio
-async def test_empty_witnesses_returns_empty():
-    result = await generate_questions([], _EVIDENCE, _FACTS)
+async def test_empty_argument_summary_returns_empty():
+    result = await generate_questions("", _WEAKNESSES)
     assert result == []
