@@ -63,9 +63,7 @@ class TestSearchPrecedentsTool:
     @pytest.mark.asyncio
     async def test_run_async_impl_delegates(self):
         tool = SearchPrecedentsTool()
-        mock_results = [
-            {"citation": "SGHC 123", "similarity_score": 0.95}
-        ]
+        mock_results = [{"citation": "SGHC 123", "similarity_score": 0.95}]
 
         with patch(
             "src.tools.search_precedents.search_precedents",

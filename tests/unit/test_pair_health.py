@@ -47,9 +47,9 @@ async def test_probe_success_records_success():
 @pytest.mark.asyncio
 async def test_probe_failure_records_failure():
     mock_http_client = AsyncMock(spec=httpx.AsyncClient)
-    mock_http_client.post = AsyncMock(side_effect=httpx.HTTPStatusError(
-        "500", request=MagicMock(), response=MagicMock()
-    ))
+    mock_http_client.post = AsyncMock(
+        side_effect=httpx.HTTPStatusError("500", request=MagicMock(), response=MagicMock())
+    )
     mock_http_client.__aenter__ = AsyncMock(return_value=mock_http_client)
     mock_http_client.__aexit__ = AsyncMock(return_value=False)
 

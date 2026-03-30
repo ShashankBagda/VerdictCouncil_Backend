@@ -50,10 +50,7 @@ class SearchPrecedentsTool:
 
     @property
     def tool_description(self) -> str:
-        return (
-            "Query the PAIR Search API for binding higher court case law "
-            "matching fact patterns."
-        )
+        return "Query the PAIR Search API for binding higher court case law matching fact patterns."
 
     @property
     def parameters_schema(self) -> dict[str, Any]:

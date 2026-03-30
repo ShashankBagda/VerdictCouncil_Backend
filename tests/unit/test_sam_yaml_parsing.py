@@ -22,15 +22,15 @@ AGENT_NAMES = [
 
 # Expected model anchors per agent (based on model_tier mapping)
 EXPECTED_MODELS = {
-    "case-processing": "gpt54_nano_model",         # lightweight
-    "complexity-routing": "gpt54_nano_model",       # lightweight
-    "evidence-analysis": "gpt5_model",              # strong
-    "fact-reconstruction": "gpt5_model",            # strong
-    "witness-analysis": "gpt5_mini_model",          # efficient
-    "legal-knowledge": "gpt5_model",                # strong
-    "argument-construction": "gpt54_model",         # frontier
-    "deliberation": "gpt54_model",                  # frontier
-    "governance-verdict": "gpt54_model",            # frontier
+    "case-processing": "gpt54_nano_model",  # lightweight
+    "complexity-routing": "gpt54_nano_model",  # lightweight
+    "evidence-analysis": "gpt5_model",  # strong
+    "fact-reconstruction": "gpt5_model",  # strong
+    "witness-analysis": "gpt5_mini_model",  # efficient
+    "legal-knowledge": "gpt5_model",  # strong
+    "argument-construction": "gpt54_model",  # frontier
+    "deliberation": "gpt54_model",  # frontier
+    "governance-verdict": "gpt54_model",  # frontier
 }
 
 

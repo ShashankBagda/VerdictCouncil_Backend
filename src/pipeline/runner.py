@@ -265,6 +265,7 @@ def _resolve_env_vars(value: str) -> str:
 
     Returns the original placeholder unchanged if the env var is not set.
     """
+
     def _replacer(match: re.Match) -> str:
         var_name = match.group(1)
         return os.environ.get(var_name, match.group(0))

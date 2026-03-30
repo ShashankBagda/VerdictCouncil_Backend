@@ -47,5 +47,3 @@ class TimelineFact(_TimelineFactRequired, total=False):
 
     fact_id: str
     source_refs: list[str]
-
-
