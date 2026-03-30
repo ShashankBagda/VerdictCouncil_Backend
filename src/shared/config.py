@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     precedent_cache_ttl_seconds: int = 86400
     pair_api_url: str = "https://search.pair.gov.sg/api/v1/search"
+    pair_circuit_breaker_threshold: int = 3
+    pair_circuit_breaker_timeout: int = 60
 
     # OpenAI Models
     openai_vector_store_id: str = ""

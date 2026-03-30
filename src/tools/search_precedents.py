@@ -13,10 +13,18 @@ import logging
 import httpx
 import redis.asyncio as redis
 
+from src.shared.circuit_breaker import CircuitBreaker, CircuitState
 from src.shared.config import settings
 from src.shared.retry import retry_with_backoff
+from src.tools.vector_store_fallback import vector_store_search
 
 logger = logging.getLogger(__name__)
+
+_pair_breaker = CircuitBreaker(
+    service_name="pair_search",
+    failure_threshold=settings.pair_circuit_breaker_threshold,
+    recovery_timeout=settings.pair_circuit_breaker_timeout,
+)
 
 
 class PrecedentSearchError(Exception):
@@ -156,18 +164,40 @@ async def search_precedents(
         logger.warning("Redis cache read failed; proceeding with live search")
         r = None
 
-    # Live search
-    try:
-        if r is None:
-            r = await _get_redis_client()
-        results = await _call_pair_api(query, domain, max_results, r)
-    except (httpx.HTTPError, httpx.TimeoutException) as exc:
-        logger.warning(
-            "PAIR Search API unreachable for query '%s': %s. Returning empty results.",
-            query[:80],
-            exc,
-        )
-        return []
+    # Check circuit breaker state
+    breaker_state = await _pair_breaker.get_state()
+
+    results: list[dict] = []
+    used_fallback = False
+
+    if breaker_state == CircuitState.OPEN:
+        # Circuit is open — skip PAIR, go straight to fallback
+        logger.info("Circuit breaker OPEN for pair_search; using vector store fallback")
+        results = await vector_store_search(query, domain, max_results)
+        used_fallback = True
+    else:
+        # CLOSED or HALF_OPEN — attempt PAIR API
+        try:
+            if r is None:
+                r = await _get_redis_client()
+            results = await _call_pair_api(query, domain, max_results, r)
+            await _pair_breaker.record_success()
+        except (httpx.HTTPError, httpx.TimeoutException) as exc:
+            new_state = await _pair_breaker.record_failure()
+            logger.warning(
+                "PAIR Search API unreachable for query '%s': %s (circuit: %s). "
+                "Falling back to vector store.",
+                query[:80],
+                exc,
+                new_state.value,
+            )
+            results = await vector_store_search(query, domain, max_results)
+            used_fallback = True
+
+    # Tag fallback results
+    if used_fallback:
+        for result in results:
+            result["fallback_used"] = True
 
     # Sort by similarity descending
     results.sort(key=lambda x: x.get("similarity_score", 0), reverse=True)
@@ -185,8 +215,9 @@ async def search_precedents(
         logger.warning("Failed to write precedent results to Redis cache")
 
     logger.info(
-        "Precedent search returned %d results for query: %s",
+        "Precedent search returned %d results (fallback=%s) for query: %s",
         len(results),
+        used_fallback,
         query[:80],
     )
 
