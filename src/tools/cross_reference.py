@@ -4,13 +4,17 @@ Analyzes pairs of parsed documents to find contradictions and
 corroborations across evidence items.
 """
 
+from __future__ import annotations
+
 import json
 import logging
+from typing import Annotated
 
 import openai
 
 from src.shared.config import settings
 from src.shared.retry import retry_with_backoff
+from src.tools.types import CrossReferenceSegment
 
 logger = logging.getLogger(__name__)
 
@@ -61,15 +65,22 @@ async def _analyze_documents(
 
 
 async def cross_reference(
-    documents: list[dict],
-    case_domain: str,
+    segments: Annotated[
+        list[CrossReferenceSegment],
+        "List of document segments to compare. Each segment: {doc_id, text, page, paragraph}",
+    ],
+    check_type: Annotated[
+        str,
+        "Type of cross-reference check: 'contradiction' | 'corroboration' | 'all'",
+    ],
 ) -> dict:
-    """Compare parsed documents to find contradictions and corroborations.
+    """Compare document segments to find contradictions and corroborations.
 
     Args:
-        documents: List of parsed document outputs. Each dict should have
+        segments: List of document segments to compare. Each should have
             at minimum a doc identifier and text content.
-        case_domain: Legal domain context (e.g. "small_claims", "traffic").
+        check_type: Type of cross-reference check to perform:
+            'contradiction', 'corroboration', or 'all'.
 
     Returns:
         Dictionary with keys:
@@ -79,7 +90,7 @@ async def cross_reference(
     Raises:
         CrossReferenceError: If analysis fails.
     """
-    if len(documents) < 2:
+    if len(segments) < 2:
         return {
             "contradictions": [],
             "corroborations": [],
@@ -87,21 +98,21 @@ async def cross_reference(
 
     client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
 
-    # Serialize documents for the prompt, keeping only relevant fields
+    # Serialize segments for the prompt, keeping only relevant fields
     doc_summaries = []
-    for doc in documents:
+    for seg in segments:
         doc_summaries.append(
             {
-                "doc_id": doc.get("file_id") or doc.get("doc_id", "unknown"),
-                "filename": doc.get("filename", ""),
-                "text": doc.get("text", "")[:8000],  # Truncate to fit context
+                "doc_id": seg.get("file_id") or seg.get("doc_id", "unknown"),
+                "filename": seg.get("filename", ""),
+                "text": seg.get("text", "")[:8000],  # Truncate to fit context
             }
         )
 
     documents_text = json.dumps(doc_summaries, indent=2)
 
     try:
-        result = await _analyze_documents(client, documents_text, case_domain)
+        result = await _analyze_documents(client, documents_text, check_type)
     except json.JSONDecodeError as exc:
         raise CrossReferenceError(
             f"Failed to parse cross-reference analysis response: {exc}"
@@ -112,10 +123,10 @@ async def cross_reference(
     corroborations = result.get("corroborations", [])
 
     logger.info(
-        "Cross-reference complete: %d contradictions, %d corroborations across %d documents",
+        "Cross-reference complete: %d contradictions, %d corroborations across %d segments",
         len(contradictions),
         len(corroborations),
-        len(documents),
+        len(segments),
     )
 
     return {
