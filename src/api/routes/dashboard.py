@@ -4,6 +4,7 @@ from sqlalchemy import func, select
 
 from src.api.deps import CurrentUser, DBSession
 from src.models.case import Case
+from src.shared.circuit_breaker import get_pair_search_breaker
 
 router = APIRouter()
 
@@ -18,6 +19,7 @@ class DashboardStats(BaseModel):
     by_status: dict[str, int]
     by_domain: dict[str, int]
     recent_cases: list[dict]
+    pair_api_status: dict | None = None
 
 
 # --------------------------------------------------------------------------- #
@@ -54,9 +56,12 @@ async def get_stats(db: DBSession, current_user: CurrentUser) -> dict:
         for c in recent_result.scalars().all()
     ]
 
+    pair_status = await get_pair_search_breaker().get_status()
+
     return {
         "total_cases": total,
         "by_status": by_status,
         "by_domain": by_domain,
         "recent_cases": recent,
+        "pair_api_status": pair_status,
     }

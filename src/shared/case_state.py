@@ -63,6 +63,7 @@ class CaseState(BaseModel):
     # Law (written by Legal Knowledge)
     legal_rules: list[dict[str, Any]] = Field(default_factory=list)
     precedents: list[dict[str, Any]] = Field(default_factory=list)
+    precedent_source_metadata: dict[str, Any] | None = None
 
     # Arguments (written by Argument Construction)
     arguments: dict[str, Any] | None = None
