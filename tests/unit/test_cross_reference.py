@@ -26,8 +26,14 @@ def _openai_client():
 
 def _two_segments():
     return [
-        {"doc_id": "doc-1", "filename": "claim.pdf", "text": "Plaintiff claims $5000.", "page": 1, "paragraph": 1},
-        {"doc_id": "doc-2", "filename": "response.pdf", "text": "Defendant disputes $5000.", "page": 1, "paragraph": 1},
+        {
+            "doc_id": "doc-1", "filename": "claim.pdf",
+            "text": "Plaintiff claims $5000.", "page": 1, "paragraph": 1,
+        },
+        {
+            "doc_id": "doc-2", "filename": "response.pdf",
+            "text": "Defendant disputes $5000.", "page": 1, "paragraph": 1,
+        },
     ]
 
 

@@ -424,7 +424,7 @@ class PipelineRunner:
         if model_name:
             if "${" in model_name:
                 # Env var not set — fall back to settings default
-                model_name = getattr(settings, "openai_model_lightweight")
+                model_name = settings.openai_model_lightweight
                 logger.warning(
                     "Model env var not resolved, falling back to settings default: %s",
                     model_name,

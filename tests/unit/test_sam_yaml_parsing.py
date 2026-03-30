@@ -3,7 +3,6 @@
 from pathlib import Path
 
 import pytest
-import yaml
 
 from src.pipeline.runner import PipelineRunner, _load_yaml_with_includes
 
