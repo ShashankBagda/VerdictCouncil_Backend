@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -255,6 +257,64 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
 
 CONFIGS_DIR = Path(__file__).resolve().parent.parent.parent / "configs" / "agents"
 
+_ENV_VAR_PATTERN = re.compile(r"\$\{([^}]+)\}")
+
+
+def _resolve_env_vars(value: str) -> str:
+    """Replace ``${VAR}`` placeholders with environment variable values.
+
+    Returns the original placeholder unchanged if the env var is not set.
+    """
+    def _replacer(match: re.Match) -> str:
+        var_name = match.group(1)
+        return os.environ.get(var_name, match.group(0))
+
+    return _ENV_VAR_PATTERN.sub(_replacer, value)
+
+
+def _load_yaml_with_includes(config_path: Path) -> dict:
+    """Load a SAM-style YAML config that may start with ``!include``.
+
+    Because ``!include <path>`` followed by additional YAML keys is not
+    valid in a single YAML document, this function:
+
+    1. Reads the raw text.
+    2. If the first non-comment, non-blank line is ``!include <path>``,
+       loads the referenced file as shared anchors, then loads the
+       remainder of the file using those anchors.
+    3. Otherwise falls back to plain ``yaml.safe_load``.
+    """
+    text = config_path.read_text()
+    lines = text.split("\n")
+
+    # Find the first non-comment, non-blank line
+    include_path = None
+    include_line_idx = None
+    for idx, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if stripped.startswith("!include"):
+            include_path = stripped.split(None, 1)[1].strip()
+            include_line_idx = idx
+        break
+
+    if include_path is None:
+        # No include directive — plain YAML
+        return yaml.safe_load(text)
+
+    # Load the shared config to populate anchors
+    shared_path = (config_path.parent / include_path).resolve()
+    shared_text = shared_path.read_text()
+
+    # Combine: shared config providing anchors, then the rest of the
+    # host file.  Anchors defined in the shared config are available.
+    remaining_lines = lines[include_line_idx + 1 :]
+    remaining_text = "\n".join(remaining_lines)
+
+    combined = shared_text + "\n" + remaining_text
+    return yaml.safe_load(combined)
+
 
 # Required keys for critical agent output fields
 _REQUIRED_KEYS: dict[str, dict[str, list[str]]] = {
@@ -293,6 +353,46 @@ class PipelineRunner:
         self._client = client or AsyncOpenAI(api_key=settings.openai_api_key)
         self._config_cache: dict[str, dict[str, Any]] = {}
 
+    @staticmethod
+    def _parse_sam_yaml(raw: dict[str, Any]) -> dict[str, Any]:
+        """Normalize a YAML config dict into the internal format.
+
+        Handles two layouts:
+        - **New SAM format**: has an ``apps`` key with the agent config nested
+          under ``apps[0]["app_config"]``.  The model is a dict like
+          ``{"model": "gpt-5.4-nano", "api_key": "..."}``.
+        - **Legacy format**: has ``instruction`` and ``model_tier`` at the
+          top level.  Returned as-is for backward compatibility.
+
+        Returns a flat dict with at least ``instruction`` and either
+        ``model_tier`` (legacy) or ``model_name`` (SAM) so downstream
+        callers can resolve the model string.
+        """
+        if "apps" not in raw:
+            # Legacy format — pass through unchanged
+            return raw
+
+        app_config = raw["apps"][0]["app_config"]
+        instruction = app_config.get("instruction", "")
+
+        # Extract model name from the SAM model dict and resolve env vars
+        model_value = app_config.get("model", {})
+        if isinstance(model_value, dict):
+            model_name = model_value.get("model", "")
+        else:
+            model_name = str(model_value)
+
+        # Resolve ${ENV_VAR} placeholders from the environment
+        model_name = _resolve_env_vars(model_name)
+
+        return {
+            "instruction": instruction,
+            "model_name": model_name,
+            "display_name": app_config.get("display_name", ""),
+            "agent_name": app_config.get("agent_name", ""),
+            "_raw_app_config": app_config,
+        }
+
     def _load_agent_config(self, agent_name: str) -> dict[str, Any]:
         """Load and cache an agent's YAML configuration."""
         if agent_name in self._config_cache:
@@ -302,14 +402,24 @@ class PipelineRunner:
         if not config_path.exists():
             raise FileNotFoundError(f"Agent config not found: {config_path}")
 
-        with open(config_path) as f:
-            config = yaml.safe_load(f)
-
+        config = _load_yaml_with_includes(config_path)
+        config = self._parse_sam_yaml(config)
         self._config_cache[agent_name] = config
         return config
 
     def _resolve_model(self, config: dict[str, Any]) -> str:
-        """Resolve model tier from config to an actual model name."""
+        """Resolve model name from config.
+
+        Supports two formats:
+        - SAM format: ``model_name`` key contains the resolved model string.
+        - Legacy format: ``model_tier`` key maps to a settings attribute.
+        """
+        # SAM format: model_name already resolved
+        model_name = config.get("model_name")
+        if model_name:
+            return model_name
+
+        # Legacy format: tier-based lookup
         tier = config.get("model_tier", "lightweight")
         attr_name = MODEL_TIER_MAP.get(tier)
         if not attr_name:

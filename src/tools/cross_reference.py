@@ -4,13 +4,17 @@ Analyzes pairs of parsed documents to find contradictions and
 corroborations across evidence items.
 """
 
+from __future__ import annotations
+
 import json
 import logging
+from typing import Annotated
 
 import openai
 
 from src.shared.config import settings
 from src.shared.retry import retry_with_backoff
+from src.tools.types import CrossReferenceSegment
 
 logger = logging.getLogger(__name__)
 
@@ -61,8 +65,8 @@ async def _analyze_documents(
 
 
 async def cross_reference(
-    documents: list[dict],
-    case_domain: str,
+    documents: Annotated[list[CrossReferenceSegment], "List of document segments to compare"],
+    case_domain: Annotated[str, "Legal domain: 'small_claims' | 'traffic'"],
 ) -> dict:
     """Compare parsed documents to find contradictions and corroborations.
 

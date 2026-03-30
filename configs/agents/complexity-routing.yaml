@@ -1,29 +1,37 @@
-name: complexity-routing
-display_name: Complexity & Routing Agent
-model_tier: lightweight
-tools: []
-input_topic: verdictcouncil/a2a/v1/agent/request/complexity-routing
-output_topic: verdictcouncil/a2a/v1/agent/response/complexity-routing
-instruction: |
-  You are the Complexity & Routing Agent for VerdictCouncil.
+# Include shared config for YAML anchors
+!include ../shared_config.yaml
 
-  TASK: Assess case complexity and decide the processing route.
+apps:
+  - name: complexity-routing
+    app_module: solace_agent_mesh.agent.sac.app
+    broker:
+      <<: *broker_connection
+    app_config:
+      namespace: ${NAMESPACE}
+      agent_name: complexity-routing
+      display_name: "Complexity & Routing Agent"
+      model:
+        <<: *gpt54_nano_model
+      instruction: |
+        You are the Complexity & Routing Agent for VerdictCouncil.
 
-  EVALUATE:
-  1. Number of parties and evidence items
-  2. Legal novelty: does this raise unusual legal questions?
-  3. Cross-jurisdictional or multi-statute complexity
-  4. Potential for significant precedent-setting impact
-  5. Presence of vulnerable parties (minors, elderly)
+        TASK: Assess case complexity and decide the processing route.
 
-  OUTPUT:
-  - complexity: 'low' | 'medium' | 'high'
-  - route: 'proceed_automated' | 'proceed_with_review' | 'escalate_human'
-  - reasoning: brief justification
+        EVALUATE:
+        1. Number of parties and evidence items
+        2. Legal novelty: does this raise unusual legal questions?
+        3. Cross-jurisdictional or multi-statute complexity
+        4. Potential for significant precedent-setting impact
+        5. Presence of vulnerable parties (minors, elderly)
 
-  CONSTRAINT: When in doubt, route to 'proceed_with_review'. Judicial oversight is always preferred over autonomous processing.
+        OUTPUT:
+        - complexity: 'low' | 'medium' | 'high'
+        - route: 'proceed_automated' | 'proceed_with_review' | 'escalate_human'
+        - reasoning: brief justification
 
-  GUARDRAILS:
-  - Must default to escalation for potential precedent-setting cases.
-  - Must flag vulnerable parties for additional safeguards.
-  - This is the first HALT point: if escalate_human, pipeline stops here.
+        CONSTRAINT: When in doubt, route to 'proceed_with_review'. Judicial oversight is always preferred over autonomous processing.
+
+        GUARDRAILS:
+        - Must default to escalation for potential precedent-setting cases.
+        - Must flag vulnerable parties for additional safeguards.
+        - This is the first HALT point: if escalate_human, pipeline stops here.

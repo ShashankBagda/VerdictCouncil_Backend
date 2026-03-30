@@ -4,8 +4,13 @@ Pure-logic tool that sorts extracted facts into chronological order.
 No LLM calls required.
 """
 
+from __future__ import annotations
+
 import logging
 from datetime import datetime
+from typing import Annotated
+
+from src.tools.types import TimelineFact
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +47,9 @@ def _parse_date(date_str: str) -> datetime | None:
     return None
 
 
-def timeline_construct(facts: list[dict]) -> list[dict]:
+def timeline_construct(
+    facts: Annotated[list[TimelineFact], "List of facts to order chronologically"],
+) -> list[dict]:
     """Build a chronological timeline from extracted facts.
 
     Takes facts with date/time information, sorts them chronologically,

@@ -4,8 +4,11 @@ Generates targeted questions a Judge could ask during a hearing,
 based on witness profiles, evidence, and extracted facts.
 """
 
+from __future__ import annotations
+
 import json
 import logging
+from typing import Annotated
 
 import openai
 
@@ -67,9 +70,9 @@ async def _generate_via_openai(
 
 
 async def generate_questions(
-    witnesses: list[dict],
-    evidence: dict,
-    facts: dict,
+    witnesses: Annotated[list[dict], "List of witness profile dicts with credibility scores"],
+    evidence: Annotated[dict, "Evidence analysis output with strength assessments"],
+    facts: Annotated[dict, "Extracted facts from fact reconstruction"],
 ) -> list[dict]:
     """Generate judicial questions for witness cross-examination.
 

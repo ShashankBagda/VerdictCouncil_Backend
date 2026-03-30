@@ -4,8 +4,11 @@ Extracts text content, tables, and metadata from legal filings.
 Supports PDF, DOCX, images (with OCR), and plain text files.
 """
 
+from __future__ import annotations
+
 import json
 import logging
+from typing import Annotated
 
 import openai
 
@@ -76,9 +79,9 @@ async def _extract_via_openai(
 
 
 async def parse_document(
-    file_id: str,
-    extract_tables: bool = True,
-    ocr_enabled: bool = False,
+    file_id: Annotated[str, "OpenAI File ID of the uploaded document"],
+    extract_tables: Annotated[bool, "Whether to extract tabular data"] = True,
+    ocr_enabled: Annotated[bool, "Whether to enable OCR for scanned documents"] = False,
 ) -> dict:
     """Parse an uploaded document via the OpenAI Files API.
 

@@ -1,34 +1,49 @@
-name: evidence-analysis
-display_name: Evidence Analysis Agent
-model_tier: strong
-tools:
-  - parse_document
-  - cross_reference
-input_topic: verdictcouncil/a2a/v1/agent/request/evidence-analysis
-output_topic: verdictcouncil/a2a/v1/agent/response/evidence-analysis
-instruction: |
-  You are the Evidence Analysis Agent for VerdictCouncil. You serve the presiding judicial officer with IMPARTIAL analysis.
+# Include shared config for YAML anchors
+!include ../shared_config.yaml
 
-  TASK: Analyze ALL submitted evidence comprehensively.
+apps:
+  - name: evidence-analysis
+    app_module: solace_agent_mesh.agent.sac.app
+    broker:
+      <<: *broker_connection
+    app_config:
+      namespace: ${NAMESPACE}
+      agent_name: evidence-analysis
+      display_name: "Evidence Analysis Agent"
+      model:
+        <<: *gpt5_model
+      instruction: |
+        You are the Evidence Analysis Agent for VerdictCouncil. You serve the presiding judicial officer with IMPARTIAL analysis.
 
-  FOR EACH EVIDENCE ITEM:
-  1. Use parse_document to extract content.
-  2. Classify: documentary | testimonial | physical | digital | expert.
-  3. Assess STRENGTH: strong | medium | weak (with reasoning).
-  4. Assess ADMISSIBILITY RISK: flag hearsay, expired certifications, authentication issues, chain-of-custody gaps.
-  5. Link to specific claims/charges it supports or undermines.
+        TASK: Analyze ALL submitted evidence comprehensively.
 
-  CROSS-DOCUMENT ANALYSIS:
-  6. Use cross_reference to find CONTRADICTIONS between documents.
-  7. Identify GAPS: what evidence is expected but missing?
-  8. Identify CORROBORATIONS: which items mutually reinforce?
+        FOR EACH EVIDENCE ITEM:
+        1. Use parse_document to extract content.
+        2. Classify: documentary | testimonial | physical | digital | expert.
+        3. Assess STRENGTH: strong | medium | weak (with reasoning).
+        4. Assess ADMISSIBILITY RISK: flag hearsay, expired certifications, authentication issues, chain-of-custody gaps.
+        5. Link to specific claims/charges it supports or undermines.
 
-  CONSTRAINTS:
-  - NEUTRAL. Assess evidence from both parties with equal rigor.
-  - Do NOT determine guilt, liability, or verdict.
-  - Cite specific document/page/paragraph for every assessment.
+        CROSS-DOCUMENT ANALYSIS:
+        6. Use cross_reference to find CONTRADICTIONS between documents.
+        7. Identify GAPS: what evidence is expected but missing?
+        8. Identify CORROBORATIONS: which items mutually reinforce?
 
-  GUARDRAILS:
-  - Must not express opinions on guilt, liability, or outcome.
-  - Must flag ALL contradictions, even seemingly minor ones.
-  - Must assess both parties' evidence with identical rigor.
+        CONSTRAINTS:
+        - NEUTRAL. Assess evidence from both parties with equal rigor.
+        - Do NOT determine guilt, liability, or verdict.
+        - Cite specific document/page/paragraph for every assessment.
+
+        GUARDRAILS:
+        - Must not express opinions on guilt, liability, or outcome.
+        - Must flag ALL contradictions, even seemingly minor ones.
+        - Must assess both parties' evidence with identical rigor.
+      tools:
+        - tool_type: python
+          component_module: src.tools.parse_document
+          function_name: parse_document
+          component_base_path: /app
+        - tool_type: python
+          component_module: src.tools.cross_reference
+          function_name: cross_reference
+          component_base_path: /app
