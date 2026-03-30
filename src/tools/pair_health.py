@@ -4,12 +4,10 @@ import logging
 
 import httpx
 
-from src.shared.circuit_breaker import CircuitBreaker
+from src.shared.circuit_breaker import get_pair_search_breaker
 from src.shared.config import settings
 
 logger = logging.getLogger(__name__)
-
-_pair_breaker = CircuitBreaker(service_name="pair_search")
 
 
 async def check_pair_health() -> dict:
@@ -18,6 +16,7 @@ async def check_pair_health() -> dict:
     Updates circuit breaker state based on probe result.
     Returns health status dict.
     """
+    pair_breaker = get_pair_search_breaker()
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(
@@ -38,9 +37,9 @@ async def check_pair_health() -> dict:
                 headers={"Content-Type": "application/json"},
             )
             resp.raise_for_status()
-            await _pair_breaker.record_success()
+            await pair_breaker.record_success()
             return {"status": "healthy", "response_code": resp.status_code}
     except (httpx.HTTPError, httpx.TimeoutException) as exc:
-        await _pair_breaker.record_failure()
+        await pair_breaker.record_failure()
         logger.warning("PAIR health check failed: %s", exc)
         return {"status": "unhealthy", "error": str(exc)}

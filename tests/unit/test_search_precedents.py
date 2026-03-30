@@ -56,7 +56,7 @@ def mock_redis():
 def mock_breaker_closed():
     """Yield a mock circuit breaker in CLOSED state."""
     breaker = AsyncMock()
-    breaker.get_state = AsyncMock(return_value=CircuitState.CLOSED)
+    breaker.check_recovery = AsyncMock(return_value=CircuitState.CLOSED)
     breaker.record_success = AsyncMock()
     breaker.record_failure = AsyncMock(return_value=CircuitState.CLOSED)
     return breaker
@@ -80,7 +80,7 @@ async def test_happy_path_returns_structured_results(mock_redis, mock_breaker_cl
             return_value=mock_redis,
         ),
         patch("src.tools.search_precedents.httpx.AsyncClient", return_value=mock_http_client),
-        patch("src.tools.search_precedents._pair_breaker", mock_breaker_closed),
+        patch("src.tools.search_precedents.get_pair_search_breaker", return_value=mock_breaker_closed),
     ):
         results = await search_precedents("breach of contract deposit refund")
 
@@ -108,7 +108,7 @@ async def test_api_timeout_falls_back_to_vector_store(mock_redis, mock_breaker_c
             "src.tools.search_precedents._call_pair_api",
             AsyncMock(side_effect=httpx.TimeoutException("timed out")),
         ),
-        patch("src.tools.search_precedents._pair_breaker", mock_breaker_closed),
+        patch("src.tools.search_precedents.get_pair_search_breaker", return_value=mock_breaker_closed),
         patch(
             "src.tools.search_precedents.vector_store_search",
             AsyncMock(return_value=[]),
@@ -174,7 +174,7 @@ async def test_empty_results_from_api(mock_redis, mock_breaker_closed):
             return_value=mock_redis,
         ),
         patch("src.tools.search_precedents.httpx.AsyncClient", return_value=mock_http_client),
-        patch("src.tools.search_precedents._pair_breaker", mock_breaker_closed),
+        patch("src.tools.search_precedents.get_pair_search_breaker", return_value=mock_breaker_closed),
     ):
         results = await search_precedents("obscure legal question no results")
 
@@ -201,7 +201,7 @@ async def test_rate_limiting_allows_first_two_requests(mock_redis, mock_breaker_
             return_value=mock_redis,
         ),
         patch("src.tools.search_precedents.httpx.AsyncClient", return_value=mock_http_client),
-        patch("src.tools.search_precedents._pair_breaker", mock_breaker_closed),
+        patch("src.tools.search_precedents.get_pair_search_breaker", return_value=mock_breaker_closed),
     ):
         results = await search_precedents("rate limit test")
 
@@ -230,7 +230,7 @@ async def test_breaker_closed_pair_success(mock_redis, mock_breaker_closed):
     with (
         patch("src.tools.search_precedents._get_redis_client", return_value=mock_redis),
         patch("src.tools.search_precedents.httpx.AsyncClient", return_value=mock_http_client),
-        patch("src.tools.search_precedents._pair_breaker", mock_breaker_closed),
+        patch("src.tools.search_precedents.get_pair_search_breaker", return_value=mock_breaker_closed),
     ):
         results = await search_precedents("test query")
 
@@ -246,7 +246,7 @@ async def test_breaker_closed_pair_success(mock_redis, mock_breaker_closed):
 async def test_breaker_open_uses_fallback(mock_redis):
     """When breaker is OPEN, vector store fallback is called without trying PAIR."""
     mock_breaker = AsyncMock()
-    mock_breaker.get_state = AsyncMock(return_value=CircuitState.OPEN)
+    mock_breaker.check_recovery = AsyncMock(return_value=CircuitState.OPEN)
 
     fallback_results = [
         {
@@ -264,7 +264,7 @@ async def test_breaker_open_uses_fallback(mock_redis):
 
     with (
         patch("src.tools.search_precedents._get_redis_client", return_value=mock_redis),
-        patch("src.tools.search_precedents._pair_breaker", mock_breaker),
+        patch("src.tools.search_precedents.get_pair_search_breaker", return_value=mock_breaker),
         patch("src.tools.search_precedents.vector_store_search", AsyncMock(return_value=fallback_results)),
         patch("src.tools.search_precedents._call_pair_api", mock_call_pair),
     ):
@@ -296,7 +296,7 @@ async def test_fallback_results_tagged(mock_redis, mock_breaker_closed):
 
     with (
         patch("src.tools.search_precedents._get_redis_client", return_value=mock_redis),
-        patch("src.tools.search_precedents._pair_breaker", mock_breaker_closed),
+        patch("src.tools.search_precedents.get_pair_search_breaker", return_value=mock_breaker_closed),
         patch(
             "src.tools.search_precedents._call_pair_api",
             AsyncMock(side_effect=httpx.TimeoutException("timed out")),

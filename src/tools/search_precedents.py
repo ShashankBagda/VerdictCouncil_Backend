@@ -13,18 +13,12 @@ import logging
 import httpx
 import redis.asyncio as redis
 
-from src.shared.circuit_breaker import CircuitBreaker, CircuitState
+from src.shared.circuit_breaker import CircuitState, get_pair_search_breaker
 from src.shared.config import settings
 from src.shared.retry import retry_with_backoff
 from src.tools.vector_store_fallback import vector_store_search
 
 logger = logging.getLogger(__name__)
-
-_pair_breaker = CircuitBreaker(
-    service_name="pair_search",
-    failure_threshold=settings.pair_circuit_breaker_threshold,
-    recovery_timeout=settings.pair_circuit_breaker_timeout,
-)
 
 
 class PrecedentSearchError(Exception):
@@ -164,8 +158,9 @@ async def search_precedents(
         logger.warning("Redis cache read failed; proceeding with live search")
         r = None
 
-    # Check circuit breaker state
-    breaker_state = await _pair_breaker.get_state()
+    # Check circuit breaker state (with recovery timeout check)
+    pair_breaker = get_pair_search_breaker()
+    breaker_state = await pair_breaker.check_recovery()
 
     results: list[dict] = []
     used_fallback = False
@@ -181,9 +176,9 @@ async def search_precedents(
             if r is None:
                 r = await _get_redis_client()
             results = await _call_pair_api(query, domain, max_results, r)
-            await _pair_breaker.record_success()
+            await pair_breaker.record_success()
         except (httpx.HTTPError, httpx.TimeoutException) as exc:
-            new_state = await _pair_breaker.record_failure()
+            new_state = await pair_breaker.record_failure()
             logger.warning(
                 "PAIR Search API unreachable for query '%s': %s (circuit: %s). "
                 "Falling back to vector store.",

@@ -32,7 +32,7 @@ async def test_probe_success_records_success():
 
     with (
         patch("src.tools.pair_health.httpx.AsyncClient", return_value=mock_http_client),
-        patch("src.tools.pair_health._pair_breaker", mock_breaker),
+        patch("src.tools.pair_health.get_pair_search_breaker", return_value=mock_breaker),
     ):
         result = await check_pair_health()
 
@@ -57,7 +57,7 @@ async def test_probe_failure_records_failure():
 
     with (
         patch("src.tools.pair_health.httpx.AsyncClient", return_value=mock_http_client),
-        patch("src.tools.pair_health._pair_breaker", mock_breaker),
+        patch("src.tools.pair_health.get_pair_search_breaker", return_value=mock_breaker),
     ):
         result = await check_pair_health()
 
@@ -80,7 +80,7 @@ async def test_timeout_records_failure():
 
     with (
         patch("src.tools.pair_health.httpx.AsyncClient", return_value=mock_http_client),
-        patch("src.tools.pair_health._pair_breaker", mock_breaker),
+        patch("src.tools.pair_health.get_pair_search_breaker", return_value=mock_breaker),
     ):
         result = await check_pair_health()
 

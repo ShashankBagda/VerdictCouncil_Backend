@@ -20,10 +20,12 @@ async def test_get_pair_health_returns_circuit_state():
         "opened_at": None,
     }
 
+    mock_breaker = AsyncMock()
+    mock_breaker.get_status = AsyncMock(return_value=mock_status)
+
     with patch(
-        "src.api.routes.health._pair_breaker.get_status",
-        new_callable=AsyncMock,
-        return_value=mock_status,
+        "src.api.routes.health.get_pair_search_breaker",
+        return_value=mock_breaker,
     ):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -50,10 +52,12 @@ async def test_get_pair_health_returns_proper_json_structure():
         "opened_at": 1711800000.0,
     }
 
+    mock_breaker = AsyncMock()
+    mock_breaker.get_status = AsyncMock(return_value=mock_status)
+
     with patch(
-        "src.api.routes.health._pair_breaker.get_status",
-        new_callable=AsyncMock,
-        return_value=mock_status,
+        "src.api.routes.health.get_pair_search_breaker",
+        return_value=mock_breaker,
     ):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:

@@ -2,18 +2,16 @@
 
 from fastapi import APIRouter
 
-from src.shared.circuit_breaker import CircuitBreaker
+from src.shared.circuit_breaker import get_pair_search_breaker
 from src.tools.pair_health import check_pair_health
 
 router = APIRouter()
-
-_pair_breaker = CircuitBreaker(service_name="pair_search")
 
 
 @router.get("/pair")
 async def pair_health():
     """Get PAIR API circuit breaker status."""
-    return await _pair_breaker.get_status()
+    return await get_pair_search_breaker().get_status()
 
 
 @router.post("/pair/probe")

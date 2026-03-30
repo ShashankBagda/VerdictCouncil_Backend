@@ -10,6 +10,28 @@ from src.shared.config import settings
 
 logger = logging.getLogger(__name__)
 
+# Lua script for atomic record_failure.
+# KEYS[1] = failures key, KEYS[2] = state key, KEYS[3] = opened_at key
+# ARGV[1] = failure_threshold, ARGV[2] = current timestamp
+_LUA_RECORD_FAILURE = """
+local failures = redis.call('INCR', KEYS[1])
+local state = redis.call('GET', KEYS[2]) or 'closed'
+
+if state == 'half_open' then
+    redis.call('SET', KEYS[2], 'open')
+    redis.call('SET', KEYS[3], ARGV[2])
+    return 'open'
+end
+
+if failures >= tonumber(ARGV[1]) then
+    redis.call('SET', KEYS[2], 'open')
+    redis.call('SET', KEYS[3], ARGV[2])
+    return 'open'
+end
+
+return 'closed'
+"""
+
 
 class CircuitState(str, Enum):
     CLOSED = "closed"
@@ -39,12 +61,49 @@ class CircuitBreaker:
         self.recovery_timeout = recovery_timeout
         self._redis_url = redis_url or settings.redis_url
         self._key_prefix = f"vc:circuit:{service_name}"
+        self._redis: redis.Redis | None = None
+        self._lua_sha: str | None = None
 
     async def _get_redis(self) -> redis.Redis:
-        return redis.Redis.from_url(self._redis_url, decode_responses=True)
+        if self._redis is None:
+            self._redis = redis.Redis.from_url(self._redis_url, decode_responses=True)
+        return self._redis
+
+    async def close(self) -> None:
+        """Close the Redis connection."""
+        if self._redis is not None:
+            await self._redis.aclose()
+            self._redis = None
+            self._lua_sha = None
+
+    async def _ensure_lua_loaded(self) -> str:
+        """Load the Lua script into Redis and cache its SHA."""
+        if self._lua_sha is None:
+            r = await self._get_redis()
+            self._lua_sha = await r.script_load(_LUA_RECORD_FAILURE)
+        return self._lua_sha
 
     async def get_state(self) -> CircuitState:
-        """Get current circuit state."""
+        """Get current circuit state (read-only, no side effects)."""
+        try:
+            r = await self._get_redis()
+            state = await r.get(f"{self._key_prefix}:state")
+            if state == CircuitState.OPEN.value:
+                return CircuitState.OPEN
+            if state == CircuitState.HALF_OPEN.value:
+                return CircuitState.HALF_OPEN
+            return CircuitState.CLOSED
+        except redis.RedisError:
+            logger.warning("Redis unavailable for circuit breaker; defaulting to CLOSED")
+            return CircuitState.CLOSED
+
+    async def check_recovery(self) -> CircuitState:
+        """Check if OPEN circuit should transition to HALF_OPEN.
+
+        Call this before making a request to determine if a probe attempt
+        is allowed. Transitions OPEN -> HALF_OPEN when the recovery
+        timeout has elapsed.
+        """
         try:
             r = await self._get_redis()
             state = await r.get(f"{self._key_prefix}:state")
@@ -74,36 +133,28 @@ class CircuitBreaker:
             logger.warning("Redis unavailable; cannot record circuit breaker success")
 
     async def record_failure(self) -> CircuitState:
-        """Record a failed call. Returns the new circuit state."""
+        """Record a failed call atomically via Lua script. Returns the new state."""
         try:
             r = await self._get_redis()
-            failures = await r.incr(f"{self._key_prefix}:failures")
-            current_state = await self.get_state()
+            sha = await self._ensure_lua_loaded()
+            result = await r.evalsha(
+                sha,
+                3,
+                f"{self._key_prefix}:failures",
+                f"{self._key_prefix}:state",
+                f"{self._key_prefix}:opened_at",
+                str(self.failure_threshold),
+                str(time.time()),
+            )
+            new_state_str = result if isinstance(result, str) else result.decode()
+            new_state = CircuitState(new_state_str)
 
-            if current_state == CircuitState.HALF_OPEN:
-                pipe = r.pipeline()
-                pipe.set(f"{self._key_prefix}:state", CircuitState.OPEN.value)
-                pipe.set(f"{self._key_prefix}:opened_at", str(time.time()))
-                await pipe.execute()
+            if new_state == CircuitState.OPEN:
                 logger.warning(
-                    "Circuit breaker %s: HALF_OPEN -> OPEN (probe failed)",
+                    "Circuit breaker %s -> OPEN",
                     self.service_name,
                 )
-                return CircuitState.OPEN
-
-            if failures >= self.failure_threshold:
-                pipe = r.pipeline()
-                pipe.set(f"{self._key_prefix}:state", CircuitState.OPEN.value)
-                pipe.set(f"{self._key_prefix}:opened_at", str(time.time()))
-                await pipe.execute()
-                logger.warning(
-                    "Circuit breaker %s: CLOSED -> OPEN after %d failures",
-                    self.service_name,
-                    failures,
-                )
-                return CircuitState.OPEN
-
-            return CircuitState.CLOSED
+            return new_state
         except redis.RedisError:
             logger.warning("Redis unavailable; cannot record circuit breaker failure")
             return CircuitState.CLOSED
@@ -130,3 +181,22 @@ class CircuitBreaker:
                 "failure_count": -1,
                 "error": "Redis unavailable",
             }
+
+
+# --------------------------------------------------------------------------- #
+# Shared singleton for PAIR Search API circuit breaker
+# --------------------------------------------------------------------------- #
+
+_pair_search_breaker: CircuitBreaker | None = None
+
+
+def get_pair_search_breaker() -> CircuitBreaker:
+    """Return the shared PAIR Search circuit breaker instance."""
+    global _pair_search_breaker
+    if _pair_search_breaker is None:
+        _pair_search_breaker = CircuitBreaker(
+            service_name="pair_search",
+            failure_threshold=settings.pair_circuit_breaker_threshold,
+            recovery_timeout=settings.pair_circuit_breaker_timeout,
+        )
+    return _pair_search_breaker
