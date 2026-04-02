@@ -1,11 +1,17 @@
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, status
-from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from src.api.deps import CurrentUser, DBSession, require_role
+from src.api.schemas.cases import (
+    CaseCreateRequest,
+    CaseDetailResponse,
+    CaseListResponse,
+    CaseResponse,
+)
+from src.api.schemas.common import ErrorResponse, ValidationErrorResponse
 from src.models.case import (
     Case,
     CaseDomain,
@@ -17,35 +23,6 @@ router = APIRouter()
 
 
 # --------------------------------------------------------------------------- #
-# Schemas
-# --------------------------------------------------------------------------- #
-
-
-class CaseCreateRequest(BaseModel):
-    domain: CaseDomain
-    description: str | None = None
-
-
-class CaseResponse(BaseModel):
-    id: UUID
-    domain: CaseDomain
-    status: CaseStatus
-    jurisdiction_valid: bool | None = None
-    complexity: str | None = None
-    route: str | None = None
-    created_by: UUID
-
-    model_config = {"from_attributes": True}
-
-
-class CaseListResponse(BaseModel):
-    items: list[CaseResponse]
-    total: int
-    page: int
-    per_page: int
-
-
-# --------------------------------------------------------------------------- #
 # Endpoints
 # --------------------------------------------------------------------------- #
 
@@ -54,6 +31,13 @@ class CaseListResponse(BaseModel):
     "/",
     response_model=CaseResponse,
     status_code=status.HTTP_201_CREATED,
+    operation_id="create_case",
+    summary="Create a new case",
+    description="Create a new judicial case in the specified domain. Requires clerk or judge role.",
+    responses={
+        403: {"model": ErrorResponse, "description": "Insufficient permissions"},
+        422: {"model": ValidationErrorResponse, "description": "Validation error"},
+    },
 )
 async def create_case(
     body: CaseCreateRequest,
@@ -70,7 +54,14 @@ async def create_case(
     return case
 
 
-@router.get("/", response_model=CaseListResponse)
+@router.get(
+    "/",
+    response_model=CaseListResponse,
+    operation_id="list_cases",
+    summary="List cases with pagination",
+    description="List cases with optional status and domain filters. "
+    "Clerks and judges see only their own cases; admins see all.",
+)
 async def list_cases(
     db: DBSession,
     current_user: CurrentUser,
@@ -103,12 +94,24 @@ async def list_cases(
     return {"items": items, "total": total, "page": page, "per_page": per_page}
 
 
-@router.get("/{case_id}", response_model=None)
+@router.get(
+    "/{case_id}",
+    response_model=CaseDetailResponse,
+    operation_id="get_case",
+    summary="Get full case details",
+    description="Retrieve a case with all related entities: parties, documents, "
+    "evidence, facts, witnesses, legal rules, precedents, arguments, "
+    "deliberations, verdicts, and audit logs.",
+    responses={
+        403: {"model": ErrorResponse, "description": "Not authorized to view this case"},
+        404: {"model": ErrorResponse, "description": "Case not found"},
+    },
+)
 async def get_case(
     case_id: UUID,
     db: DBSession,
     current_user: CurrentUser,
-) -> dict:
+) -> Case:
     result = await db.execute(
         select(Case)
         .where(Case.id == case_id)
@@ -138,107 +141,4 @@ async def get_case(
             detail="Not authorized to view this case",
         )
 
-    return {
-        "id": case.id,
-        "domain": case.domain,
-        "status": case.status,
-        "jurisdiction_valid": case.jurisdiction_valid,
-        "complexity": case.complexity,
-        "route": case.route,
-        "created_by": case.created_by,
-        "parties": [
-            {"id": p.id, "name": p.name, "role": p.role, "contact_info": p.contact_info}
-            for p in case.parties
-        ],
-        "documents": [
-            {
-                "id": d.id,
-                "filename": d.filename,
-                "file_type": d.file_type,
-                "uploaded_at": d.uploaded_at.isoformat() if d.uploaded_at else None,
-            }
-            for d in case.documents
-        ],
-        "evidence": [
-            {
-                "id": e.id,
-                "evidence_type": e.evidence_type,
-                "strength": e.strength,
-                "admissibility_flags": e.admissibility_flags,
-            }
-            for e in case.evidence
-        ],
-        "facts": [
-            {
-                "id": f.id,
-                "description": f.description,
-                "event_date": f.event_date.isoformat() if f.event_date else None,
-                "confidence": f.confidence,
-                "status": f.status,
-            }
-            for f in case.facts
-        ],
-        "witnesses": [
-            {
-                "id": w.id,
-                "name": w.name,
-                "role": w.role,
-                "credibility_score": w.credibility_score,
-            }
-            for w in case.witnesses
-        ],
-        "legal_rules": [
-            {
-                "id": r.id,
-                "statute_name": r.statute_name,
-                "section": r.section,
-                "relevance_score": r.relevance_score,
-            }
-            for r in case.legal_rules
-        ],
-        "precedents": [
-            {
-                "id": p.id,
-                "citation": p.citation,
-                "court": p.court,
-                "outcome": p.outcome,
-                "similarity_score": p.similarity_score,
-            }
-            for p in case.precedents
-        ],
-        "arguments": [
-            {
-                "id": a.id,
-                "side": a.side,
-                "legal_basis": a.legal_basis,
-                "weaknesses": a.weaknesses,
-            }
-            for a in case.arguments
-        ],
-        "deliberations": [
-            {
-                "id": d.id,
-                "preliminary_conclusion": d.preliminary_conclusion,
-                "confidence_score": d.confidence_score,
-            }
-            for d in case.deliberations
-        ],
-        "verdicts": [
-            {
-                "id": v.id,
-                "recommendation_type": v.recommendation_type,
-                "recommended_outcome": v.recommended_outcome,
-                "confidence_score": v.confidence_score,
-            }
-            for v in case.verdicts
-        ],
-        "audit_logs": [
-            {
-                "id": a.id,
-                "agent_name": a.agent_name,
-                "action": a.action,
-                "created_at": a.created_at.isoformat() if a.created_at else None,
-            }
-            for a in case.audit_logs
-        ],
-    }
+    return case
