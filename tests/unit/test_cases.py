@@ -257,20 +257,40 @@ class TestGetCaseResponseShape:
         data = resp.json()
 
         expected_keys = {
-            "id", "domain", "status", "jurisdiction_valid", "complexity",
-            "route", "created_by", "parties", "documents", "evidence",
-            "facts", "witnesses", "legal_rules", "precedents", "arguments",
-            "deliberations", "verdicts", "audit_logs",
+            "id",
+            "domain",
+            "status",
+            "jurisdiction_valid",
+            "complexity",
+            "route",
+            "created_by",
+            "parties",
+            "documents",
+            "evidence",
+            "facts",
+            "witnesses",
+            "legal_rules",
+            "precedents",
+            "arguments",
+            "deliberations",
+            "verdicts",
+            "audit_logs",
         }
-        assert expected_keys.issubset(data.keys()), (
-            f"Missing keys: {expected_keys - data.keys()}"
-        )
+        assert expected_keys.issubset(data.keys()), f"Missing keys: {expected_keys - data.keys()}"
 
         # All nested lists should be present (even if empty)
         for key in [
-            "parties", "documents", "evidence", "facts", "witnesses",
-            "legal_rules", "precedents", "arguments", "deliberations",
-            "verdicts", "audit_logs",
+            "parties",
+            "documents",
+            "evidence",
+            "facts",
+            "witnesses",
+            "legal_rules",
+            "precedents",
+            "arguments",
+            "deliberations",
+            "verdicts",
+            "audit_logs",
         ]:
             assert isinstance(data[key], list), f"{key} should be a list"
 
