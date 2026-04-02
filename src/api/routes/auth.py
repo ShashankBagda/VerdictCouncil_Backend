@@ -1,50 +1,20 @@
 from datetime import UTC, datetime, timedelta
-from uuid import UUID
 
 import jwt
 from fastapi import APIRouter, HTTPException, Response, status
 from passlib.context import CryptContext
-from pydantic import BaseModel, EmailStr
 from sqlalchemy import select
 
 from src.api.deps import CurrentUser, DBSession
-from src.models.user import User, UserRole
+from src.api.schemas.auth import LoginRequest, RegisterRequest, UserResponse
+from src.api.schemas.common import ErrorResponse, MessageResponse, ValidationErrorResponse
+from src.models.user import User
 from src.shared.config import settings
 
 router = APIRouter()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 TOKEN_EXPIRY_HOURS = 24
-
-
-# --------------------------------------------------------------------------- #
-# Schemas
-# --------------------------------------------------------------------------- #
-
-
-class RegisterRequest(BaseModel):
-    name: str
-    email: EmailStr
-    password: str
-    role: UserRole
-
-
-class UserResponse(BaseModel):
-    id: UUID
-    name: str
-    email: str
-    role: UserRole
-
-    model_config = {"from_attributes": True}
-
-
-class LoginRequest(BaseModel):
-    email: EmailStr
-    password: str
-
-
-class MessageResponse(BaseModel):
-    message: str
 
 
 # --------------------------------------------------------------------------- #
@@ -66,7 +36,20 @@ def _create_token(user: User) -> str:
 # --------------------------------------------------------------------------- #
 
 
-@router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/register",
+    response_model=UserResponse,
+    status_code=status.HTTP_201_CREATED,
+    operation_id="register_user",
+    summary="Register a new user",
+    description="Create a new user account with the specified role. "
+    "Returns the created user profile (without password).",
+    responses={
+        409: {"model": ErrorResponse, "description": "Email already registered"},
+        422: {"model": ValidationErrorResponse, "description": "Validation error"},
+    },
+    openapi_extra={"security": []},
+)
 async def register(body: RegisterRequest, db: DBSession) -> User:
     result = await db.execute(select(User).where(User.email == body.email))
     if result.scalar_one_or_none():
@@ -94,7 +77,19 @@ async def register(body: RegisterRequest, db: DBSession) -> User:
     return user
 
 
-@router.post("/login", response_model=MessageResponse)
+@router.post(
+    "/login",
+    response_model=MessageResponse,
+    operation_id="login",
+    summary="Authenticate and receive session cookie",
+    description="Verify credentials and set an httpOnly `vc_token` JWT cookie. "
+    "The cookie is valid for 24 hours.",
+    responses={
+        401: {"model": ErrorResponse, "description": "Invalid email or password"},
+        422: {"model": ValidationErrorResponse, "description": "Validation error"},
+    },
+    openapi_extra={"security": []},
+)
 async def login(body: LoginRequest, response: Response, db: DBSession) -> dict:
     result = await db.execute(select(User).where(User.email == body.email))
     user = result.scalar_one_or_none()
@@ -117,12 +112,28 @@ async def login(body: LoginRequest, response: Response, db: DBSession) -> dict:
     return {"message": "logged in"}
 
 
-@router.post("/logout", response_model=MessageResponse)
+@router.post(
+    "/logout",
+    response_model=MessageResponse,
+    operation_id="logout",
+    summary="Clear session cookie",
+    description="Delete the `vc_token` cookie to end the session.",
+    openapi_extra={"security": []},
+)
 async def logout(response: Response) -> dict:
     response.delete_cookie("vc_token")
     return {"message": "logged out"}
 
 
-@router.get("/me", response_model=UserResponse)
+@router.get(
+    "/me",
+    response_model=UserResponse,
+    operation_id="get_current_user",
+    summary="Get authenticated user profile",
+    description="Returns the profile of the currently authenticated user.",
+    responses={
+        401: {"model": ErrorResponse, "description": "Not authenticated"},
+    },
+)
 async def me(current_user: CurrentUser) -> User:
     return current_user

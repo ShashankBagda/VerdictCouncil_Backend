@@ -236,3 +236,90 @@ class TestCaseOwnership:
         # The endpoint should return 403 or 404 for cases not owned by the clerk.
         # Accept either — 404 hides existence, 403 is explicit.
         assert resp.status_code in (403, 404)
+
+
+class TestGetCaseResponseShape:
+    async def test_response_contains_all_nested_entities(self):
+        """GET /cases/{id} response includes all 12 nested entity lists."""
+        user = _make_user()
+        mock_db = _build_mock_session()
+
+        case = _make_case(user.id)
+        mock_db.execute.return_value = _mock_scalar_result(case)
+
+        app = _app_with_overrides(mock_db, user)
+        transport = ASGITransport(app=app)
+
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get(f"/api/v1/cases/{case.id}")
+
+        assert resp.status_code == 200
+        data = resp.json()
+
+        expected_keys = {
+            "id",
+            "domain",
+            "status",
+            "jurisdiction_valid",
+            "complexity",
+            "route",
+            "created_by",
+            "parties",
+            "documents",
+            "evidence",
+            "facts",
+            "witnesses",
+            "legal_rules",
+            "precedents",
+            "arguments",
+            "deliberations",
+            "verdicts",
+            "audit_logs",
+        }
+        assert expected_keys.issubset(data.keys()), f"Missing keys: {expected_keys - data.keys()}"
+
+        # All nested lists should be present (even if empty)
+        for key in [
+            "parties",
+            "documents",
+            "evidence",
+            "facts",
+            "witnesses",
+            "legal_rules",
+            "precedents",
+            "arguments",
+            "deliberations",
+            "verdicts",
+            "audit_logs",
+        ]:
+            assert isinstance(data[key], list), f"{key} should be a list"
+
+    async def test_datetime_serialization_format(self):
+        """Datetime fields serialize to ISO 8601 format."""
+        user = _make_user()
+        mock_db = _build_mock_session()
+
+        now = datetime.now(UTC)
+        doc = MagicMock()
+        doc.id = uuid.uuid4()
+        doc.filename = "test.pdf"
+        doc.file_type = "application/pdf"
+        doc.uploaded_at = now
+
+        case = _make_case(user.id, documents=[doc])
+        mock_db.execute.return_value = _mock_scalar_result(case)
+
+        app = _app_with_overrides(mock_db, user)
+        transport = ASGITransport(app=app)
+
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get(f"/api/v1/cases/{case.id}")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["documents"]) == 1
+        uploaded_at = data["documents"][0]["uploaded_at"]
+        assert uploaded_at is not None
+        # Verify it parses as ISO 8601
+        parsed = datetime.fromisoformat(uploaded_at)
+        assert parsed.year == now.year

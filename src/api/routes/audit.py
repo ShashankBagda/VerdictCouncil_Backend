@@ -2,10 +2,11 @@ from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Query
-from pydantic import BaseModel
 from sqlalchemy import select
 
 from src.api.deps import DBSession, require_role
+from src.api.schemas.audit import AuditLogResponse
+from src.api.schemas.common import ErrorResponse
 from src.models.audit import AuditLog
 from src.models.user import User, UserRole
 
@@ -13,30 +14,21 @@ router = APIRouter()
 
 
 # --------------------------------------------------------------------------- #
-# Schemas
-# --------------------------------------------------------------------------- #
-
-
-class AuditLogResponse(BaseModel):
-    id: UUID
-    case_id: UUID
-    agent_name: str
-    action: str
-    input_payload: dict | None = None
-    output_payload: dict | None = None
-    model: str | None = None
-    token_usage: dict | None = None
-    created_at: datetime | None = None
-
-    model_config = {"from_attributes": True}
-
-
-# --------------------------------------------------------------------------- #
 # Endpoints
 # --------------------------------------------------------------------------- #
 
 
-@router.get("/{case_id}/audit", response_model=list[AuditLogResponse])
+@router.get(
+    "/{case_id}/audit",
+    response_model=list[AuditLogResponse],
+    operation_id="list_audit_logs",
+    summary="List audit logs for a case",
+    description="Retrieve the audit trail for a case. Filterable by agent name "
+    "and time range. Requires judge or admin role.",
+    responses={
+        403: {"model": ErrorResponse, "description": "Insufficient permissions"},
+    },
+)
 async def list_audit_logs(
     case_id: UUID,
     db: DBSession,

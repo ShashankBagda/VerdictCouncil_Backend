@@ -21,6 +21,18 @@
 - **Context:** Circuit breaker + vector store fallback reduce this risk but do not eliminate it. Both sources can legitimately return empty for novel fact patterns.
 - **Depends on:** feat/pair-resilience complete
 
+### Cookie Secure Flag
+- **What:** Make JWT cookie `secure` flag conditional on environment
+- **Why:** `auth.py` sets `secure=True` unconditionally. Browsers won't send the cookie back over `http://localhost:8000`, breaking local dev auth.
+- **Context:** Pre-existing bug discovered during OpenAPI spec review. Add a `settings.cookie_secure` flag that defaults to `True` in production and `False` in development.
+- **Depends on:** Nothing
+
+### Case Description Field
+- **What:** Evaluate whether `Case` model needs a `description` column
+- **Why:** `CaseCreateRequest` had a `description` field that was accepted but never stored. Removed during OpenAPI spec cleanup.
+- **Context:** Field existed since initial case endpoint implementation. Either it was intended and forgotten, or it was dead code from the start. If a case description is useful, add a column + migration.
+- **Depends on:** Nothing
+
 ## Future Scaling
 
 ### Redis Key Sharding for Layer2Aggregator

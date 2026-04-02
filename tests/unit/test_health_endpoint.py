@@ -71,3 +71,35 @@ async def test_get_pair_health_returns_proper_json_structure():
     assert isinstance(data["failure_threshold"], int)
     assert isinstance(data["recovery_timeout_seconds"], int)
     assert isinstance(data["opened_at"], float)
+
+
+@pytest.mark.asyncio
+async def test_pair_health_redis_error_shape():
+    """Redis-error response (fewer fields, with error key) is accepted by response model."""
+    mock_status = {
+        "service": "pair_search",
+        "state": "unknown",
+        "failure_count": -1,
+        "error": "Redis unavailable",
+    }
+
+    mock_breaker = AsyncMock()
+    mock_breaker.get_status = AsyncMock(return_value=mock_status)
+
+    with patch(
+        "src.api.routes.health.get_pair_search_breaker",
+        return_value=mock_breaker,
+    ):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get("/api/v1/health/pair")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["service"] == "pair_search"
+    assert data["state"] == "unknown"
+    assert data["failure_count"] == -1
+    assert data["error"] == "Redis unavailable"
+    # Optional fields should be absent or null
+    assert data.get("failure_threshold") is None
+    assert data.get("recovery_timeout_seconds") is None

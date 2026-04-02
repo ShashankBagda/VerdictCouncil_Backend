@@ -4,18 +4,24 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
-from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, status
-from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from src.api.deps import DBSession, require_role
+from src.api.schemas.common import ErrorResponse, ValidationErrorResponse
+from src.api.schemas.what_if import (
+    StabilityRequest,
+    StabilityResponse,
+    StabilityResultResponse,
+    WhatIfRequest,
+    WhatIfResponse,
+    WhatIfResultResponse,
+)
 from src.models.case import Case, CaseStatus
 from src.models.user import User, UserRole
 from src.models.what_if import (
-    ModificationType,
     ScenarioStatus,
     StabilityClassification,
     StabilityScore,
@@ -25,68 +31,6 @@ from src.models.what_if import (
 )
 
 router = APIRouter()
-
-
-# --------------------------------------------------------------------------- #
-# Schemas
-# --------------------------------------------------------------------------- #
-
-
-class WhatIfRequest(BaseModel):
-    modification_type: ModificationType
-    modification_payload: dict[str, Any]
-    description: str | None = None
-
-
-class WhatIfResponse(BaseModel):
-    scenario_id: uuid.UUID
-    status: ScenarioStatus
-    message: str
-
-
-class WhatIfResultResponse(BaseModel):
-    id: uuid.UUID
-    case_id: uuid.UUID
-    original_run_id: str
-    scenario_run_id: str
-    modification_type: ModificationType
-    modification_description: str | None
-    modification_payload: dict[str, Any] | None
-    status: ScenarioStatus
-    created_at: datetime
-    completed_at: datetime | None
-    original_verdict: dict[str, Any] | None = None
-    modified_verdict: dict[str, Any] | None = None
-    diff_view: dict[str, Any] | None = None
-    verdict_changed: bool | None = None
-
-    model_config = {"from_attributes": True}
-
-
-class StabilityRequest(BaseModel):
-    perturbation_count: int = 5
-
-
-class StabilityResponse(BaseModel):
-    stability_id: uuid.UUID
-    status: StabilityStatus
-    message: str
-
-
-class StabilityResultResponse(BaseModel):
-    id: uuid.UUID
-    case_id: uuid.UUID
-    run_id: str
-    score: int
-    classification: StabilityClassification
-    perturbation_count: int
-    perturbations_held: int
-    perturbation_details: dict[str, Any] | None
-    status: StabilityStatus
-    created_at: datetime
-    completed_at: datetime | None
-
-    model_config = {"from_attributes": True}
 
 
 # --------------------------------------------------------------------------- #
@@ -118,9 +62,6 @@ async def _run_whatif_scenario(scenario_id: uuid.UUID) -> None:
             scenario.status = ScenarioStatus.running
             await db.commit()
 
-            # Build a CaseState from the case data
-            # In a full implementation this would load from a state store;
-            # here we construct a minimal state for the pipeline runner.
             case_result = await db.execute(select(Case).where(Case.id == scenario.case_id))
             case = case_result.scalar_one_or_none()
             if not case:
@@ -214,6 +155,17 @@ async def _run_stability_computation(stability_id: uuid.UUID) -> None:
     "/{case_id}/what-if",
     response_model=WhatIfResponse,
     status_code=status.HTTP_202_ACCEPTED,
+    operation_id="submit_whatif_scenario",
+    summary="Submit a what-if scenario",
+    description="Submit a hypothetical modification for a case to test verdict stability. "
+    "The scenario runs asynchronously in the background. "
+    "Case must be in `ready_for_review` or `decided` status.",
+    responses={
+        400: {"model": ErrorResponse, "description": "Case not in valid status"},
+        403: {"model": ErrorResponse, "description": "Insufficient permissions (judge only)"},
+        404: {"model": ErrorResponse, "description": "Case not found"},
+        422: {"model": ValidationErrorResponse, "description": "Validation error"},
+    },
 )
 async def submit_whatif_scenario(
     case_id: uuid.UUID,
@@ -222,12 +174,6 @@ async def submit_whatif_scenario(
     db: DBSession,
     current_user: User = require_role(UserRole.judge),
 ) -> WhatIfResponse:
-    """Submit a what-if modification for a case.
-
-    Requires judge role. Case must be in ready_for_review or decided status.
-    The scenario runs asynchronously in the background.
-    """
-    # Verify case exists and is in a valid status
     result = await db.execute(select(Case).where(Case.id == case_id))
     case = result.scalar_one_or_none()
     if not case:
@@ -245,10 +191,9 @@ async def submit_whatif_scenario(
             ),
         )
 
-    # Create scenario record
     scenario = WhatIfScenario(
         case_id=case_id,
-        original_run_id=str(uuid.uuid4()),  # Would come from state store in production
+        original_run_id=str(uuid.uuid4()),
         scenario_run_id=str(uuid.uuid4()),
         modification_type=body.modification_type,
         modification_description=body.description,
@@ -269,14 +214,23 @@ async def submit_whatif_scenario(
     )
 
 
-@router.get("/{case_id}/what-if/{scenario_id}", response_model=WhatIfResultResponse)
+@router.get(
+    "/{case_id}/what-if/{scenario_id}",
+    response_model=WhatIfResultResponse,
+    operation_id="get_whatif_result",
+    summary="Get what-if scenario result",
+    description="Retrieve the result of a what-if scenario including the verdict diff view.",
+    responses={
+        403: {"model": ErrorResponse, "description": "Insufficient permissions (judge only)"},
+        404: {"model": ErrorResponse, "description": "Scenario not found"},
+    },
+)
 async def get_whatif_result(
     case_id: uuid.UUID,
     scenario_id: uuid.UUID,
     db: DBSession,
     current_user: User = require_role(UserRole.judge),
 ) -> WhatIfResultResponse:
-    """Get a what-if scenario result with diff view."""
     result = await db.execute(
         select(WhatIfScenario)
         .options(selectinload(WhatIfScenario.verdict))
@@ -318,6 +272,15 @@ async def get_whatif_result(
     "/{case_id}/stability",
     response_model=StabilityResponse,
     status_code=status.HTTP_202_ACCEPTED,
+    operation_id="trigger_stability_score",
+    summary="Trigger stability score computation",
+    description="Start computing a stability score for a case by running multiple "
+    "perturbations and measuring how often the verdict holds.",
+    responses={
+        403: {"model": ErrorResponse, "description": "Insufficient permissions (judge only)"},
+        404: {"model": ErrorResponse, "description": "Case not found"},
+        422: {"model": ValidationErrorResponse, "description": "Validation error"},
+    },
 )
 async def trigger_stability_score(
     case_id: uuid.UUID,
@@ -326,7 +289,6 @@ async def trigger_stability_score(
     db: DBSession,
     current_user: User = require_role(UserRole.judge),
 ) -> StabilityResponse:
-    """Trigger stability score computation for a case."""
     result = await db.execute(select(Case).where(Case.id == case_id))
     case = result.scalar_one_or_none()
     if not case:
@@ -357,13 +319,22 @@ async def trigger_stability_score(
     )
 
 
-@router.get("/{case_id}/stability", response_model=StabilityResultResponse)
+@router.get(
+    "/{case_id}/stability",
+    response_model=StabilityResultResponse,
+    operation_id="get_stability_score",
+    summary="Get latest stability score",
+    description="Retrieve the most recent stability score for a case.",
+    responses={
+        403: {"model": ErrorResponse, "description": "Insufficient permissions (judge only)"},
+        404: {"model": ErrorResponse, "description": "No stability score found"},
+    },
+)
 async def get_stability_score(
     case_id: uuid.UUID,
     db: DBSession,
     current_user: User = require_role(UserRole.judge),
 ) -> StabilityResultResponse:
-    """Get the latest stability score for a case."""
     result = await db.execute(
         select(StabilityScore)
         .where(StabilityScore.case_id == case_id)

@@ -1,11 +1,11 @@
-import enum
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel
 from sqlalchemy import select
 
 from src.api.deps import DBSession, require_role
+from src.api.schemas.common import ErrorResponse, ValidationErrorResponse
+from src.api.schemas.decisions import DecisionAction, DecisionRequest, DecisionResponse
 from src.models.audit import AuditLog
 from src.models.case import Case, CaseStatus
 from src.models.user import User, UserRole
@@ -14,35 +14,25 @@ router = APIRouter()
 
 
 # --------------------------------------------------------------------------- #
-# Schemas
-# --------------------------------------------------------------------------- #
-
-
-class DecisionAction(str, enum.Enum):
-    accept = "accept"
-    modify = "modify"
-    reject = "reject"
-
-
-class DecisionRequest(BaseModel):
-    action: DecisionAction
-    notes: str | None = None
-    final_order: str | None = None
-
-
-class DecisionResponse(BaseModel):
-    case_id: UUID
-    action: DecisionAction
-    status: CaseStatus
-    message: str
-
-
-# --------------------------------------------------------------------------- #
 # Endpoints
 # --------------------------------------------------------------------------- #
 
 
-@router.post("/{case_id}/decision", response_model=DecisionResponse)
+@router.post(
+    "/{case_id}/decision",
+    response_model=DecisionResponse,
+    operation_id="record_decision",
+    summary="Record a judge decision",
+    description="Record a judge's decision on a case verdict (accept, modify, or reject). "
+    "Case must be in `ready_for_review` status. Transitions the case to "
+    "`decided` (accept/modify) or `rejected`.",
+    responses={
+        400: {"model": ErrorResponse, "description": "Case not in ready_for_review status"},
+        403: {"model": ErrorResponse, "description": "Insufficient permissions (judge only)"},
+        404: {"model": ErrorResponse, "description": "Case not found"},
+        422: {"model": ValidationErrorResponse, "description": "Validation error"},
+    },
+)
 async def record_decision(
     case_id: UUID,
     body: DecisionRequest,

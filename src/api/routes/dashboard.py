@@ -1,8 +1,8 @@
 from fastapi import APIRouter
-from pydantic import BaseModel
 from sqlalchemy import func, select
 
 from src.api.deps import CurrentUser, DBSession
+from src.api.schemas.dashboard import DashboardStats
 from src.models.case import Case
 from src.shared.circuit_breaker import get_pair_search_breaker
 
@@ -10,24 +10,18 @@ router = APIRouter()
 
 
 # --------------------------------------------------------------------------- #
-# Schemas
-# --------------------------------------------------------------------------- #
-
-
-class DashboardStats(BaseModel):
-    total_cases: int
-    by_status: dict[str, int]
-    by_domain: dict[str, int]
-    recent_cases: list[dict]
-    pair_api_status: dict | None = None
-
-
-# --------------------------------------------------------------------------- #
 # Endpoints
 # --------------------------------------------------------------------------- #
 
 
-@router.get("/stats", response_model=DashboardStats)
+@router.get(
+    "/stats",
+    response_model=DashboardStats,
+    operation_id="get_dashboard_stats",
+    summary="Get dashboard statistics",
+    description="Aggregate case statistics: total count, breakdown by status and domain, "
+    "recent cases, and PAIR API circuit breaker health.",
+)
 async def get_stats(db: DBSession, current_user: CurrentUser) -> dict:
     # Total
     total = (await db.execute(select(func.count(Case.id)))).scalar_one()
