@@ -118,6 +118,7 @@ class Case(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "cases"
 
     domain: Mapped[CaseDomain] = mapped_column(Enum(CaseDomain), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
     status: Mapped[CaseStatus] = mapped_column(
         Enum(CaseStatus), nullable=False, server_default=CaseStatus.pending.value
     )

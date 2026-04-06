@@ -18,6 +18,7 @@ from src.models.case import (
     CaseStatus,
 )
 from src.models.user import User, UserRole
+from src.shared.sanitization import sanitize_user_input
 
 router = APIRouter()
 
@@ -44,8 +45,10 @@ async def create_case(
     db: DBSession,
     current_user: User = require_role(UserRole.clerk, UserRole.judge),
 ) -> Case:
+    description = sanitize_user_input(body.description) if body.description else None
     case = Case(
         domain=body.domain,
+        description=description,
         created_by=current_user.id,
     )
     db.add(case)
