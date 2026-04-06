@@ -48,12 +48,7 @@
 
 ### Group B — Judge-Facing Endpoints
 
-- **US-009: Flag Disputed Facts** — Endpoint for judges to mark facts as disputed, updating fact status in the database
-- **US-010: Evidence Gaps** — Endpoint surfacing what evidence is missing or insufficient for a case
-- **US-016: Live Precedent Search (ad-hoc)** — User-facing endpoint to trigger ad-hoc PAIR API searches outside the pipeline
-- **US-017: Knowledge Base Status** — Endpoint showing vector store health, coverage, and last-updated timestamps
-- **US-023: Fairness & Bias Audit Display** — Dedicated endpoint to surface governance agent fairness check results
-- **US-024: Escalated Cases Handling** — Escalation workflow with endpoint for judges to review and act on escalated cases
+- **Status:** Complete in v0.1.0.0 (feat/group-b-judge-endpoints)
 
 ### Group C — Real-Time & Search
 
@@ -66,3 +61,20 @@
 - **US-006: Evidence Analysis Dashboard Endpoint** — Aggregated endpoint for evidence strength, admissibility, and contradiction summaries
 - **US-020: Hearing Pack Generation** — Compile and export a hearing preparation pack (case summary, evidence, arguments, verdict)
 - **US-027: Case Report PDF Export** — Generate and download a PDF report of the full case analysis
+
+## Technical Debt (from adversarial review, v0.1.0.0)
+
+### Session Token Revocation
+- **What:** `get_current_user` (deps.py) decodes the JWT but never validates against the `sessions` table. A revoked session remains valid until JWT expiry.
+- **Why:** A fired/suspended judge retains API access for the JWT lifetime with no kill switch.
+- **Priority:** P1 — security gap. Fix: check `Session.jwt_token_hash` and `expires_at` on every request.
+
+### Verdict Ordering by UUID
+- **What:** `get_fairness_audit` orders `Verdict` by `id.desc()` (UUID v4 — random, not temporal). The Verdict model has no `created_at` column.
+- **Why:** On cases that re-run (via `return_to_pipeline`), the "most recent" verdict returned is random.
+- **Priority:** P2 — add `created_at` to Verdict + migration, then change `order_by` to `created_at.desc()`.
+
+### Redis Connection Leak in search_precedents.py
+- **What:** `_get_redis_client()` creates a new `redis.Redis` object on every call, never closes them.
+- **Why:** Under load this exhausts the Redis connection pool.
+- **Priority:** P2 — convert to a module-level singleton with proper lifecycle management.
