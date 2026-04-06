@@ -358,6 +358,7 @@ class PipelineRunner:
     def __init__(self, client: AsyncOpenAI | None = None) -> None:
         self._client = client or AsyncOpenAI(api_key=settings.openai_api_key)
         self._config_cache: dict[str, dict[str, Any]] = {}
+        self._pending_precedent_meta: dict[str, Any] | None = None
 
     @staticmethod
     def _parse_sam_yaml(raw: dict[str, Any]) -> dict[str, Any]:
@@ -473,9 +474,18 @@ class PipelineRunner:
 
                 result = await generate_questions(**arguments)
             elif tool_name == "search_precedents":
-                from src.tools import search_precedents
+                from src.tools.search_precedents import search_precedents_with_meta
 
-                result = await search_precedents(**arguments)
+                search_result = await search_precedents_with_meta(**arguments)
+                result = search_result.precedents
+                # Merge metadata across multiple calls: source_failed if ANY call failed
+                if self._pending_precedent_meta is None:
+                    self._pending_precedent_meta = search_result.metadata
+                elif search_result.metadata.get("source_failed"):
+                    self._pending_precedent_meta["source_failed"] = True
+                    self._pending_precedent_meta["pair_status"] = search_result.metadata.get(
+                        "pair_status", self._pending_precedent_meta.get("pair_status")
+                    )
             elif tool_name == "confidence_calc":
                 from src.tools import confidence_calc
 
@@ -593,6 +603,11 @@ class PipelineRunner:
             for key in allowed:
                 if key in agent_output:
                     merged_dict[key] = agent_output[key]
+
+        # Inject precedent source metadata from tool execution (overrides any LLM output)
+        if agent_name == "legal-knowledge" and self._pending_precedent_meta is not None:
+            merged_dict["precedent_source_metadata"] = self._pending_precedent_meta
+        self._pending_precedent_meta = None
 
         updated_state = CaseState(**merged_dict)
 

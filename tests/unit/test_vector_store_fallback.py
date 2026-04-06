@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.tools.vector_store_fallback import vector_store_search
+from src.tools.vector_store_fallback import VectorStoreError, vector_store_search
 
 
 def _mock_file_search_result(filename="case_001.pdf", score=0.85, text="The court held..."):
@@ -114,23 +114,22 @@ async def test_empty_results():
 
 
 # ------------------------------------------------------------------ #
-# Unconfigured vector store ID returns []
+# Unconfigured vector store ID raises VectorStoreError
 # ------------------------------------------------------------------ #
 @pytest.mark.asyncio
-async def test_unconfigured_vector_store_id_returns_empty():
+async def test_unconfigured_vector_store_id_raises():
     with patch("src.tools.vector_store_fallback.settings") as mock_settings:
         mock_settings.openai_vector_store_id = ""
 
-        output = await vector_store_search("any query")
-
-    assert output == []
+        with pytest.raises(VectorStoreError, match="not configured"):
+            await vector_store_search("any query")
 
 
 # ------------------------------------------------------------------ #
-# API error returns []
+# API error raises VectorStoreError
 # ------------------------------------------------------------------ #
 @pytest.mark.asyncio
-async def test_api_error_returns_empty():
+async def test_api_error_raises_vector_store_error():
     mock_client = AsyncMock()
     mock_client.responses.create = AsyncMock(side_effect=Exception("API error"))
 
@@ -142,6 +141,5 @@ async def test_api_error_returns_empty():
         mock_settings.openai_api_key = "test-key"
         mock_settings.openai_model_lightweight = "gpt-4o-mini"
 
-        output = await vector_store_search("error query")
-
-    assert output == []
+        with pytest.raises(VectorStoreError, match="API error"):
+            await vector_store_search("error query")

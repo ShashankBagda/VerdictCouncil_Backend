@@ -14,6 +14,10 @@ from src.shared.config import settings
 logger = logging.getLogger(__name__)
 
 
+class VectorStoreError(Exception):
+    """Raised when vector store search encounters an unrecoverable error."""
+
+
 async def vector_store_search(
     query: str,
     domain: str = "small_claims",
@@ -29,7 +33,7 @@ async def vector_store_search(
     """
     if not settings.openai_vector_store_id:
         logger.warning("OPENAI_VECTOR_STORE_ID not configured; cannot use vector store fallback")
-        return []
+        raise VectorStoreError("Vector store not configured")
 
     try:
         client = AsyncOpenAI(api_key=settings.openai_api_key)
@@ -71,4 +75,4 @@ async def vector_store_search(
 
     except Exception as exc:
         logger.warning("Vector store fallback failed: %s", exc)
-        return []
+        raise VectorStoreError(str(exc)) from exc

@@ -16,6 +16,12 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 TOKEN_EXPIRY_HOURS = 24
 
+_COOKIE_KWARGS: dict[str, object] = {
+    "key": "vc_token",
+    "httponly": True,
+    "samesite": "lax",
+}
+
 
 # --------------------------------------------------------------------------- #
 # Helpers
@@ -102,11 +108,9 @@ async def login(body: LoginRequest, response: Response, db: DBSession) -> dict:
 
     token = _create_token(user)
     response.set_cookie(
-        key="vc_token",
+        **_COOKIE_KWARGS,
         value=token,
-        httponly=True,
-        secure=True,
-        samesite="lax",
+        secure=settings.cookie_secure,
         max_age=TOKEN_EXPIRY_HOURS * 3600,
     )
     return {"message": "logged in"}
@@ -121,7 +125,7 @@ async def login(body: LoginRequest, response: Response, db: DBSession) -> dict:
     openapi_extra={"security": []},
 )
 async def logout(response: Response) -> dict:
-    response.delete_cookie("vc_token")
+    response.delete_cookie(**_COOKIE_KWARGS, secure=settings.cookie_secure)
     return {"message": "logged out"}
 
 
