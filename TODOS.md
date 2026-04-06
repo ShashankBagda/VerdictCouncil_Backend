@@ -20,18 +20,21 @@
 - **Why:** Legal-knowledge agent currently treats zero results as "no relevant precedents" rather than "all sources failed." This distinction matters for governance and fairness checks.
 - **Context:** Circuit breaker + vector store fallback reduce this risk but do not eliminate it. Both sources can legitimately return empty for novel fact patterns.
 - **Depends on:** feat/pair-resilience complete
+- **Status:** Addressed in feat/pre-production-fixes — `SearchResult` dataclass with metadata, `VectorStoreError` for failure distinction, `precedent_source_metadata` populated by runner, governance prompt updated. Note: only covers PipelineRunner path; SAM mesh path deferred.
 
 ### Cookie Secure Flag
 - **What:** Make JWT cookie `secure` flag conditional on environment
 - **Why:** `auth.py` sets `secure=True` unconditionally. Browsers won't send the cookie back over `http://localhost:8000`, breaking local dev auth.
 - **Context:** Pre-existing bug discovered during OpenAPI spec review. Add a `settings.cookie_secure` flag that defaults to `True` in production and `False` in development.
 - **Depends on:** Nothing
+- **Status:** Addressed in feat/pre-production-fixes — `cookie_secure` setting with startup warning, centralized cookie kwargs
 
 ### Case Description Field
 - **What:** Evaluate whether `Case` model needs a `description` column
 - **Why:** `CaseCreateRequest` had a `description` field that was accepted but never stored. Removed during OpenAPI spec cleanup.
 - **Context:** Field existed since initial case endpoint implementation. Either it was intended and forgotten, or it was dead code from the start. If a case description is useful, add a column + migration.
 - **Depends on:** Nothing
+- **Status:** Addressed in feat/pre-production-fixes — `description` column added with migration 0002, sanitized via `sanitize_user_input()` on create
 
 ## Future Scaling
 
@@ -40,3 +43,26 @@
 - **Why:** Current design uses per-case Redis keys with Lua scripts. At 500+ concurrent cases, Redis single-thread serialization could bottleneck.
 - **Context:** At projected 50-200 cases/month, this is a non-issue. Only matters at high concurrent volume.
 - **Depends on:** Phase 3 (Layer2Aggregator) complete + production usage data
+
+## Outstanding User Stories
+
+### Group B — Judge-Facing Endpoints
+
+- **US-009: Flag Disputed Facts** — Endpoint for judges to mark facts as disputed, updating fact status in the database
+- **US-010: Evidence Gaps** — Endpoint surfacing what evidence is missing or insufficient for a case
+- **US-016: Live Precedent Search (ad-hoc)** — User-facing endpoint to trigger ad-hoc PAIR API searches outside the pipeline
+- **US-017: Knowledge Base Status** — Endpoint showing vector store health, coverage, and last-updated timestamps
+- **US-023: Fairness & Bias Audit Display** — Dedicated endpoint to surface governance agent fairness check results
+- **US-024: Escalated Cases Handling** — Escalation workflow with endpoint for judges to review and act on escalated cases
+
+### Group C — Real-Time & Search
+
+- **US-002: SSE/WebSocket Pipeline Status** — Real-time push updates for pipeline progress across 9 agents (currently no SSE)
+- **US-028: Advanced Case Search & Filter** — Full-text search and advanced filtering on cases (domain, status, date range, description)
+
+### Group D — Export & Reporting
+
+- **US-003: Jurisdiction Validation Result Endpoint** — Dedicated endpoint to surface Agent 1 jurisdiction validation result
+- **US-006: Evidence Analysis Dashboard Endpoint** — Aggregated endpoint for evidence strength, admissibility, and contradiction summaries
+- **US-020: Hearing Pack Generation** — Compile and export a hearing preparation pack (case summary, evidence, arguments, verdict)
+- **US-027: Case Report PDF Export** — Generate and download a PDF report of the full case analysis
