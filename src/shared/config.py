@@ -11,14 +11,21 @@ class Settings(BaseSettings):
     database_url: str = "postgresql://vc_dev:vc_dev_password@localhost:5432/verdictcouncil"
     redis_url: str = "redis://localhost:6379/0"
     jwt_secret: str = "change-me-in-production"  # validated at startup
+    cookie_secure: bool = True
 
     def model_post_init(self, __context: object) -> None:
-        if self.jwt_secret == "change-me-in-production" and self.log_level != "DEBUG":
-            import warnings
+        import warnings
 
+        if self.jwt_secret == "change-me-in-production" and self.log_level != "DEBUG":
             warnings.warn(
                 "JWT_SECRET is using the default value. "
                 "Set a secure secret via the JWT_SECRET environment variable.",
+                stacklevel=2,
+            )
+        if not self.cookie_secure and self.log_level != "DEBUG":
+            warnings.warn(
+                "COOKIE_SECURE is False. Session cookies will be sent over "
+                "insecure HTTP. This must ONLY be used in local development.",
                 stacklevel=2,
             )
 
