@@ -9,6 +9,8 @@ import asyncio
 import hashlib
 import json
 import logging
+from dataclasses import dataclass, field
+from typing import Any
 
 import httpx
 import redis.asyncio as redis
@@ -16,13 +18,27 @@ import redis.asyncio as redis
 from src.shared.circuit_breaker import CircuitState, get_pair_search_breaker
 from src.shared.config import settings
 from src.shared.retry import retry_with_backoff
-from src.tools.vector_store_fallback import vector_store_search
+from src.tools.vector_store_fallback import VectorStoreError, vector_store_search
 
 logger = logging.getLogger(__name__)
 
 
 class PrecedentSearchError(Exception):
     """Raised when precedent search encounters an unrecoverable error."""
+
+
+@dataclass
+class SearchResult:
+    """Result of a precedent search with source metadata."""
+
+    precedents: list[dict] = field(default_factory=list)
+    metadata: dict[str, Any] = field(
+        default_factory=lambda: {
+            "source_failed": False,
+            "fallback_used": False,
+            "pair_status": "ok",
+        }
+    )
 
 
 def _cache_key(query: str, domain: str, max_results: int) -> str:
@@ -67,17 +83,7 @@ async def _call_pair_api(
     max_results: int,
     r: redis.Redis,
 ) -> list[dict]:
-    """Query PAIR Search API for Singapore case law.
-
-    PAIR (Platform for AI-assisted Research) is a Singapore government
-    legal research platform. Its search API provides hybrid retrieval
-    (BM25 + semantic embedding) over the full corpus of Singapore
-    judiciary decisions on eLitigation.
-
-    Court coverage: SGHC, SGCA, SGHCF, SGHCR, SGHC(I), SGHC(A), SGCA(I).
-    Does NOT cover Small Claims Tribunals or lower State Courts, but
-    higher court rulings are binding on lower courts.
-    """
+    """Query PAIR Search API for Singapore case law."""
     await _rate_limit(r)
 
     payload = {
@@ -120,32 +126,18 @@ async def _call_pair_api(
     return results
 
 
-async def search_precedents(
+async def _search_precedents_impl(
     query: str,
     domain: str = "small_claims",
     max_results: int = 5,
-) -> list[dict]:
-    """Search PAIR API for precedent cases.
-
-    Searches search.pair.gov.sg for published judiciary decisions from
-    Singapore's higher courts. Results are cached in Redis with a
-    configurable TTL (default 24 hours). Rate-limited to 2 req/sec.
-
-    Args:
-        query: Semantic search query describing the legal issue or
-            fact pattern to find precedents for.
-        domain: Legal domain context. One of "small_claims" or
-            "traffic". Defaults to "small_claims".
-        max_results: Maximum number of precedents to return.
-            Defaults to 5.
-
-    Returns:
-        List of precedent dicts, each with: citation, court, outcome,
-        reasoning_summary, similarity_score, url, source.
-        Returns empty list with a logged warning if PAIR API is
-        unreachable (does not silently fail).
-    """
+) -> SearchResult:
+    """Internal implementation that returns SearchResult with metadata."""
     cache_k = _cache_key(query, domain, max_results)
+    metadata: dict[str, Any] = {
+        "source_failed": False,
+        "fallback_used": False,
+        "pair_status": "ok",
+    }
 
     # Try cache first
     try:
@@ -153,7 +145,14 @@ async def search_precedents(
         cached = await r.get(cache_k)
         if cached:
             logger.info("Precedent cache hit for query: %s", query[:80])
-            return json.loads(cached)
+            cached_payload = json.loads(cached)
+            if isinstance(cached_payload, dict) and "precedents" in cached_payload:
+                return SearchResult(
+                    precedents=cached_payload["precedents"],
+                    metadata=cached_payload.get("metadata", metadata),
+                )
+            # Legacy cache format (plain list) — treat as clean results
+            return SearchResult(precedents=cached_payload, metadata=metadata)
     except (redis.RedisError, json.JSONDecodeError):
         logger.warning("Redis cache read failed; proceeding with live search")
         r = None
@@ -168,8 +167,16 @@ async def search_precedents(
     if breaker_state == CircuitState.OPEN:
         # Circuit is open — skip PAIR, go straight to fallback
         logger.info("Circuit breaker OPEN for pair_search; using vector store fallback")
-        results = await vector_store_search(query, domain, max_results)
+        metadata["pair_status"] = "circuit_open"
+        try:
+            results = await vector_store_search(query, domain, max_results)
+        except VectorStoreError as exc:
+            logger.warning("Vector store fallback also failed: %s", exc)
+            metadata["source_failed"] = True
         used_fallback = True
+        # Circuit open + vector store returned empty = all sources exhausted
+        if not results and not metadata["source_failed"]:
+            metadata["source_failed"] = True
     else:
         # CLOSED or HALF_OPEN — attempt PAIR API
         try:
@@ -179,6 +186,7 @@ async def search_precedents(
             await pair_breaker.record_success()
         except (httpx.HTTPError, httpx.TimeoutException) as exc:
             new_state = await pair_breaker.record_failure()
+            metadata["pair_status"] = f"failed ({new_state.value})"
             logger.warning(
                 "PAIR Search API unreachable for query '%s': %s (circuit: %s). "
                 "Falling back to vector store.",
@@ -186,8 +194,14 @@ async def search_precedents(
                 exc,
                 new_state.value,
             )
-            results = await vector_store_search(query, domain, max_results)
+            try:
+                results = await vector_store_search(query, domain, max_results)
+            except VectorStoreError as vs_exc:
+                logger.warning("Vector store fallback also failed: %s", vs_exc)
+                metadata["source_failed"] = True
             used_fallback = True
+
+    metadata["fallback_used"] = used_fallback
 
     # Tag fallback results
     if used_fallback:
@@ -197,23 +211,54 @@ async def search_precedents(
     # Sort by similarity descending
     results.sort(key=lambda x: x.get("similarity_score", 0), reverse=True)
 
-    # Cache results
-    try:
-        if r is None:
-            r = await _get_redis_client()
-        await r.setex(
-            cache_k,
-            settings.precedent_cache_ttl_seconds,
-            json.dumps(results),
-        )
-    except redis.RedisError:
-        logger.warning("Failed to write precedent results to Redis cache")
+    # Cache results with metadata (skip caching total failures to avoid extending outages)
+    if not metadata["source_failed"]:
+        try:
+            if r is None:
+                r = await _get_redis_client()
+            cache_payload = {"precedents": results, "metadata": metadata}
+            await r.setex(
+                cache_k,
+                settings.precedent_cache_ttl_seconds,
+                json.dumps(cache_payload),
+            )
+        except redis.RedisError:
+            logger.warning("Failed to write precedent results to Redis cache")
 
     logger.info(
-        "Precedent search returned %d results (fallback=%s) for query: %s",
+        "Precedent search returned %d results (fallback=%s, source_failed=%s) for query: %s",
         len(results),
         used_fallback,
+        metadata["source_failed"],
         query[:80],
     )
 
-    return results
+    return SearchResult(precedents=results, metadata=metadata)
+
+
+async def search_precedents(
+    query: str,
+    domain: str = "small_claims",
+    max_results: int = 5,
+) -> list[dict]:
+    """Search PAIR API for precedent cases.
+
+    Backward-compatible public API that returns only the precedent list.
+    Used by the SAM tool wrapper and direct callers.
+    """
+    result = await _search_precedents_impl(query, domain, max_results)
+    return result.precedents
+
+
+async def search_precedents_with_meta(
+    query: str,
+    domain: str = "small_claims",
+    max_results: int = 5,
+) -> SearchResult:
+    """Search PAIR API for precedent cases with source metadata.
+
+    Returns a SearchResult containing both the precedent list and
+    metadata about source availability. Used by the pipeline runner
+    to populate CaseState.precedent_source_metadata.
+    """
+    return await _search_precedents_impl(query, domain, max_results)

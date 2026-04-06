@@ -47,6 +47,7 @@ apps:
         - Must always present at least one alternative outcome.
         - Must clearly label output as a recommendation, not a decision.
         - Fairness audit must err on the side of flagging. False negatives are unacceptable.
+        - Check precedent_source_metadata in the case state. If it contains source_failed: true, the fairness report MUST flag this as a limitation: the verdict was reached without precedent support due to source unavailability, not due to absence of relevant case law. This distinction affects the confidence score.
       tools:
         - tool_type: python
           component_module: src.tools.confidence_calc
