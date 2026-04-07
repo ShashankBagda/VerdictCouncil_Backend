@@ -21,8 +21,9 @@ main → release/<context>/<tag> → dev → feat/<context>
 - **`release` → `main`**: merge only after staging QA passes
 - **Hotfixes**: branch from `main`, merge into both `main` and `development`
 - Branch naming:
-  - Feat branches: `feat/<context>` (e.g., `feat/user-auth`, `feat/payment-api`)
+  - Feat branches: `feat/<issue-id>-<context>` (e.g., `feat/vc-123-user-auth`, `feat/vc-456-payment-api`)
   - Release branches: `release/<context>/<tag_version>` (e.g., `release/sprint-1/v1.0.0`)
+  - The issue ID enables Linear's GitHub integration to auto-link PRs to issues
 - Resolve all merge conflicts in the feature branch before merging into `development`
 - Delete feat branches after merge
 
@@ -151,6 +152,21 @@ gh release create vX.Y.Z --title "vX.Y.Z" --generate-notes --target main
 
 ## Workflow Orchestration
 
+### 0. Linear Issue Workflow
+
+All Linear issue management is handled via the **Linear MCP server** and **linear-sdlc skills**. Do not use the `linear` CLI directly.
+
+- **Pick a ticket**: `/next` — queries Linear for unblocked assigned tickets, ranks by priority, presents top 3
+- **Implement a ticket**: `/implement VER-XX` — full lifecycle: load ticket → branch → code → specialist review → PR
+- **Plan a feature**: `/brainstorm` → `/create-tickets` — discuss, write spec, create Linear issues
+- **Save/resume**: `/checkpoint` — capture state mid-session, resume later
+- **Code quality**: `/health` — run checks, compute composite score
+
+**Rules**:
+- One issue = one branch = one PR. Shared branches are not allowed.
+- Commits must NOT include co-author lines or AI attribution (see Commit Rules below).
+- `/implement` handles status transitions automatically (Todo → In Progress → In Review).
+
 ### 1. Plan Mode Default
 
 - Enter plan mode for ANY non-trivial task (3+ steps or architectural decisions)
@@ -252,3 +268,19 @@ Use `/browse` from gstack for **all web browsing** — never use `mcp__claude-in
 Available skills: `/plan-ceo-review`, `/plan-eng-review`, `/review`, `/ship`, `/browse`, `/qa`, `/setup-browser-cookies`, `/retro`
 
 If gstack skills aren't working, run `cd .claude/skills/gstack && ./setup` to build the binary and register skills.
+
+---
+
+## Linear SDLC
+
+Issues are managed via the **Linear MCP server** (configured by linear-sdlc setup). Never use the `linear` CLI directly.
+
+Available skills:
+- `/brainstorm` — Plan new features, search for duplicates, write specs
+- `/create-tickets` — Create Linear issues from spec files with dependencies
+- `/next` — Propose next ticket to work on (ranked by priority)
+- `/implement VER-XX` — Full implementation lifecycle (branch → code → specialist review → PR)
+- `/checkpoint` — Save/resume session state across conversations
+- `/health` — Code quality dashboard with composite scoring
+
+Install: see [linear-sdlc](https://github.com/douglasswm/linear-sdlc)
