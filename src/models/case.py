@@ -107,6 +107,7 @@ class RecommendationType(str, enum.Enum):
     guilty = "guilty"
     not_guilty = "not_guilty"
     reduced = "reduced"
+    manual_decision = "manual_decision"
 
 
 # ---------------------------------------------------------------------------

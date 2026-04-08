@@ -42,6 +42,24 @@ OPENAPI_TAGS = [
             "PAIR API circuit breaker status and active probing for external service health."
         ),
     },
+    {
+        "name": "judge",
+        "description": (
+            "Judge-facing endpoints for fact disputes, evidence gaps, and fairness audits."
+        ),
+    },
+    {
+        "name": "precedent-search",
+        "description": "Ad-hoc precedent search via PAIR API.",
+    },
+    {
+        "name": "knowledge-base",
+        "description": "Vector store and knowledge base health status.",
+    },
+    {
+        "name": "escalation",
+        "description": "Escalated case review and resolution workflow.",
+    },
 ]
 
 
@@ -126,15 +144,35 @@ def create_app() -> FastAPI:
     app.add_middleware(MetricsMiddleware)
     app.add_middleware(RateLimitMiddleware)
 
-    from src.api.routes import audit, auth, cases, dashboard, decisions, health, what_if
+    from src.api.routes import (
+        audit,
+        auth,
+        cases,
+        dashboard,
+        decisions,
+        escalation,
+        health,
+        judge,
+        knowledge_base,
+        precedent_search,
+        what_if,
+    )
 
     app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
     app.include_router(cases.router, prefix="/api/v1/cases", tags=["cases"])
     app.include_router(decisions.router, prefix="/api/v1/cases", tags=["decisions"])
     app.include_router(what_if.router, prefix="/api/v1/cases", tags=["what-if"])
+    app.include_router(judge.router, prefix="/api/v1/cases", tags=["judge"])
     app.include_router(audit.router, prefix="/api/v1/audit", tags=["audit"])
     app.include_router(dashboard.router, prefix="/api/v1/dashboard", tags=["dashboard"])
     app.include_router(health.router, prefix="/api/v1/health", tags=["health"])
+    app.include_router(
+        precedent_search.router, prefix="/api/v1/precedents", tags=["precedent-search"]
+    )
+    app.include_router(
+        knowledge_base.router, prefix="/api/v1/knowledge-base", tags=["knowledge-base"]
+    )
+    app.include_router(escalation.router, prefix="/api/v1/escalated-cases", tags=["escalation"])
 
     # Prometheus-compatible metrics (excluded from OpenAPI spec)
     app.routes.append(Route("/metrics", metrics_endpoint, methods=["GET"], include_in_schema=False))
