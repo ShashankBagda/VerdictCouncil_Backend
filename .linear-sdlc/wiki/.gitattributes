@@ -1,0 +1,3 @@
+# Let git auto-resolve concurrent appends. Applies to append-only files.
+log.md merge=union
+index.md merge=union
