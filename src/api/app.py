@@ -3,6 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 from starlette.routing import Route
 
+from src.shared.config import settings
+
 from src.api.middleware.metrics import MetricsMiddleware, metrics_endpoint
 from src.api.middleware.rate_limit import RateLimitMiddleware
 
@@ -126,7 +128,9 @@ def create_app() -> FastAPI:
         ),
         contact={"name": "VerdictCouncil Team"},
         openapi_tags=OPENAPI_TAGS,
-        servers=[{"url": "http://localhost:8000", "description": "Local development"}],
+        servers=[
+            {"url": f"http://localhost:{settings.fastapi_port}", "description": "Local development"}
+        ],
     )
 
     # Override OpenAPI schema generation
@@ -136,7 +140,13 @@ def create_app() -> FastAPI:
     # Order of execution: RateLimit -> Metrics -> CORS -> handler
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:3000"],
+        allow_origins=[
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "http://localhost:3000",
+        ],
+        # Dev-friendly: allow any localhost port (Vite defaults to 5173, but can vary).
+        allow_origin_regex=r"^http://(localhost|127\.0\.0\.1)(:\d+)?$",
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
