@@ -55,9 +55,9 @@ def seed() -> None:
         judge = User(
             id=uuid.UUID("00000000-0000-4000-a000-000000000001"),
             name="Judge Sarah Chen",
-            email="judge.chen@verdictcouncil.dev",
+            email="judge@verdictcouncil.sg",
             role=UserRole.judge,
-            password_hash=_hash_password("judge123"),
+            password_hash=_hash_password("password"),
         )
         admin = User(
             id=uuid.UUID("00000000-0000-4000-a000-000000000002"),
