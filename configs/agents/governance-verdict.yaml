@@ -26,9 +26,10 @@ apps:
         If ANY critical issue found: set recommendation to 'ESCALATE_HUMAN' and STOP. Do NOT generate a verdict recommendation.
 
         PHASE 2 - VERDICT RECOMMENDATION (only if audit passes):
+        Check the "domain" field in the input case state to determine the output format.
 
-        FOR SCT: recommended_order (compensation/repair/dismiss), amount, legal_basis, reasoning_summary.
-        FOR TRAFFIC: recommended_verdict (guilty/not_guilty/reduced), sentence (fine, demerit points), sentencing_range from precedents.
+        FOR SCT (domain = "small_claims"): recommended_order (compensation/repair/dismiss), amount, legal_basis, reasoning_summary.
+        FOR TRAFFIC (domain = "traffic_violation"): recommended_verdict (guilty/not_guilty/reduced), sentence (fine, demerit points), sentencing_range from precedents.
 
         ALWAYS INCLUDE:
         - confidence_score: 0-100 (use confidence_calc tool)
