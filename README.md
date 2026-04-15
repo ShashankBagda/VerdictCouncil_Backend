@@ -32,9 +32,26 @@ Multi-agent AI judicial decision-support system. FastAPI backend with 9 speciali
 
 ```bash
 cp .env.example .env          # fill in your values
-docker compose -f docker-compose.infra.yml up -d   # start postgres + redis
-make dev                      # run the API
+make install                  # create venv and install dependencies
+docker compose -f docker-compose.infra.yml up -d   # start postgres + redis + solace
+make migrate                  # run database migrations
+make dev                      # start all agents + API via honcho
 ```
+
+The API server runs on port **8001** (`Procfile.dev`). The SAM web gateway runs on port **8000** (`FASTAPI_PORT` in `.env`).
+
+Available make targets:
+
+| Target | Description |
+|--------|-------------|
+| `make install` | Create venv and install dependencies |
+| `make dev` | Start all agents via honcho |
+| `make test` | Run tests |
+| `make lint` | Run linter (ruff) |
+| `make typecheck` | Run type checker (mypy) |
+| `make migrate` | Run database migrations (alembic) |
+| `make infra-up` | Start local infrastructure |
+| `make infra-down` | Stop local infrastructure |
 
 See `docs/architecture/README.md` for the full architecture documentation.
 
