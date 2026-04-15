@@ -725,17 +725,24 @@ class PipelineRunner:
             if agent_name == "governance-verdict":
                 integrity = validate_output_integrity(state.model_dump())
                 if not integrity["passed"]:
-                    logger.warning(
-                        "Output integrity issues (case_id=%s): %s",
+                    logger.error(
+                        "Output integrity check FAILED (case_id=%s): %s",
                         state.case_id,
                         integrity["issues"],
                     )
                     state = append_audit_entry(
                         state,
                         agent="guardrails",
-                        action="output_integrity_warning",
+                        action="output_integrity_failed",
                         output_payload=integrity,
                     )
+                    state.status = CaseStatusEnum.escalated
+                    logger.warning(
+                        "Pipeline halted: output integrity failure, "
+                        "case escalated to human review (case_id=%s)",
+                        state.case_id,
+                    )
+                    return state
 
             # Halt after Agent 9 if fairness check found critical issues
             if (
