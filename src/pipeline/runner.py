@@ -629,7 +629,11 @@ class PipelineRunner:
 
         return updated_state
 
-    async def run(self, case_state: CaseState) -> CaseState:
+    async def run(
+        self,
+        case_state: CaseState,
+        judge_vector_store_id: str | None = None,
+    ) -> CaseState:
         """Run the full 9-agent pipeline sequentially.
 
         Accepts a CaseState with raw_documents populated and returns
@@ -645,6 +649,23 @@ class PipelineRunner:
         for agent_name in AGENT_ORDER:
             logger.info("Pipeline step: %s", agent_name)
             state = await self._run_agent(agent_name, state)
+
+            # After legal-knowledge agent completes, search judge's personal KB
+            if agent_name == "legal-knowledge" and judge_vector_store_id:
+                try:
+                    from src.services.knowledge_base import search_kb
+
+                    query = state.case_metadata.get("description", "") if state.case_metadata else ""
+                    if not query and state.extracted_facts:
+                        query = str(state.extracted_facts)[:500]
+                    kb_results = await search_kb(
+                        judge_vector_store_id,
+                        query,
+                        max_results=5,
+                    )
+                    state = state.model_copy(update={"judge_kb_results": kb_results})
+                except Exception as exc:
+                    logger.warning("Judge KB search failed: %s", exc)
 
             # Halt after Agent 2 if case is escalated
             if agent_name == "complexity-routing" and state.status == CaseStatusEnum.escalated:
