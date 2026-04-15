@@ -207,7 +207,7 @@ async def get_fairness_audit(
 
     # Most recent verdict fairness_report
     verdict_result = await db.execute(
-        select(Verdict).where(Verdict.case_id == case_id).order_by(Verdict.id.desc()).limit(1)
+        select(Verdict).where(Verdict.case_id == case_id).order_by(Verdict.created_at.desc(), Verdict.id.desc()).limit(1)
     )
     verdict = verdict_result.scalar_one_or_none()
     verdict_fairness_report = verdict.fairness_report if verdict else None

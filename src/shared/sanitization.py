@@ -1,11 +1,43 @@
 import re
+import unicodedata
 
-# Patterns that could be used for prompt injection
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _strip_homoglyphs(text: str) -> str:
+    """Normalize unicode to ASCII-equivalent to defeat homoglyph bypasses.
+
+    Zero-width characters are stripped. Confusable lookalikes (Cyrillic а, etc.)
+    are collapsed via NFKD + ASCII encoding.
+    """
+    # Strip zero-width characters (U+200B, U+200C, U+200D, U+FEFF, etc.)
+    cleaned = re.sub(r"[\u200b\u200c\u200d\u2060\ufeff\u00ad]", "", text)
+    # NFKD normalize then drop non-ASCII (collapses homoglyphs)
+    normalized = unicodedata.normalize("NFKD", cleaned)
+    return normalized
+
+
+# ---------------------------------------------------------------------------
+# Delimiter patterns — fixed-string matching where possible
+# ---------------------------------------------------------------------------
+
+# Fixed strings that should never appear in legal documents
+_DELIMITER_STRINGS = [
+    "<|im_start|>",
+    "<|im_end|>",
+    "<|endoftext|>",
+    "<|system|>",
+    "[INST]",
+    "[/INST]",
+    "<<SYS>>",
+    "<</SYS>>",
+]
+
+# Regex patterns for delimiters that need flexible matching
 _INJECTION_PATTERNS = [
-    re.compile(r"<\|im_start\|>.*?<\|im_end\|>", re.DOTALL),  # OpenAI chat delimiters
-    re.compile(r"<\|.*?\|>", re.DOTALL),  # Other OpenAI-style delimiters
-    re.compile(r"\[INST\].*?\[/INST\]", re.DOTALL),  # Llama-style delimiters
-    re.compile(r"<<SYS>>.*?<</SYS>>", re.DOTALL),  # System prompt injection
+    re.compile(r"<\|[a-z_]+\|>", re.IGNORECASE),  # OpenAI-style delimiters
     re.compile(r"```system\b.*?```", re.DOTALL),  # Markdown system blocks
 ]
 
@@ -13,6 +45,24 @@ _INJECTION_PATTERNS = [
 _XML_INJECTION_PATTERNS = [
     re.compile(r"</?(system|instruction|tool_call|function_call)\b[^>]*>", re.IGNORECASE),
 ]
+
+# Natural language prompt injection patterns
+# Use word boundaries and more specific patterns to reduce false positives
+_NL_INJECTION_PATTERNS = [
+    re.compile(r"IGNORE\s+.*?PREVIOUS\s+.*?INSTRUCTIONS", re.IGNORECASE),
+    re.compile(r"you\s+are\s+now\s+(?:a\s+|an\s+|my\s+|the\s+)", re.IGNORECASE),
+    re.compile(r"forget\s+(?:all\s+)?your\s+(?:previous\s+)?instructions", re.IGNORECASE),
+    re.compile(r"disregard\s+.*?(?:above|previous|prior)\s+(?:instructions|rules|guidelines)", re.IGNORECASE),
+    re.compile(r"(?:new|override|replace)\s+system\s+(?:prompt|instructions?|message)", re.IGNORECASE),
+    re.compile(r"act\s+as\s+(?:if|though)\s+you\s+(?:are|were)\b", re.IGNORECASE),
+    re.compile(r"do\s+not\s+follow\s+.*?(?:instructions|rules|guidelines)", re.IGNORECASE),
+]
+
+
+def _check_delimiter_strings(text: str) -> bool:
+    """Check for fixed delimiter strings (case-insensitive, homoglyph-resistant)."""
+    normalized = _strip_homoglyphs(text).lower()
+    return any(delim.lower() in normalized for delim in _DELIMITER_STRINGS)
 
 
 def sanitize_document_content(text: str) -> str:
@@ -22,11 +72,33 @@ def sanitize_document_content(text: str) -> str:
     the agent pipeline.
     """
     result = text
+    # Fixed-string delimiters: replace with marker
+    for delim in _DELIMITER_STRINGS:
+        result = result.replace(delim, "[CONTENT_REMOVED]")
+    # Regex-based patterns
     for pattern in _INJECTION_PATTERNS:
         result = pattern.sub("[CONTENT_REMOVED]", result)
     for pattern in _XML_INJECTION_PATTERNS:
         result = pattern.sub("[TAG_REMOVED]", result)
+    for pattern in _NL_INJECTION_PATTERNS:
+        result = pattern.sub("[INJECTION_REMOVED]", result)
     return result
+
+
+def detect_injection(text: str) -> bool:
+    """Return True if text contains any known injection pattern.
+
+    Normalizes unicode first to catch homoglyph/zero-width bypasses.
+    """
+    normalized = _strip_homoglyphs(text)
+    # Fixed-string delimiter check
+    if _check_delimiter_strings(normalized):
+        return True
+    # Regex patterns
+    for pattern in _INJECTION_PATTERNS + _XML_INJECTION_PATTERNS + _NL_INJECTION_PATTERNS:
+        if pattern.search(normalized):
+            return True
+    return False
 
 
 def sanitize_user_input(text: str) -> str:
