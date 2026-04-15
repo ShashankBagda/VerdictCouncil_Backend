@@ -7,7 +7,8 @@ from src.api.deps import DBSession, require_role
 from src.api.schemas.common import ErrorResponse, ValidationErrorResponse
 from src.api.schemas.decisions import DecisionAction, DecisionRequest, DecisionResponse
 from src.models.audit import AuditLog
-from src.models.case import Case, CaseStatus
+from src.models.calibration import CalibrationRecord
+from src.models.case import Case, CaseStatus, Verdict
 from src.models.user import User, UserRole
 
 router = APIRouter()
@@ -45,6 +46,12 @@ async def record_decision(
     if not case:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
 
+    if case.created_by != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to decide this case",
+        )
+
     if case.status != CaseStatus.ready_for_review:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -67,6 +74,30 @@ async def record_decision(
         },
     )
     db.add(audit_entry)
+
+    # Create calibration record for decision divergence tracking
+    divergence = {
+        DecisionAction.accept: 0.0,
+        DecisionAction.modify: 0.5,
+        DecisionAction.reject: 1.0,
+    }[body.action]
+
+    # Get latest verdict for AI confidence/recommendation
+    verdict_result = await db.execute(
+        select(Verdict).where(Verdict.case_id == case_id).order_by(Verdict.id.desc()).limit(1)
+    )
+    verdict = verdict_result.scalar_one_or_none()
+
+    calibration = CalibrationRecord(
+        case_id=case_id,
+        judge_id=current_user.id,
+        ai_recommendation_type=verdict.recommendation_type.value if verdict else None,
+        ai_confidence_score=verdict.confidence_score if verdict else None,
+        judge_decision=body.action.value,
+        judge_modification_summary=body.notes if body.action == DecisionAction.modify else None,
+        divergence_score=divergence,
+    )
+    db.add(calibration)
     await db.flush()
 
     return {
