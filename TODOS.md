@@ -73,6 +73,7 @@
 - **What:** `get_fairness_audit` orders `Verdict` by `id.desc()` (UUID v4 — random, not temporal). The Verdict model has no `created_at` column.
 - **Why:** On cases that re-run (via `return_to_pipeline`), the "most recent" verdict returned is random.
 - **Priority:** P2 — add `created_at` to Verdict + migration, then change `order_by` to `created_at.desc()`.
+- **Completed:** v0.2.0.0 (2026-04-15) — `created_at` added to Verdict model, ordering changed to `created_at DESC, id DESC`
 
 ### Redis Connection Leak in search_precedents.py
 - **What:** `_get_redis_client()` creates a new `redis.Redis` object on every call, never closes them.
