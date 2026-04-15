@@ -1,4 +1,6 @@
+import hashlib
 from collections.abc import AsyncGenerator, Callable
+from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
@@ -7,7 +9,7 @@ from fastapi import Cookie, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.models.user import User, UserRole
+from src.models.user import Session, User, UserRole
 from src.services.database import async_session
 from src.shared.config import settings
 
@@ -55,12 +57,30 @@ async def get_current_user(
             detail="Invalid token payload",
         )
 
-    result = await db.execute(select(User).where(User.id == UUID(user_id)))
+    try:
+        uid = UUID(user_id)
+    except (ValueError, AttributeError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token payload",
+        ) from None
+
+    # Verify active session + fetch user in one query
+    token_hash = hashlib.sha256(vc_token.encode()).hexdigest()
+    result = await db.execute(
+        select(User)
+        .join(Session, Session.user_id == User.id)
+        .where(
+            Session.user_id == uid,
+            Session.jwt_token_hash == token_hash,
+            Session.expires_at > datetime.now(UTC),
+        )
+    )
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found",
+            detail="Session expired or revoked",
         )
 
     return user

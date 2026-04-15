@@ -1,14 +1,16 @@
+import hashlib
 from datetime import UTC, datetime, timedelta
+from uuid import UUID
 
 import jwt
-from fastapi import APIRouter, HTTPException, Response, status
+from fastapi import APIRouter, Cookie, HTTPException, Response, status
 from passlib.context import CryptContext
 from sqlalchemy import select
 
 from src.api.deps import CurrentUser, DBSession
 from src.api.schemas.auth import LoginRequest, RegisterRequest, UserResponse
 from src.api.schemas.common import ErrorResponse, MessageResponse, ValidationErrorResponse
-from src.models.user import User
+from src.models.user import Session as UserSession, User
 from src.shared.config import settings
 
 router = APIRouter()
@@ -107,6 +109,17 @@ async def login(body: LoginRequest, response: Response, db: DBSession) -> dict:
         )
 
     token = _create_token(user)
+
+    # Create session record for token revocation support
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    session = UserSession(
+        user_id=user.id,
+        jwt_token_hash=token_hash,
+        expires_at=datetime.now(UTC) + timedelta(hours=TOKEN_EXPIRY_HOURS),
+    )
+    db.add(session)
+    await db.flush()
+
     response.set_cookie(
         **_COOKIE_KWARGS,
         value=token,
@@ -120,11 +133,36 @@ async def login(body: LoginRequest, response: Response, db: DBSession) -> dict:
     "/logout",
     response_model=MessageResponse,
     operation_id="logout",
-    summary="Clear session cookie",
-    description="Delete the `vc_token` cookie to end the session.",
+    summary="Clear session cookie and revoke token",
+    description="Delete the `vc_token` cookie and revoke the session to end the session.",
     openapi_extra={"security": []},
 )
-async def logout(response: Response) -> dict:
+async def logout(
+    response: Response,
+    db: DBSession,
+    vc_token: str | None = Cookie(default=None),
+) -> dict:
+    if vc_token:
+        token_hash = hashlib.sha256(vc_token.encode()).hexdigest()
+        try:
+            payload = jwt.decode(
+                vc_token, settings.jwt_secret, algorithms=["HS256"],
+                options={"verify_exp": False},
+            )
+            uid = payload.get("sub")
+        except jwt.InvalidTokenError:
+            uid = None
+        if uid:
+            result = await db.execute(
+                select(UserSession).where(
+                    UserSession.user_id == UUID(uid),
+                    UserSession.jwt_token_hash == token_hash,
+                )
+            )
+            session = result.scalar_one_or_none()
+            if session:
+                await db.delete(session)
+
     response.delete_cookie(**_COOKIE_KWARGS, secure=settings.cookie_secure)
     return {"message": "logged out"}
 
