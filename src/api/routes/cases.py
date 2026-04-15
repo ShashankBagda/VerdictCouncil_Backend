@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
@@ -16,6 +16,7 @@ from src.models.case import (
     Case,
     CaseDomain,
     CaseStatus,
+    Document,
 )
 from src.models.user import User, UserRole
 from src.shared.sanitization import sanitize_user_input
@@ -145,3 +146,114 @@ async def get_case(
         )
 
     return case
+
+
+# --------------------------------------------------------------------------- #
+# Document Upload
+# --------------------------------------------------------------------------- #
+
+
+_MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
+_ALLOWED_CONTENT_TYPES = {
+    "application/pdf",
+    "image/png",
+    "image/jpeg",
+    "text/plain",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
+
+
+@router.post(
+    "/{case_id}/documents",
+    status_code=status.HTTP_201_CREATED,
+    operation_id="upload_case_document",
+    summary="Upload a document to a case",
+)
+async def upload_case_document(
+    case_id: UUID,
+    db: DBSession,
+    current_user: CurrentUser,
+    file: UploadFile = File(...),
+) -> dict:
+    case = (await db.execute(select(Case).where(Case.id == case_id))).scalar_one_or_none()
+    if not case:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
+    if case.created_by != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your case")
+
+    if file.content_type and file.content_type not in _ALLOWED_CONTENT_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"File type '{file.content_type}' not allowed",
+        )
+
+    file_bytes = await file.read()
+    if len(file_bytes) > _MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"File exceeds {_MAX_UPLOAD_BYTES // (1024 * 1024)} MB limit",
+        )
+
+    # Upload to OpenAI Files API for pipeline processing
+    from openai import AsyncOpenAI
+    from src.shared.config import settings
+
+    client = AsyncOpenAI(api_key=settings.openai_api_key)
+    openai_file = await client.files.create(
+        file=(file.filename or "document", file_bytes),
+        purpose="assistants",
+    )
+
+    doc = Document(
+        case_id=case_id,
+        openai_file_id=openai_file.id,
+        filename=file.filename or "untitled",
+        file_type=file.content_type,
+        uploaded_by=current_user.id,
+    )
+    db.add(doc)
+    await db.flush()
+    await db.refresh(doc)
+
+    return {
+        "id": str(doc.id),
+        "case_id": str(case_id),
+        "openai_file_id": openai_file.id,
+        "filename": doc.filename,
+        "file_type": doc.file_type,
+        "size_bytes": len(file_bytes),
+        "uploaded_at": doc.uploaded_at.isoformat(),
+    }
+
+
+@router.get(
+    "/{case_id}/documents",
+    operation_id="list_case_documents",
+    summary="List documents for a case",
+)
+async def list_case_documents(
+    case_id: UUID,
+    db: DBSession,
+    current_user: CurrentUser,
+) -> dict:
+    case = (await db.execute(select(Case).where(Case.id == case_id))).scalar_one_or_none()
+    if not case:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
+    if case.created_by != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your case")
+
+    result = await db.execute(select(Document).where(Document.case_id == case_id))
+    docs = result.scalars().all()
+
+    return {
+        "documents": [
+            {
+                "id": str(d.id),
+                "filename": d.filename,
+                "file_type": d.file_type,
+                "uploaded_at": d.uploaded_at.isoformat(),
+            }
+            for d in docs
+        ]
+    }
