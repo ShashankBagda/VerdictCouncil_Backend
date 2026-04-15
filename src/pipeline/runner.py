@@ -17,7 +17,7 @@ from typing import Any
 import yaml
 from openai import AsyncOpenAI
 
-from src.pipeline.agent_schemas import get_strict_json_schema
+from src.pipeline.agent_schemas import get_strict_json_schema, validate_agent_output
 from src.pipeline.guardrails import check_input_injection, validate_output_integrity
 from src.shared.audit import append_audit_entry
 from src.shared.case_state import CaseState, CaseStatusEnum
@@ -530,13 +530,11 @@ class PipelineRunner:
 
         response = await self._client.chat.completions.create(**kwargs)
         choice = response.choices[0]
-        token_usage = None
+        token_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         if response.usage:
-            token_usage = {
-                "prompt_tokens": response.usage.prompt_tokens,
-                "completion_tokens": response.usage.completion_tokens,
-                "total_tokens": response.usage.total_tokens,
-            }
+            token_usage["prompt_tokens"] += response.usage.prompt_tokens
+            token_usage["completion_tokens"] += response.usage.completion_tokens
+            token_usage["total_tokens"] += response.usage.total_tokens
 
         # Handle tool calls in a loop until the model returns a final response
         tool_calls_log: list[dict[str, Any]] = []
@@ -567,11 +565,9 @@ class PipelineRunner:
             response = await self._client.chat.completions.create(**kwargs)
             choice = response.choices[0]
             if response.usage:
-                token_usage = {
-                    "prompt_tokens": response.usage.prompt_tokens,
-                    "completion_tokens": response.usage.completion_tokens,
-                    "total_tokens": response.usage.total_tokens,
-                }
+                token_usage["prompt_tokens"] += response.usage.prompt_tokens
+                token_usage["completion_tokens"] += response.usage.completion_tokens
+                token_usage["total_tokens"] += response.usage.total_tokens
 
         # Parse the final JSON response — retry once on failure, then fail closed
         raw_content = choice.message.content or "{}"
@@ -590,11 +586,9 @@ class PipelineRunner:
                 agent_output = json.loads(retry_content)
                 raw_content = retry_content
                 if retry_response.usage:
-                    token_usage = {
-                        "prompt_tokens": retry_response.usage.prompt_tokens,
-                        "completion_tokens": retry_response.usage.completion_tokens,
-                        "total_tokens": retry_response.usage.total_tokens,
-                    }
+                    token_usage["prompt_tokens"] += retry_response.usage.prompt_tokens
+                    token_usage["completion_tokens"] += retry_response.usage.completion_tokens
+                    token_usage["total_tokens"] += retry_response.usage.total_tokens
                 logger.info("Agent '%s' retry succeeded", agent_name)
             except (json.JSONDecodeError, Exception) as retry_err:
                 logger.error(
@@ -609,6 +603,9 @@ class PipelineRunner:
 
         # Validate critical output fields have expected structure
         _validate_agent_output_structure(agent_name, agent_output)
+
+        # Validate output against Pydantic schema (warns on mismatch, does not halt)
+        validate_agent_output(agent_name, agent_output)
 
         # Merge agent output into CaseState (respecting field ownership)
         original_dict = state.model_dump()
