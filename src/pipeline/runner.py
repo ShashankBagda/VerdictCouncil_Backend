@@ -17,6 +17,8 @@ from typing import Any
 import yaml
 from openai import AsyncOpenAI
 
+from src.pipeline.agent_schemas import get_strict_json_schema
+from src.pipeline.guardrails import check_input_injection, validate_output_integrity
 from src.shared.audit import append_audit_entry
 from src.shared.case_state import CaseState, CaseStatusEnum
 from src.shared.config import settings
@@ -515,10 +517,13 @@ class PipelineRunner:
         logger.info("Running agent '%s' with model '%s'", agent_name, model)
 
         # LLM call with optional tool use loop
+        # Use strict JSON schema if available, otherwise fall back to json_object
+        response_format = get_strict_json_schema(agent_name) or {"type": "json_object"}
+
         kwargs: dict[str, Any] = {
             "model": model,
             "messages": messages,
-            "response_format": {"type": "json_object"},
+            "response_format": response_format,
         }
         if tools:
             kwargs["tools"] = tools
@@ -568,17 +573,39 @@ class PipelineRunner:
                     "total_tokens": response.usage.total_tokens,
                 }
 
-        # Parse the final JSON response
+        # Parse the final JSON response — retry once on failure, then fail closed
         raw_content = choice.message.content or "{}"
         try:
             agent_output = json.loads(raw_content)
         except json.JSONDecodeError:
-            logger.error(
-                "Agent '%s' returned non-JSON response: %s",
+            logger.warning(
+                "Agent '%s' returned non-JSON response, retrying once: %s",
                 agent_name,
                 raw_content[:500],
             )
-            agent_output = {}
+            # Retry once with same parameters
+            try:
+                retry_response = await self._client.chat.completions.create(**kwargs)
+                retry_content = retry_response.choices[0].message.content or "{}"
+                agent_output = json.loads(retry_content)
+                raw_content = retry_content
+                if retry_response.usage:
+                    token_usage = {
+                        "prompt_tokens": retry_response.usage.prompt_tokens,
+                        "completion_tokens": retry_response.usage.completion_tokens,
+                        "total_tokens": retry_response.usage.total_tokens,
+                    }
+                logger.info("Agent '%s' retry succeeded", agent_name)
+            except (json.JSONDecodeError, Exception) as retry_err:
+                logger.error(
+                    "Agent '%s' failed on retry — halting agent: %s",
+                    agent_name,
+                    retry_err,
+                )
+                raise RuntimeError(
+                    f"Agent '{agent_name}' produced invalid output after retry. "
+                    f"Pipeline cannot continue safely."
+                ) from retry_err
 
         # Validate critical output fields have expected structure
         _validate_agent_output_structure(agent_name, agent_output)
@@ -646,6 +673,27 @@ class PipelineRunner:
         """
         state = case_state
 
+        # Input guardrail: check case description for injection attempts
+        description = state.case_metadata.get("description", "")
+        if description:
+            injection_result = await check_input_injection(description, self._client)
+            if injection_result["blocked"]:
+                logger.warning(
+                    "Input injection detected (method=%s, case_id=%s): %s",
+                    injection_result["method"],
+                    state.case_id,
+                    injection_result["reason"],
+                )
+                # Replace with sanitized version and continue
+                state.case_metadata["description"] = injection_result["sanitized_text"]
+                state = append_audit_entry(
+                    state,
+                    agent="guardrails",
+                    action="input_injection_blocked",
+                    input_payload={"method": injection_result["method"]},
+                    output_payload={"reason": injection_result["reason"]},
+                )
+
         for agent_name in AGENT_ORDER:
             logger.info("Pipeline step: %s", agent_name)
             state = await self._run_agent(agent_name, state)
@@ -675,6 +723,22 @@ class PipelineRunner:
                     state.case_id,
                 )
                 return state
+
+            # Output guardrail after governance-verdict
+            if agent_name == "governance-verdict":
+                integrity = validate_output_integrity(state.model_dump())
+                if not integrity["passed"]:
+                    logger.warning(
+                        "Output integrity issues (case_id=%s): %s",
+                        state.case_id,
+                        integrity["issues"],
+                    )
+                    state = append_audit_entry(
+                        state,
+                        agent="guardrails",
+                        action="output_integrity_warning",
+                        output_payload=integrity,
+                    )
 
             # Halt after Agent 9 if fairness check found critical issues
             if (

@@ -14,6 +14,14 @@ _XML_INJECTION_PATTERNS = [
     re.compile(r"</?(system|instruction|tool_call|function_call)\b[^>]*>", re.IGNORECASE),
 ]
 
+# Natural language prompt injection patterns
+_NL_INJECTION_PATTERNS = [
+    re.compile(r"IGNORE\s+.*?PREVIOUS\s+.*?INSTRUCTIONS", re.IGNORECASE),
+    re.compile(r"you\s+are\s+now\s+", re.IGNORECASE),
+    re.compile(r"forget\s+your\s+instructions", re.IGNORECASE),
+    re.compile(r"disregard\s+.*?above", re.IGNORECASE),
+]
+
 
 def sanitize_document_content(text: str) -> str:
     """Remove prompt injection patterns from document content.
@@ -26,7 +34,17 @@ def sanitize_document_content(text: str) -> str:
         result = pattern.sub("[CONTENT_REMOVED]", result)
     for pattern in _XML_INJECTION_PATTERNS:
         result = pattern.sub("[TAG_REMOVED]", result)
+    for pattern in _NL_INJECTION_PATTERNS:
+        result = pattern.sub("[INJECTION_REMOVED]", result)
     return result
+
+
+def detect_injection(text: str) -> bool:
+    """Return True if text contains any known injection pattern."""
+    for pattern in _INJECTION_PATTERNS + _XML_INJECTION_PATTERNS + _NL_INJECTION_PATTERNS:
+        if pattern.search(text):
+            return True
+    return False
 
 
 def sanitize_user_input(text: str) -> str:
