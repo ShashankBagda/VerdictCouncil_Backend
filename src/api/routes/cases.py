@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
@@ -16,6 +16,7 @@ from src.models.case import (
     Case,
     CaseDomain,
     CaseStatus,
+    Document,
 )
 from src.models.user import User, UserRole
 from src.shared.sanitization import sanitize_user_input
@@ -145,3 +146,77 @@ async def get_case(
         )
 
     return case
+
+
+# --------------------------------------------------------------------------- #
+# Document Upload
+# --------------------------------------------------------------------------- #
+
+
+@router.post(
+    "/{case_id}/documents",
+    status_code=status.HTTP_201_CREATED,
+    operation_id="upload_case_document",
+    summary="Upload a document to a case",
+)
+async def upload_case_document(
+    case_id: UUID,
+    db: DBSession,
+    current_user: CurrentUser,
+    file: UploadFile = File(...),
+) -> dict:
+    case = (await db.execute(select(Case).where(Case.id == case_id))).scalar_one_or_none()
+    if not case:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
+    if case.created_by != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your case")
+
+    doc = Document(
+        case_id=case_id,
+        filename=file.filename or "untitled",
+        file_type=file.content_type,
+        uploaded_by=current_user.id,
+    )
+    db.add(doc)
+    await db.flush()
+    await db.refresh(doc)
+
+    return {
+        "id": str(doc.id),
+        "case_id": str(case_id),
+        "filename": doc.filename,
+        "file_type": doc.file_type,
+        "uploaded_at": doc.uploaded_at.isoformat(),
+    }
+
+
+@router.get(
+    "/{case_id}/documents",
+    operation_id="list_case_documents",
+    summary="List documents for a case",
+)
+async def list_case_documents(
+    case_id: UUID,
+    db: DBSession,
+    current_user: CurrentUser,
+) -> dict:
+    case = (await db.execute(select(Case).where(Case.id == case_id))).scalar_one_or_none()
+    if not case:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
+    if case.created_by != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your case")
+
+    result = await db.execute(select(Document).where(Document.case_id == case_id))
+    docs = result.scalars().all()
+
+    return {
+        "documents": [
+            {
+                "id": str(d.id),
+                "filename": d.filename,
+                "file_type": d.file_type,
+                "uploaded_at": d.uploaded_at.isoformat(),
+            }
+            for d in docs
+        ]
+    }
