@@ -153,6 +153,17 @@ async def get_case(
 # --------------------------------------------------------------------------- #
 
 
+_MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
+_ALLOWED_CONTENT_TYPES = {
+    "application/pdf",
+    "image/png",
+    "image/jpeg",
+    "text/plain",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
+
+
 @router.post(
     "/{case_id}/documents",
     status_code=status.HTTP_201_CREATED,
@@ -171,8 +182,32 @@ async def upload_case_document(
     if case.created_by != current_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your case")
 
+    if file.content_type and file.content_type not in _ALLOWED_CONTENT_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"File type '{file.content_type}' not allowed",
+        )
+
+    file_bytes = await file.read()
+    if len(file_bytes) > _MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"File exceeds {_MAX_UPLOAD_BYTES // (1024 * 1024)} MB limit",
+        )
+
+    # Upload to OpenAI Files API for pipeline processing
+    from openai import AsyncOpenAI
+    from src.shared.config import settings
+
+    client = AsyncOpenAI(api_key=settings.openai_api_key)
+    openai_file = await client.files.create(
+        file=(file.filename or "document", file_bytes),
+        purpose="assistants",
+    )
+
     doc = Document(
         case_id=case_id,
+        openai_file_id=openai_file.id,
         filename=file.filename or "untitled",
         file_type=file.content_type,
         uploaded_by=current_user.id,
@@ -184,8 +219,10 @@ async def upload_case_document(
     return {
         "id": str(doc.id),
         "case_id": str(case_id),
+        "openai_file_id": openai_file.id,
         "filename": doc.filename,
         "file_type": doc.file_type,
+        "size_bytes": len(file_bytes),
         "uploaded_at": doc.uploaded_at.isoformat(),
     }
 
