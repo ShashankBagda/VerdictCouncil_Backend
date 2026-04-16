@@ -14,9 +14,13 @@ from sqlalchemy.dialects.postgresql import JSONB
 from src.api.deps import DBSession, require_role
 from src.api.schemas.common import ErrorResponse
 from src.api.schemas.judge import (
+    AdmissibilityFlagSummary,
+    ContradictionItem,
     DisputeFactRequest,
     DisputeFactResponse,
+    EvidenceDashboardResponse,
     EvidenceGapsResponse,
+    EvidenceStrengthBreakdown,
     FairnessAuditResponse,
     GovernanceFairnessEntry,
     JurisdictionValidationResponse,
@@ -317,4 +321,116 @@ async def get_jurisdiction_validation(
         audit_log_id=audit_entry.id if audit_entry else None,
         created_at=audit_entry.created_at if audit_entry else None,
         has_validation_data=case.jurisdiction_valid is not None or audit_entry is not None,
+    )
+
+
+# --------------------------------------------------------------------------- #
+# US-006: Evidence Analysis Dashboard
+# --------------------------------------------------------------------------- #
+
+# Heuristic keys used to flag a Fact's corroboration JSONB as a contradiction
+# signal. Keep this conservative — anything matched here surfaces in the
+# dashboard, so prefer false-negatives over false-positives.
+_CONTRADICTION_KEYS = ("contradicts", "contradiction", "conflicts", "dispute_reason")
+
+
+def _summarize_strength(rows: list[Evidence]) -> EvidenceStrengthBreakdown:
+    summary = EvidenceStrengthBreakdown(total=len(rows))
+    for row in rows:
+        match row.strength:
+            case EvidenceStrength.strong:
+                summary.strong += 1
+            case EvidenceStrength.medium:
+                summary.medium += 1
+            case EvidenceStrength.weak:
+                summary.weak += 1
+            case _:
+                summary.unrated += 1
+    return summary
+
+
+def _summarize_admissibility(rows: list[Evidence]) -> list[AdmissibilityFlagSummary]:
+    """Tally each admissibility-flag key across all evidence rows."""
+    tallies: dict[str, dict[str, int]] = {}
+    for row in rows:
+        flags = row.admissibility_flags or {}
+        if not isinstance(flags, dict):
+            continue
+        for key, value in flags.items():
+            bucket = tallies.setdefault(key, {"truthy_count": 0, "falsy_count": 0})
+            if value:
+                bucket["truthy_count"] += 1
+            else:
+                bucket["falsy_count"] += 1
+    return [
+        AdmissibilityFlagSummary(
+            flag=key, truthy_count=counts["truthy_count"], falsy_count=counts["falsy_count"]
+        )
+        for key, counts in sorted(tallies.items())
+    ]
+
+
+def _extract_contradiction_notes(corroboration: dict | None) -> dict | None:
+    if not isinstance(corroboration, dict):
+        return None
+    notes = {k: v for k, v in corroboration.items() if k in _CONTRADICTION_KEYS}
+    return notes or None
+
+
+def _is_contradiction(fact: Fact) -> bool:
+    if fact.status == FactStatus.disputed:
+        return True
+    notes = _extract_contradiction_notes(fact.corroboration)
+    return notes is not None
+
+
+@router.get(
+    "/{case_id}/evidence-dashboard",
+    response_model=EvidenceDashboardResponse,
+    operation_id="get_evidence_dashboard",
+    summary="Get an aggregated evidence analysis dashboard for a case",
+    description="Returns evidence strength counts, admissibility flag tallies, and "
+    "facts that show contradiction signals (status=disputed or corroboration "
+    "entries naming a conflict). Requires judge role.",
+    responses={
+        403: {"model": ErrorResponse, "description": "Insufficient permissions"},
+        404: {"model": ErrorResponse, "description": "Case not found"},
+    },
+)
+async def get_evidence_dashboard(
+    case_id: UUID,
+    db: DBSession,
+    current_user: User = require_role(UserRole.judge),
+) -> EvidenceDashboardResponse:
+    case_result = await db.execute(select(Case).where(Case.id == case_id))
+    if case_result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
+
+    evidence_rows = list(
+        (await db.execute(select(Evidence).where(Evidence.case_id == case_id))).scalars().all()
+    )
+    fact_rows = list(
+        (await db.execute(select(Fact).where(Fact.case_id == case_id))).scalars().all()
+    )
+
+    contradictions = [
+        ContradictionItem(
+            fact_id=f.id,
+            description=f.description,
+            status=f.status,
+            confidence=f.confidence,
+            contradiction_notes=_extract_contradiction_notes(f.corroboration),
+        )
+        for f in fact_rows
+        if _is_contradiction(f)
+    ]
+
+    return EvidenceDashboardResponse(
+        case_id=case_id,
+        strength_summary=_summarize_strength(evidence_rows),
+        admissibility_flags_summary=_summarize_admissibility(evidence_rows),
+        contradictions=contradictions,
+        total_evidence_count=len(evidence_rows),
+        total_fact_count=len(fact_rows),
+        has_evidence_data=bool(evidence_rows or fact_rows),
     )
