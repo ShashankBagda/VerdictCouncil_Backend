@@ -95,7 +95,12 @@ class TestAcceptVerdict:
         case = _make_case(judge.id, status=CaseStatus.ready_for_review)
 
         mock_db = _build_mock_session()
-        mock_db.execute.return_value = _mock_scalar_result(case)
+        # The route runs two queries: load Case, then look up the latest Verdict
+        # for the calibration record. No verdict yet for this fixture.
+        mock_db.execute.side_effect = [
+            _mock_scalar_result(case),
+            _mock_scalar_result(None),
+        ]
 
         app = _app_with_overrides(mock_db, judge)
         transport = ASGITransport(app=app)
@@ -119,7 +124,10 @@ class TestModifyVerdict:
         case = _make_case(judge.id, status=CaseStatus.ready_for_review)
 
         mock_db = _build_mock_session()
-        mock_db.execute.return_value = _mock_scalar_result(case)
+        mock_db.execute.side_effect = [
+            _mock_scalar_result(case),
+            _mock_scalar_result(None),
+        ]
 
         app = _app_with_overrides(mock_db, judge)
         transport = ASGITransport(app=app)
@@ -146,7 +154,10 @@ class TestRejectVerdict:
         case = _make_case(judge.id, status=CaseStatus.ready_for_review)
 
         mock_db = _build_mock_session()
-        mock_db.execute.return_value = _mock_scalar_result(case)
+        mock_db.execute.side_effect = [
+            _mock_scalar_result(case),
+            _mock_scalar_result(None),
+        ]
 
         app = _app_with_overrides(mock_db, judge)
         transport = ASGITransport(app=app)
