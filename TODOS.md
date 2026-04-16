@@ -43,6 +43,14 @@
 - **Why:** Current design uses per-case Redis keys with Lua scripts. At 500+ concurrent cases, Redis single-thread serialization could bottleneck.
 - **Context:** At projected 50-200 cases/month, this is a non-issue. Only matters at high concurrent volume.
 - **Depends on:** Phase 3 (Layer2Aggregator) complete + production usage data
+- **Status (2026-04-16):** Re-scoped after investigation. The deployed aggregator does NOT exist — `configs/services/layer2-aggregator.yaml:4` references `solace_agent_mesh.services.aggregator.app`, which is not a real module in `solace-agent-mesh==1.4.7` (verified via `python -c "import solace_agent_mesh.services.aggregator.app"` → `ModuleNotFoundError`). `src/services/layer2_aggregator/aggregator.py` is a spec/reference file, imported by nothing. There are no production Redis keys to shard. When the real local aggregator gets built (Epic 6 — SAM mesh activation), bake in Cluster-safe key shapes from day one (`vc:aggregator:{<case_id>}:<run_id>` with literal Redis hash-tag braces). See also the new "Dead Layer2Aggregator config" pre-production item below.
+
+### Dead Layer2Aggregator config (URGENT)
+- **What:** `configs/services/layer2-aggregator.yaml` and `k8s/base/deployment-layer2-aggregator.yaml` reference a SAM module (`solace_agent_mesh.services.aggregator.app`) that does not exist. If this Deployment is applied to a cluster, the pod will `CrashLoopBackOff` immediately with `ModuleNotFoundError: No module named 'solace_agent_mesh.services'`.
+- **Why:** Today nothing applies this manifest (staging-deploy.yml only retags Deployments via `kubectl set image`, never `kubectl apply -k`), so the bomb hasn't gone off yet. But the moment anyone runs `kubectl apply -k k8s/overlays/staging` — which Section A of the Solace resilience plan adds to CI — the aggregator pod will start crash-looping. The architecture doc (`docs/architecture/02-system-architecture.md:379`) confirms SAM does not provide a fan-in barrier; the Layer2Aggregator was always meant to be a custom VerdictCouncil service that hasn't been built yet.
+- **Options:** (a) delete both files until Epic 6 builds the real aggregator, (b) keep them with `replicas: 0` plus a clear `# EPIC-6-BLOCKED — do not enable` comment, (c) move the YAML out of `k8s/base/kustomization.yaml` into a separate `k8s/blocked/` directory so kustomize never picks it up.
+- **Context:** Found during eng-review of the Solace HA plan, 2026-04-16. Codex flagged it; sub-agent investigation confirmed the SAM module is missing; verified locally in the project venv.
+- **Depends on:** Decision before Section A of the Solace HA plan ships (Section A adds `kubectl apply -k` to staging-deploy.yml, which would trigger the crash-loop).
 
 ## Outstanding User Stories
 
