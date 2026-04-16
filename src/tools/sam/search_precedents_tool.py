@@ -11,6 +11,34 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# Key under which precedent source metadata is written into the SAM
+# ``tool_context.state`` dict. The orchestrator/gateway is expected to
+# read this value after each tool call and merge it into the canonical
+# ``CaseState.precedent_source_metadata`` field before the next agent
+# fires, mirroring how :class:`PipelineRunner` injects metadata after
+# the legal-knowledge agent step.
+PRECEDENT_META_STATE_KEY = "precedent_source_metadata"
+
+
+def _merge_precedent_meta(
+    existing: dict[str, Any] | None, incoming: dict[str, Any]
+) -> dict[str, Any]:
+    """Merge precedent-source metadata across multiple search calls.
+
+    Mirrors the worst-of merge in :class:`PipelineRunner`: the first
+    call's metadata is stored verbatim, and subsequent calls only
+    escalate ``source_failed`` (and the matching ``pair_status``) when
+    a later call also failed. This guarantees that any single source
+    failure within a case sticks across the remaining tool calls.
+    """
+    if existing is None:
+        return dict(incoming)
+    if incoming.get("source_failed"):
+        existing["source_failed"] = True
+        existing["pair_status"] = incoming.get("pair_status", existing.get("pair_status"))
+    return existing
+
+
 # Parameter schema describing the search_precedents tool interface.
 # Uses plain dicts mirroring google.genai.types.Schema structure so
 # this module works without a hard dependency on the ADK package.
@@ -77,13 +105,37 @@ class SearchPrecedentsTool:
     ) -> Any:
         """Execute the search_precedents tool with the given arguments.
 
+        Calls :func:`search_precedents_with_meta` so the precedent
+        source metadata can be propagated to the SAM session state via
+        ``tool_context.state[PRECEDENT_META_STATE_KEY]``. The
+        orchestrator is expected to copy that value into the canonical
+        ``CaseState.precedent_source_metadata`` before the next agent
+        runs, so the governance prompt's
+        ``precedent_source_metadata.source_failed`` check works on the
+        SAM mesh path the same way it does in the in-process pipeline.
+
         Args:
             args: Dictionary of keyword arguments matching the parameters_schema.
-            tool_context: Optional SAM tool context (unused).
+            tool_context: Optional SAM tool context. When provided and
+                exposing a ``state`` mapping, precedent source metadata
+                is merged into it under :data:`PRECEDENT_META_STATE_KEY`.
 
         Returns:
-            List of precedent dicts from the PAIR Search API.
+            List of precedent dicts (the agent-visible return shape is
+            unchanged from the previous implementation).
         """
-        from src.tools.search_precedents import search_precedents
+        from src.tools.search_precedents import search_precedents_with_meta
 
-        return await search_precedents(**args)
+        result = await search_precedents_with_meta(**args)
+
+        state = getattr(tool_context, "state", None)
+        if state is not None:
+            try:
+                existing = state.get(PRECEDENT_META_STATE_KEY)
+                state[PRECEDENT_META_STATE_KEY] = _merge_precedent_meta(existing, result.metadata)
+            except Exception:  # pragma: no cover - defensive: never fail a tool call
+                logger.exception(
+                    "Failed to write precedent_source_metadata into tool_context.state"
+                )
+
+        return result.precedents
