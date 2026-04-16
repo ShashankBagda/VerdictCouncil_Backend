@@ -53,14 +53,18 @@
 ### Group C — Real-Time & Search
 
 - **US-002: SSE/WebSocket Pipeline Status** — Real-time push updates for pipeline progress across 9 agents (currently no SSE)
+  - **Completed:** v0.3.0 (2026-04-16) — `GET /api/v1/cases/{id}/status/stream` (SSE) emits `PipelineProgressEvent` (`started`/`completed`/`failed`) per agent via Redis pub/sub. Pipeline runner instrumented in `src/pipeline/runner.py` (`_run_agent` wrapper + `_run_agent_inner`); helpers in `src/services/pipeline_events.py`; PR #24.
 - **US-028: Advanced Case Search & Filter** — Full-text search and advanced filtering on cases (domain, status, date range, description)
+  - **Completed:** v0.3.0 (2026-04-16) — `GET /api/v1/cases` extended with `q` (Postgres `to_tsvector @@ plainto_tsquery`, ILIKE fallback for short input), `date_from`, `date_to`. GIN index `ix_cases_description_fts` added in alembic 0004. PR #23.
 
 ### Group D — Export & Reporting
 
 - **US-003: Jurisdiction Validation Result Endpoint** — Dedicated endpoint to surface Agent 1 jurisdiction validation result
 - **US-006: Evidence Analysis Dashboard Endpoint** — Aggregated endpoint for evidence strength, admissibility, and contradiction summaries
 - **US-020: Hearing Pack Generation** — Compile and export a hearing preparation pack (case summary, evidence, arguments, verdict)
+  - **Completed:** v0.3.0 (2026-04-16) — `GET /api/v1/cases/{id}/hearing-pack` returns a zip via `src/services/hearing_pack.py`. Introduces shared `CaseReportData` projection in `src/services/case_report_data.py` (also used by US-027). PR #25.
 - **US-027: Case Report PDF Export** — Generate and download a PDF report of the full case analysis
+  - **Completed:** v0.3.0 (2026-04-16) — `GET /api/v1/cases/{id}/report.pdf` renders `src/templates/case_report.html` via WeasyPrint in `src/services/pdf_export.py`; Dockerfile updated with pango/cairo runtime deps. PR #26.
 
 ## Technical Debt (from adversarial review, v0.1.0.0)
 
