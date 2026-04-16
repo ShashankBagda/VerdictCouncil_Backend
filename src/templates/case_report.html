@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Case Report — {{ case.case_id }}</title>
+<style>
+  @page {
+    size: A4;
+    margin: 2cm;
+    @bottom-right { content: counter(page) " / " counter(pages); font-size: 9pt; color: #666; }
+  }
+  body {
+    font-family: "DejaVu Sans", sans-serif;
+    color: #222;
+    font-size: 10.5pt;
+    line-height: 1.4;
+  }
+  h1 { font-size: 18pt; border-bottom: 2px solid #333; padding-bottom: 6px; }
+  h2 {
+    font-size: 13pt;
+    margin-top: 18pt;
+    padding-bottom: 3pt;
+    border-bottom: 1px solid #ccc;
+    page-break-after: avoid;
+  }
+  h3 { font-size: 11pt; margin-top: 10pt; page-break-after: avoid; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 6pt;
+  }
+  th, td {
+    border: 1px solid #ddd;
+    padding: 4pt 6pt;
+    text-align: left;
+    vertical-align: top;
+    font-size: 9.5pt;
+  }
+  th { background: #f4f4f4; }
+  .meta dt { font-weight: bold; float: left; width: 7em; }
+  .meta dd { margin-left: 7em; }
+  .empty { color: #888; font-style: italic; }
+  .section { page-break-inside: avoid; }
+  .verdict-box {
+    border: 1px solid #444;
+    padding: 8pt 10pt;
+    margin-top: 6pt;
+    background: #fafafa;
+  }
+</style>
+</head>
+<body>
+
+<h1>Case Report</h1>
+
+<dl class="meta">
+  <dt>Case ID:</dt><dd>{{ case.case_id }}</dd>
+  <dt>Domain:</dt><dd>{{ case.domain }}</dd>
+  <dt>Status:</dt><dd>{{ case.status }}</dd>
+  <dt>Created:</dt><dd>{{ case.created_at.isoformat() }}</dd>
+</dl>
+
+<section class="section">
+  <h2>Description</h2>
+  {% if case.description %}
+    <p>{{ case.description }}</p>
+  {% else %}
+    <p class="empty">No description provided.</p>
+  {% endif %}
+</section>
+
+<section class="section">
+  <h2>Parties ({{ case.parties|length }})</h2>
+  {% if case.parties %}
+    <table>
+      <thead><tr><th>Name</th><th>Role</th></tr></thead>
+      <tbody>
+      {% for p in case.parties %}
+        <tr><td>{{ p.name }}</td><td>{{ p.role }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="empty">No parties recorded.</p>
+  {% endif %}
+</section>
+
+<section class="section">
+  <h2>Evidence ({{ case.evidence|length }})</h2>
+  {% if case.evidence %}
+    <table>
+      <thead><tr><th>Type</th><th>Strength</th><th>Flags</th></tr></thead>
+      <tbody>
+      {% for e in case.evidence %}
+        <tr>
+          <td>{{ e.evidence_type }}</td>
+          <td>{{ e.strength or '—' }}</td>
+          <td>{{ e.admissibility_flags or '—' }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="empty">No evidence recorded.</p>
+  {% endif %}
+</section>
+
+<section class="section">
+  <h2>Facts ({{ case.facts|length }})</h2>
+  {% if case.facts %}
+    <table>
+      <thead><tr><th>Description</th><th>Date</th><th>Confidence</th><th>Status</th></tr></thead>
+      <tbody>
+      {% for f in case.facts %}
+        <tr>
+          <td>{{ f.description }}</td>
+          <td>{{ f.event_date or '—' }}</td>
+          <td>{{ f.confidence or '—' }}</td>
+          <td>{{ f.status or '—' }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="empty">No facts recorded.</p>
+  {% endif %}
+</section>
+
+<section class="section">
+  <h2>Arguments ({{ case.arguments|length }})</h2>
+  {% if case.arguments %}
+    {% for a in case.arguments %}
+      <h3>{{ a.side|capitalize }}</h3>
+      <p><strong>Legal basis:</strong> {{ a.legal_basis }}</p>
+      {% if a.weaknesses %}
+        <p><strong>Weaknesses:</strong> {{ a.weaknesses }}</p>
+      {% endif %}
+    {% endfor %}
+  {% else %}
+    <p class="empty">No arguments recorded.</p>
+  {% endif %}
+</section>
+
+<section class="section">
+  <h2>Verdict</h2>
+  {% if case.verdict %}
+    <div class="verdict-box">
+      <p><strong>Recommendation:</strong> {{ case.verdict.recommendation_type }}</p>
+      <p><strong>Outcome:</strong> {{ case.verdict.recommended_outcome }}</p>
+      {% if case.verdict.confidence_score is not none %}
+        <p><strong>Confidence:</strong> {{ case.verdict.confidence_score }}</p>
+      {% endif %}
+    </div>
+  {% else %}
+    <p class="empty">No verdict generated.</p>
+  {% endif %}
+</section>
+
+{% if case.fairness_report %}
+<section class="section">
+  <h2>Fairness Report</h2>
+  <pre>{{ case.fairness_report | tojson(indent=2) }}</pre>
+</section>
+{% endif %}
+
+</body>
+</html>
