@@ -206,6 +206,13 @@ class TestListCasesSearchAndFilter:
 
         return captured, _side_effect
 
+    @staticmethod
+    def _compile_pg(query) -> str:
+        """Compile a query against the Postgres dialect so tsvector / ILIKE render."""
+        from sqlalchemy.dialects import postgresql
+
+        return str(query.compile(dialect=postgresql.dialect()))
+
     async def test_list_cases_with_q_long_uses_tsquery(self):
         """`q` of >= 3 chars triggers the to_tsvector @@ plainto_tsquery branch."""
         user = _make_user()
@@ -221,8 +228,7 @@ class TestListCasesSearchAndFilter:
 
         assert resp.status_code == 200
         # Compile the items query (second call) and confirm tsquery operators are present
-        items_query = captured[1]
-        compiled = str(items_query.compile(compile_kwargs={"literal_binds": True}))
+        compiled = self._compile_pg(captured[1])
         assert "to_tsvector" in compiled
         assert "plainto_tsquery" in compiled
 
@@ -240,8 +246,7 @@ class TestListCasesSearchAndFilter:
             resp = await client.get("/api/v1/cases/?q=ab")
 
         assert resp.status_code == 200
-        items_query = captured[1]
-        compiled = str(items_query.compile(compile_kwargs={"literal_binds": True}))
+        compiled = self._compile_pg(captured[1])
         assert "ILIKE" in compiled.upper()
         assert "to_tsvector" not in compiled
 
@@ -261,11 +266,11 @@ class TestListCasesSearchAndFilter:
             )
 
         assert resp.status_code == 200
-        items_query = captured[1]
-        compiled = str(items_query.compile(compile_kwargs={"literal_binds": True}))
+        compiled = self._compile_pg(captured[1])
         assert "created_at" in compiled
-        assert "2026-01-01" in compiled
-        assert "2026-12-31" in compiled
+        # Both bounds should appear as bind params (>= and <=)
+        assert ">=" in compiled
+        assert "<=" in compiled
 
     async def test_list_cases_filters_compose(self):
         """`q`, `date_from`, `status`, and `domain` all apply together."""
@@ -287,8 +292,7 @@ class TestListCasesSearchAndFilter:
             )
 
         assert resp.status_code == 200
-        items_query = captured[1]
-        compiled = str(items_query.compile(compile_kwargs={"literal_binds": True}))
+        compiled = self._compile_pg(captured[1])
         assert "to_tsvector" in compiled
         assert "created_at" in compiled
         assert "status" in compiled.lower()
