@@ -35,9 +35,7 @@ def _merge_precedent_meta(
         return dict(incoming)
     if incoming.get("source_failed"):
         existing["source_failed"] = True
-        existing["pair_status"] = incoming.get(
-            "pair_status", existing.get("pair_status")
-        )
+        existing["pair_status"] = incoming.get("pair_status", existing.get("pair_status"))
     return existing
 
 
@@ -134,9 +132,7 @@ class SearchPrecedentsTool:
         if state is not None:
             try:
                 existing = state.get(PRECEDENT_META_STATE_KEY)
-                state[PRECEDENT_META_STATE_KEY] = _merge_precedent_meta(
-                    existing, result.metadata
-                )
+                state[PRECEDENT_META_STATE_KEY] = _merge_precedent_meta(existing, result.metadata)
             except Exception:  # pragma: no cover - defensive: never fail a tool call
                 logger.exception(
                     "Failed to write precedent_source_metadata into tool_context.state"
