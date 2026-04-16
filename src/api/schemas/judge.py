@@ -89,3 +89,35 @@ class FairnessAuditResponse(BaseModel):
     has_fairness_data: bool = Field(
         ..., description="Whether any fairness data exists for this case"
     )
+
+
+# ---------------------------------------------------------------------------
+# US-003: Jurisdiction Validation Result
+# ---------------------------------------------------------------------------
+
+
+class JurisdictionValidationResponse(BaseModel):
+    case_id: UUID
+    jurisdiction_valid: bool | None = Field(
+        None,
+        description="Top-level jurisdiction status from the Case record (set by Agent 1).",
+    )
+    jurisdiction_issues: list[str] = Field(
+        default_factory=list,
+        description="Jurisdiction issues extracted from the most recent case-processing "
+        "audit log, if any.",
+    )
+    audit_payload: dict[str, Any] | None = Field(
+        None,
+        description="Raw output_payload from the most recent case-processing audit log "
+        "for this case, when available.",
+    )
+    audit_log_id: UUID | None = Field(
+        None, description="Identifier of the audit log row sourcing this response."
+    )
+    created_at: datetime | None = Field(None, description="Timestamp of the source audit log row.")
+    has_validation_data: bool = Field(
+        ...,
+        description="True when either jurisdiction_valid is set on the Case or a "
+        "case-processing audit log row exists.",
+    )
