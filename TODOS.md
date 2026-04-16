@@ -20,7 +20,7 @@
 - **Why:** Legal-knowledge agent currently treats zero results as "no relevant precedents" rather than "all sources failed." This distinction matters for governance and fairness checks.
 - **Context:** Circuit breaker + vector store fallback reduce this risk but do not eliminate it. Both sources can legitimately return empty for novel fact patterns.
 - **Depends on:** feat/pair-resilience complete
-- **Status:** Addressed in feat/pre-production-fixes — `SearchResult` dataclass with metadata, `VectorStoreError` for failure distinction, `precedent_source_metadata` populated by runner, governance prompt updated. Note: only covers PipelineRunner path; SAM mesh path deferred.
+- **Status:** Addressed in feat/pre-production-fixes (PipelineRunner path) and feat/sam-precedent-metadata (SAM mesh path) — `SearchResult` dataclass with metadata, `VectorStoreError` for failure distinction, `precedent_source_metadata` populated by both runners, governance prompt updated. SAM wrapper writes metadata into `tool_context.state["precedent_source_metadata"]` (key exported as `PRECEDENT_META_STATE_KEY`); the SAM gateway must copy that value into the canonical `CaseState.precedent_source_metadata` before the next agent fires.
 
 ### Cookie Secure Flag
 - **What:** Make JWT cookie `secure` flag conditional on environment
