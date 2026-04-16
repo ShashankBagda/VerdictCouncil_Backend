@@ -4,6 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
+from sse_starlette.sse import EventSourceResponse
 
 from src.api.deps import CurrentUser, DBSession, require_role
 from src.api.schemas.cases import (
@@ -20,6 +21,7 @@ from src.models.case import (
     Document,
 )
 from src.models.user import User, UserRole
+from src.services.pipeline_events import subscribe as subscribe_pipeline_events
 from src.shared.sanitization import sanitize_user_input
 
 router = APIRouter()
@@ -176,6 +178,47 @@ async def get_case(
         )
 
     return case
+
+
+# --------------------------------------------------------------------------- #
+# Pipeline Status SSE Stream (US-002)
+# --------------------------------------------------------------------------- #
+
+
+@router.get(
+    "/{case_id}/status/stream",
+    operation_id="stream_pipeline_status",
+    summary="Server-Sent Events stream of pipeline agent progress",
+    description=(
+        "Streams `PipelineProgressEvent` JSON objects as SSE messages for the "
+        "lifetime of the pipeline run, closing once the governance-verdict agent "
+        "reaches a terminal phase. Authentication uses the same cookie as the "
+        "rest of the API."
+    ),
+    responses={
+        403: {"model": ErrorResponse, "description": "Not authorized to view this case"},
+        404: {"model": ErrorResponse, "description": "Case not found"},
+    },
+)
+async def stream_pipeline_status(
+    case_id: UUID,
+    db: DBSession,
+    current_user: CurrentUser,
+) -> EventSourceResponse:
+    case = (await db.execute(select(Case).where(Case.id == case_id))).scalar_one_or_none()
+    if case is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
+    if current_user.role == UserRole.clerk and case.created_by != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to view this case",
+        )
+
+    async def event_source():
+        async for event_json in subscribe_pipeline_events(str(case_id)):
+            yield {"data": event_json}
+
+    return EventSourceResponse(event_source())
 
 
 # --------------------------------------------------------------------------- #

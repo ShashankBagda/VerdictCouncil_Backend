@@ -11,14 +11,18 @@ import json
 import logging
 import os
 import re
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 import yaml
 from openai import AsyncOpenAI
 
+from src.api.schemas.pipeline_events import PipelineProgressEvent
 from src.pipeline.agent_schemas import get_strict_json_schema, validate_agent_output
 from src.pipeline.guardrails import check_input_injection, validate_output_integrity
+from src.services.pipeline_events import publish_progress
 from src.shared.audit import append_audit_entry
 from src.shared.case_state import CaseState, CaseStatusEnum
 from src.shared.config import settings
@@ -500,8 +504,50 @@ class PipelineRunner:
 
         return json.dumps(result, default=str)
 
+    async def _emit_progress(
+        self,
+        agent_name: str,
+        case_id: str,
+        phase: str,
+        error: str | None = None,
+    ) -> None:
+        """Publish a PipelineProgressEvent for this agent step (US-002).
+
+        Best-effort: pub/sub failures are swallowed inside ``publish_progress``
+        so observability never blocks pipeline execution.
+        """
+        try:
+            event = PipelineProgressEvent(
+                case_id=UUID(case_id),
+                agent=agent_name,
+                phase=phase,  # type: ignore[arg-type]
+                step=AGENT_ORDER.index(agent_name) + 1,
+                ts=datetime.now(UTC),
+                error=error,
+            )
+        except (ValueError, KeyError):
+            # case_id is not a UUID, or agent_name not in AGENT_ORDER — skip
+            return
+        await publish_progress(event)
+
     async def _run_agent(self, agent_name: str, state: CaseState) -> CaseState:
         """Run a single agent step: call LLM, parse response, update state."""
+        await self._emit_progress(agent_name, state.case_id, "started")
+        try:
+            updated = await self._run_agent_inner(agent_name, state)
+        except Exception as exc:
+            await self._emit_progress(
+                agent_name,
+                state.case_id,
+                "failed",
+                error=str(exc)[:500],
+            )
+            raise
+        await self._emit_progress(agent_name, updated.case_id, "completed")
+        return updated
+
+    async def _run_agent_inner(self, agent_name: str, state: CaseState) -> CaseState:
+        """Inner agent execution — kept separate so SSE events wrap the whole call."""
         config = self._load_agent_config(agent_name)
         model = self._resolve_model(config)
         system_prompt = config.get("instruction", "")
