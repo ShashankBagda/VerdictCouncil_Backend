@@ -15,7 +15,6 @@ from src.api.schemas.knowledge_base import (
     PairApiStatus,
     VectorStoreStatus,
 )
-from src.models.user import User
 from src.services import knowledge_base as kb_service
 from src.shared.circuit_breaker import get_pair_search_breaker
 from src.shared.config import settings
@@ -104,7 +103,10 @@ async def initialize_kb(
     current_user: CurrentUser,
 ) -> dict:
     if current_user.openai_vector_store_id:
-        return {"vector_store_id": current_user.openai_vector_store_id, "message": "Already initialized"}
+        return {
+            "vector_store_id": current_user.openai_vector_store_id,
+            "message": "Already initialized",
+        }
 
     store_id = await kb_service.create_judge_vector_store(str(current_user.id))
     current_user.openai_vector_store_id = store_id
@@ -124,7 +126,9 @@ async def upload_kb_document(
     file: UploadFile = File(...),
 ) -> dict:
     if not current_user.openai_vector_store_id:
-        raise HTTPException(status_code=400, detail="Knowledge base not initialized. Call POST /initialize first.")
+        raise HTTPException(
+            status_code=400, detail="Knowledge base not initialized. Call POST /initialize first."
+        )
 
     file_bytes = await file.read()
     result = await kb_service.upload_document_to_kb(

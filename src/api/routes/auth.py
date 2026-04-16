@@ -10,7 +10,8 @@ from sqlalchemy import select
 from src.api.deps import CurrentUser, DBSession
 from src.api.schemas.auth import LoginRequest, RegisterRequest, UserResponse
 from src.api.schemas.common import ErrorResponse, MessageResponse, ValidationErrorResponse
-from src.models.user import Session as UserSession, User
+from src.models.user import Session as UserSession
+from src.models.user import User
 from src.shared.config import settings
 
 router = APIRouter()
@@ -146,7 +147,9 @@ async def logout(
         token_hash = hashlib.sha256(vc_token.encode()).hexdigest()
         try:
             payload = jwt.decode(
-                vc_token, settings.jwt_secret, algorithms=["HS256"],
+                vc_token,
+                settings.jwt_secret,
+                algorithms=["HS256"],
                 options={"verify_exp": False},
             )
             uid = payload.get("sub")

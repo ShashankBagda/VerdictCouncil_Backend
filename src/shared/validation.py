@@ -15,7 +15,12 @@ FIELD_OWNERSHIP: dict[str, set[str]] = {
     "evidence-analysis": {"evidence_analysis"},
     "fact-reconstruction": {"extracted_facts"},
     "witness-analysis": {"witnesses"},
-    "legal-knowledge": {"legal_rules", "precedents", "precedent_source_metadata", "judge_kb_results"},
+    "legal-knowledge": {
+        "legal_rules",
+        "precedents",
+        "precedent_source_metadata",
+        "judge_kb_results",
+    },
     "argument-construction": {"arguments"},
     "deliberation": {"deliberation"},
     "governance-verdict": {"fairness_check", "verdict_recommendation", "status"},

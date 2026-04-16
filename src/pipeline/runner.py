@@ -700,7 +700,9 @@ class PipelineRunner:
                 try:
                     from src.services.knowledge_base import search_kb
 
-                    query = state.case_metadata.get("description", "") if state.case_metadata else ""
+                    query = (
+                        state.case_metadata.get("description", "") if state.case_metadata else ""
+                    )
                     if not query and state.extracted_facts:
                         query = str(state.extracted_facts)[:500]
                     kb_results = await search_kb(

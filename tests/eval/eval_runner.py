@@ -42,9 +42,7 @@ def _score_output(state: CaseState) -> dict:
         confidence = verdict.get("confidence_score")
         scores["has_verdict"] = True
         scores["confidence_score"] = confidence
-        scores["confidence_valid"] = (
-            isinstance(confidence, (int, float)) and 0 <= confidence <= 100
-        )
+        scores["confidence_valid"] = isinstance(confidence, (int, float)) and 0 <= confidence <= 100
     else:
         scores["has_verdict"] = False
         scores["confidence_valid"] = False
@@ -60,9 +58,7 @@ def _score_output(state: CaseState) -> dict:
 
     # Overall pass: completeness >= 70%, has verdict, has fairness
     scores["passed"] = (
-        scores["completeness"] >= 0.7
-        and scores["has_verdict"]
-        and scores["has_fairness"]
+        scores["completeness"] >= 0.7 and scores["has_verdict"] and scores["has_fairness"]
     )
 
     return scores
@@ -95,15 +91,16 @@ class TestPipelineEval:
 
         # Print score report
         print(f"\n--- Eval: {fixture['case_id']} ---")
-        print(f"  Completeness: {scores['completeness']:.0%} ({scores['populated_fields']}/{scores['total_fields']})")
+        print(
+            f"  Completeness: {scores['completeness']:.0%} "
+            f"({scores['populated_fields']}/{scores['total_fields']})"
+        )
         print(f"  Has verdict: {scores['has_verdict']}")
         print(f"  Confidence valid: {scores['confidence_valid']}")
         print(f"  Has fairness: {scores['has_fairness']}")
         print(f"  Audit passed present: {scores['audit_passed_present']}")
         print(f"  PASSED: {scores['passed']}")
 
-        assert scores["completeness"] >= 0.7, (
-            f"Completeness too low: {scores['completeness']:.0%}"
-        )
+        assert scores["completeness"] >= 0.7, f"Completeness too low: {scores['completeness']:.0%}"
         assert scores["has_verdict"], "No verdict_recommendation produced"
         assert scores["has_fairness"], "No fairness_check produced"

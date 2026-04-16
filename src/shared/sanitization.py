@@ -52,8 +52,13 @@ _NL_INJECTION_PATTERNS = [
     re.compile(r"IGNORE\s+.*?PREVIOUS\s+.*?INSTRUCTIONS", re.IGNORECASE),
     re.compile(r"you\s+are\s+now\s+(?:a\s+|an\s+|my\s+|the\s+)", re.IGNORECASE),
     re.compile(r"forget\s+(?:all\s+)?your\s+(?:previous\s+)?instructions", re.IGNORECASE),
-    re.compile(r"disregard\s+.*?(?:above|previous|prior)\s+(?:instructions|rules|guidelines)", re.IGNORECASE),
-    re.compile(r"(?:new|override|replace)\s+system\s+(?:prompt|instructions?|message)", re.IGNORECASE),
+    re.compile(
+        r"disregard\s+.*?(?:above|previous|prior)\s+(?:instructions|rules|guidelines)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:new|override|replace)\s+system\s+(?:prompt|instructions?|message)", re.IGNORECASE
+    ),
     re.compile(r"act\s+as\s+(?:if|though)\s+you\s+(?:are|were)\b", re.IGNORECASE),
     re.compile(r"do\s+not\s+follow\s+.*?(?:instructions|rules|guidelines)", re.IGNORECASE),
 ]

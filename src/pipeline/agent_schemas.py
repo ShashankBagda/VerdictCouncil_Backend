@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 # Agent 9: governance-verdict (strict mode — fully specified)
 # ---------------------------------------------------------------------------
 
+
 class AlternativeOutcome(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -59,6 +60,7 @@ class GovernanceVerdictOutput(BaseModel):
 # Validation-only models (used after parsing, NOT for strict mode)
 # These validate agent outputs but allow extra/variable fields via dict[str, Any].
 # ---------------------------------------------------------------------------
+
 
 class CaseProcessingOutput(BaseModel):
     case_id: str
