@@ -19,6 +19,7 @@ from src.api.schemas.judge import (
     EvidenceGapsResponse,
     FairnessAuditResponse,
     GovernanceFairnessEntry,
+    JurisdictionValidationResponse,
     UncorroboratedFact,
     WeakEvidenceItem,
 )
@@ -243,4 +244,77 @@ async def get_fairness_audit(
         verdict_fairness_report=verdict_fairness_report,
         governance_checks=governance_checks,
         has_fairness_data=has_fairness_data,
+    )
+
+
+# --------------------------------------------------------------------------- #
+# US-003: Jurisdiction Validation Result
+# --------------------------------------------------------------------------- #
+
+
+def _extract_jurisdiction_issues(payload: dict | None) -> list[str]:
+    """Pull jurisdiction_issues from a case-processing audit payload.
+
+    The agent output may place issues at the top level or nested under
+    ``case_metadata`` depending on prompt revision; tolerate both shapes
+    and coerce non-string entries to strings.
+    """
+    if not payload:
+        return []
+    raw = payload.get("jurisdiction_issues")
+    if raw is None:
+        meta = payload.get("case_metadata") or {}
+        if isinstance(meta, dict):
+            raw = meta.get("jurisdiction_issues")
+    if not raw:
+        return []
+    if isinstance(raw, list):
+        return [str(item) for item in raw]
+    return [str(raw)]
+
+
+@router.get(
+    "/{case_id}/jurisdiction",
+    response_model=JurisdictionValidationResponse,
+    operation_id="get_jurisdiction_validation",
+    summary="Get the jurisdiction validation result for a case",
+    description="Surfaces Agent 1 (case-processing) jurisdiction validation output: "
+    "the top-level `jurisdiction_valid` flag from the Case record plus any "
+    "`jurisdiction_issues` recorded in the most recent case-processing audit log. "
+    "Requires judge role.",
+    responses={
+        403: {"model": ErrorResponse, "description": "Insufficient permissions"},
+        404: {"model": ErrorResponse, "description": "Case not found"},
+    },
+)
+async def get_jurisdiction_validation(
+    case_id: UUID,
+    db: DBSession,
+    current_user: User = require_role(UserRole.judge),
+) -> JurisdictionValidationResponse:
+    case_result = await db.execute(select(Case).where(Case.id == case_id))
+    case = case_result.scalar_one_or_none()
+    if case is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
+
+    audit_result = await db.execute(
+        select(AuditLog)
+        .where(
+            AuditLog.case_id == case_id,
+            AuditLog.agent_name == "case-processing",
+        )
+        .order_by(AuditLog.created_at.desc())
+        .limit(1)
+    )
+    audit_entry = audit_result.scalar_one_or_none()
+
+    payload = audit_entry.output_payload if audit_entry else None
+    return JurisdictionValidationResponse(
+        case_id=case_id,
+        jurisdiction_valid=case.jurisdiction_valid,
+        jurisdiction_issues=_extract_jurisdiction_issues(payload),
+        audit_payload=payload,
+        audit_log_id=audit_entry.id if audit_entry else None,
+        created_at=audit_entry.created_at if audit_entry else None,
+        has_validation_data=case.jurisdiction_valid is not None or audit_entry is not None,
     )
