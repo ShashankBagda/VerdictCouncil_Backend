@@ -121,3 +121,60 @@ class JurisdictionValidationResponse(BaseModel):
         description="True when either jurisdiction_valid is set on the Case or a "
         "case-processing audit log row exists.",
     )
+
+
+# ---------------------------------------------------------------------------
+# US-006: Evidence Analysis Dashboard
+# ---------------------------------------------------------------------------
+
+
+class EvidenceStrengthBreakdown(BaseModel):
+    strong: int = 0
+    moderate: int = 0
+    weak: int = 0
+    unrated: int = Field(0, description="Evidence rows with no strength rating set")
+    total: int = 0
+
+
+class AdmissibilityFlagSummary(BaseModel):
+    flag: str = Field(..., description="Admissibility flag key (e.g. 'authenticated', 'hearsay')")
+    truthy_count: int = Field(
+        0, description="Evidence rows where this flag is set to a truthy value"
+    )
+    falsy_count: int = Field(
+        0, description="Evidence rows where this flag is present but set to a falsy value"
+    )
+
+
+class ContradictionItem(BaseModel):
+    fact_id: UUID
+    description: str
+    status: FactStatus | None = None
+    confidence: FactConfidence | None = None
+    contradiction_notes: dict[str, Any] | None = Field(
+        None,
+        description="Subset of the fact's corroboration JSONB containing contradiction "
+        "signals (e.g. dispute_reason, contradicts).",
+    )
+
+    model_config = {"from_attributes": True}
+
+
+class EvidenceDashboardResponse(BaseModel):
+    case_id: UUID
+    strength_summary: EvidenceStrengthBreakdown
+    admissibility_flags_summary: list[AdmissibilityFlagSummary] = Field(
+        default_factory=list,
+        description="Per-flag tally across all evidence rows for this case.",
+    )
+    contradictions: list[ContradictionItem] = Field(
+        default_factory=list,
+        description="Facts with status=disputed or corroboration entries that flag a "
+        "contradiction.",
+    )
+    total_evidence_count: int = 0
+    total_fact_count: int = 0
+    has_evidence_data: bool = Field(
+        ...,
+        description="True when at least one evidence or fact row exists for the case.",
+    )
