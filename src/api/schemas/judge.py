@@ -115,9 +115,7 @@ class JurisdictionValidationResponse(BaseModel):
     audit_log_id: UUID | None = Field(
         None, description="Identifier of the audit log row sourcing this response."
     )
-    created_at: datetime | None = Field(
-        None, description="Timestamp of the source audit log row."
-    )
+    created_at: datetime | None = Field(None, description="Timestamp of the source audit log row.")
     has_validation_data: bool = Field(
         ...,
         description="True when either jurisdiction_valid is set on the Case or a "

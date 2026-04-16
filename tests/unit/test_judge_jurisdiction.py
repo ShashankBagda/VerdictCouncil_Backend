@@ -138,9 +138,7 @@ async def test_jurisdiction_extracts_issues_from_case_metadata():
     assert resp.status_code == 200
     data = resp.json()
     assert data["jurisdiction_valid"] is False
-    assert data["jurisdiction_issues"] == [
-        "Claim amount $25,000 exceeds SCT $20,000 limit"
-    ]
+    assert data["jurisdiction_issues"] == ["Claim amount $25,000 exceeds SCT $20,000 limit"]
     assert data["has_validation_data"] is True
 
 
