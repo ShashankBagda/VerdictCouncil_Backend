@@ -41,6 +41,10 @@ class CaseStatus(str, enum.Enum):
     escalated = "escalated"
     closed = "closed"
     failed = "failed"
+    # Set by stuck-case watchdog when a `processing` case has not advanced
+    # past its threshold — typically because the broker dropped its in-flight
+    # message. The frontend surfaces this as "Pipeline interrupted, retry?"
+    failed_retryable = "failed_retryable"
 
 
 class CaseComplexity(str, enum.Enum):
