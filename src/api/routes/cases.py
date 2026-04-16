@@ -1,7 +1,9 @@
 from datetime import datetime
+from io import BytesIO
 from uuid import UUID
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 from sse_starlette.sse import EventSourceResponse
@@ -21,6 +23,8 @@ from src.models.case import (
     Document,
 )
 from src.models.user import User, UserRole
+from src.services.case_report_data import build_case_report_data
+from src.services.hearing_pack import assemble_pack
 from src.services.pipeline_events import subscribe as subscribe_pipeline_events
 from src.shared.sanitization import sanitize_user_input
 
@@ -219,6 +223,54 @@ async def stream_pipeline_status(
             yield {"data": event_json}
 
     return EventSourceResponse(event_source())
+
+
+# --------------------------------------------------------------------------- #
+# Hearing Pack Export (US-020)
+# --------------------------------------------------------------------------- #
+
+
+@router.get(
+    "/{case_id}/hearing-pack",
+    operation_id="get_hearing_pack",
+    summary="Download a hearing-prep zip pack for a case",
+    description=(
+        "Returns a zip archive containing a manifest, case summary, evidence, "
+        "facts, arguments, and verdict for the given case. Suitable for offline "
+        "preparation before a hearing."
+    ),
+    responses={
+        403: {"model": ErrorResponse, "description": "Not authorized to view this case"},
+        404: {"model": ErrorResponse, "description": "Case not found"},
+    },
+)
+async def get_hearing_pack(
+    case_id: UUID,
+    db: DBSession,
+    current_user: CurrentUser,
+) -> StreamingResponse:
+    # Quick existence + ownership check before loading every relation
+    case_row = (await db.execute(select(Case).where(Case.id == case_id))).scalar_one_or_none()
+    if case_row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
+    if current_user.role == UserRole.clerk and case_row.created_by != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to view this case",
+        )
+
+    data = await build_case_report_data(db, case_id)
+    if data is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
+
+    pack_bytes = assemble_pack(data)
+    return StreamingResponse(
+        BytesIO(pack_bytes),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="case-{case_id}-hearing-pack.zip"',
+        },
+    )
 
 
 # --------------------------------------------------------------------------- #
