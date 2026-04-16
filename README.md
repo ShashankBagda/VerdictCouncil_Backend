@@ -20,11 +20,14 @@ Multi-agent AI judicial decision-support system. FastAPI backend with 9 speciali
 | Python | 3.12 | `brew install python@3.12` |
 | PostgreSQL | 15+ | `brew install postgresql@15` |
 | Redis | 7+ | `brew install redis` |
+| Pango (WeasyPrint runtime) | latest | `brew install pango` (Mac); Linux: `apt install libpango-1.0-0 libpangoft2-1.0-0` |
 | Docker | latest | [docker.com](https://docker.com) |
 | Node.js | latest | `brew install node` (required for Linear MCP server) |
 | GitHub CLI | latest | `brew install gh` |
 | Claude Code | latest | [claude.ai/code](https://claude.ai/code) |
 | linear-sdlc | latest | [linear-sdlc](https://github.com/douglasswm/linear-sdlc) |
+
+> Pango is required by WeasyPrint, which renders the case report PDF export (`GET /api/v1/cases/{id}/report.pdf`). Without it, that endpoint will raise an OSError at request time but the rest of the API is unaffected.
 
 ---
 
