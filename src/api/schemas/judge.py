@@ -130,7 +130,7 @@ class JurisdictionValidationResponse(BaseModel):
 
 class EvidenceStrengthBreakdown(BaseModel):
     strong: int = 0
-    moderate: int = 0
+    medium: int = 0
     weak: int = 0
     unrated: int = Field(0, description="Evidence rows with no strength rating set")
     total: int = 0

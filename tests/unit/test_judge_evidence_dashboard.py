@@ -121,7 +121,7 @@ async def test_dashboard_aggregates_strength_admissibility_and_contradictions():
     evidence_rows = [
         _make_evidence(case_id, EvidenceStrength.strong, {"authenticated": True}),
         _make_evidence(case_id, EvidenceStrength.strong, {"authenticated": True, "hearsay": False}),
-        _make_evidence(case_id, EvidenceStrength.moderate, {"authenticated": True}),
+        _make_evidence(case_id, EvidenceStrength.medium, {"authenticated": True}),
         _make_evidence(case_id, EvidenceStrength.weak, {"authenticated": False, "hearsay": True}),
         _make_evidence(case_id, None, None),
     ]
@@ -156,7 +156,7 @@ async def test_dashboard_aggregates_strength_admissibility_and_contradictions():
     data = resp.json()
     strength = data["strength_summary"]
     assert strength["strong"] == 2
-    assert strength["moderate"] == 1
+    assert strength["medium"] == 1
     assert strength["weak"] == 1
     assert strength["unrated"] == 1
     assert strength["total"] == 5

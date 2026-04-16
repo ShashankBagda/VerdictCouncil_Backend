@@ -340,8 +340,8 @@ def _summarize_strength(rows: list[Evidence]) -> EvidenceStrengthBreakdown:
         match row.strength:
             case EvidenceStrength.strong:
                 summary.strong += 1
-            case EvidenceStrength.moderate:
-                summary.moderate += 1
+            case EvidenceStrength.medium:
+                summary.medium += 1
             case EvidenceStrength.weak:
                 summary.weak += 1
             case _:
