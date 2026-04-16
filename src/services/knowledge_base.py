@@ -1,5 +1,6 @@
 """Per-judge knowledge base service using OpenAI Vector Stores."""
 
+import contextlib
 import logging
 
 from openai import AsyncOpenAI
@@ -45,7 +46,9 @@ async def upload_document_to_kb(vector_store_id: str, file_bytes: bytes, filenam
         file_id=file_obj.id,
     )
 
-    logger.info("Uploaded %s to vector store %s (file_id=%s)", filename, vector_store_id, file_obj.id)
+    logger.info(
+        "Uploaded %s to vector store %s (file_id=%s)", filename, vector_store_id, file_obj.id
+    )
     return {
         "file_id": file_obj.id,
         "filename": filename,
@@ -86,19 +89,23 @@ async def list_kb_files(vector_store_id: str) -> list[dict]:
         # Get file metadata
         try:
             file_obj = await client.files.retrieve(vs_file.id)
-            result.append({
-                "file_id": vs_file.id,
-                "filename": file_obj.filename,
-                "status": vs_file.status,
-                "bytes": file_obj.bytes,
-                "created_at": file_obj.created_at,
-            })
+            result.append(
+                {
+                    "file_id": vs_file.id,
+                    "filename": file_obj.filename,
+                    "status": vs_file.status,
+                    "bytes": file_obj.bytes,
+                    "created_at": file_obj.created_at,
+                }
+            )
         except Exception:
-            result.append({
-                "file_id": vs_file.id,
-                "filename": "unknown",
-                "status": vs_file.status,
-            })
+            result.append(
+                {
+                    "file_id": vs_file.id,
+                    "filename": "unknown",
+                    "status": vs_file.status,
+                }
+            )
 
     return result
 
@@ -107,9 +114,8 @@ async def delete_kb_file(vector_store_id: str, file_id: str) -> bool:
     """Delete a file from a judge's vector store."""
     client = _get_client()
     await client.vector_stores.files.delete(vector_store_id=vector_store_id, file_id=file_id)
-    try:
+    # File may already be deleted — ignore failures here
+    with contextlib.suppress(Exception):
         await client.files.delete(file_id)
-    except Exception:
-        pass  # File may already be deleted
     logger.info("Deleted file %s from vector store %s", file_id, vector_store_id)
     return True

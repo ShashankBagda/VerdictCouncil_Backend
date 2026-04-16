@@ -39,7 +39,8 @@ REFUND_DISPUTE = {
                 "Horizon Electronics acknowledges the delayed delivery. Our terms and conditions, "
                 "updated on 1 November 2025, include a clause extending delivery guarantees during "
                 "the holiday period (15 Nov - 31 Dec). The customer was notified of this extension "
-                "via email on 16 November 2025. The missing accessories are being shipped separately "
+                "via email on 16 November 2025. The missing accessories are being "
+                "shipped separately "
                 "and were dispatched on 10 December 2025. We offer a 15% discount on the next "
                 "purchase as goodwill but deny refund eligibility."
             ),
@@ -94,9 +95,10 @@ SERVICE_COMPLAINT = {
             "filename": "Contractor_Response.pdf",
             "content": (
                 "Northline Renovations confirms the project timeline was extended due to three "
-                "scope change requests from Mr. Lim: (1) upgrade from laminate to quartz countertop "
-                "(agreed 20 Aug), (2) addition of under-cabinet lighting (agreed 5 Sep), (3) change "
-                "of backsplash material from ceramic to mosaic (agreed 18 Sep). Each change required "
+                "scope change requests from Mr. Lim: (1) upgrade from laminate to "
+                "quartz countertop (agreed 20 Aug), (2) addition of under-cabinet lighting "
+                "(agreed 5 Sep), (3) change of backsplash material from ceramic to mosaic "
+                "(agreed 18 Sep). Each change required "
                 "remeasurement and reordering. The tile supplier experienced a 3-week delay. We "
                 "dispute the defect claims — the countertop was inspected at installation and "
                 "the crack appeared after Mr. Lim placed heavy equipment on it."
@@ -128,7 +130,8 @@ TRAFFIC_APPEAL = {
                 "when I encountered roadworks that had obscured the lane markings. Temporary "
                 "cones were placed inconsistently and the lane guide signs were partially blocked "
                 "by construction equipment. I made what I believed was a legal lane change based "
-                "on the visible temporary markings. The traffic camera captured this as an improper "
+                "on the visible temporary markings. The traffic camera captured this "
+                "as an improper "
                 "lane change. I have dashcam footage showing the obscured markings and confusing "
                 "temporary signage."
             ),

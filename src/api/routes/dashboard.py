@@ -75,8 +75,9 @@ async def get_calibration_stats(db: DBSession, current_user: CurrentUser) -> dic
     # Counts by decision type
     decision_rows = (
         await db.execute(
-            select(CalibrationRecord.judge_decision, func.count(CalibrationRecord.id))
-            .group_by(CalibrationRecord.judge_decision)
+            select(CalibrationRecord.judge_decision, func.count(CalibrationRecord.id)).group_by(
+                CalibrationRecord.judge_decision
+            )
         )
     ).all()
     by_decision = {row[0]: row[1] for row in decision_rows}

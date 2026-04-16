@@ -197,6 +197,7 @@ async def upload_case_document(
 
     # Upload to OpenAI Files API for pipeline processing
     from openai import AsyncOpenAI
+
     from src.shared.config import settings
 
     client = AsyncOpenAI(api_key=settings.openai_api_key)
