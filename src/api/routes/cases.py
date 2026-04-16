@@ -1,3 +1,4 @@
+from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
@@ -62,8 +63,9 @@ async def create_case(
     "/",
     response_model=CaseListResponse,
     operation_id="list_cases",
-    summary="List cases with pagination",
-    description="List cases with optional status and domain filters. "
+    summary="List cases with pagination, search, and filters",
+    description="List cases with optional status/domain filters, full-text search on "
+    "description (`q`), and created_at date range (`date_from`/`date_to`). "
     "Clerks and judges see only their own cases; admins see all.",
 )
 async def list_cases(
@@ -71,6 +73,18 @@ async def list_cases(
     current_user: CurrentUser,
     status_filter: CaseStatus | None = Query(None, alias="status"),
     domain: CaseDomain | None = None,
+    q: str | None = Query(
+        None,
+        min_length=1,
+        max_length=200,
+        description="Full-text search term applied to case description",
+    ),
+    date_from: datetime | None = Query(
+        None, description="Lower bound (inclusive) on case created_at"
+    ),
+    date_to: datetime | None = Query(
+        None, description="Upper bound (inclusive) on case created_at"
+    ),
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
 ) -> dict:
@@ -85,6 +99,22 @@ async def list_cases(
         query = query.where(Case.status == status_filter)
     if domain:
         query = query.where(Case.domain == domain)
+    if q:
+        if len(q) < 3:
+            # tsquery is wasteful for very short input; fall back to ILIKE
+            query = query.where(Case.description.ilike(f"%{q}%"))
+        else:
+            # Postgres tsquery — use plainto_tsquery so user input does not need
+            # to be escaped for tsquery operators.
+            query = query.where(
+                func.to_tsvector("simple", func.coalesce(Case.description, "")).op("@@")(
+                    func.plainto_tsquery("simple", q)
+                )
+            )
+    if date_from:
+        query = query.where(Case.created_at >= date_from)
+    if date_to:
+        query = query.where(Case.created_at <= date_to)
 
     # Count
     count_query = select(func.count()).select_from(query.subquery())
