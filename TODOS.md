@@ -68,6 +68,7 @@
 - **What:** `get_current_user` (deps.py) decodes the JWT but never validates against the `sessions` table. A revoked session remains valid until JWT expiry.
 - **Why:** A fired/suspended judge retains API access for the JWT lifetime with no kill switch.
 - **Priority:** P1 — security gap. Fix: check `Session.jwt_token_hash` and `expires_at` on every request.
+- **Completed:** 0172e3e (`fix(auth): validate JWT against sessions table on every request`) — `src/api/deps.py:68-86` joins `User`+`Session` and checks `jwt_token_hash` + `expires_at > now()` on every request.
 
 ### Verdict Ordering by UUID
 - **What:** `get_fairness_audit` orders `Verdict` by `id.desc()` (UUID v4 — random, not temporal). The Verdict model has no `created_at` column.
@@ -79,3 +80,4 @@
 - **What:** `_get_redis_client()` creates a new `redis.Redis` object on every call, never closes them.
 - **Why:** Under load this exhausts the Redis connection pool.
 - **Priority:** P2 — convert to a module-level singleton with proper lifecycle management.
+- **Completed:** feat/search-precedents-redis-singleton — module-level singleton in `src/tools/search_precedents.py`, `close_redis_client()` wired into FastAPI lifespan in `src/api/app.py`. Mirrors the pattern in `src/shared/circuit_breaker.py`.
