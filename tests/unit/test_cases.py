@@ -179,6 +179,122 @@ class TestListCases:
         assert len(items) == 2
 
 
+class TestListCasesSearchAndFilter:
+    """US-028: full-text search (`q`) and date-range filters on the list endpoint."""
+
+    @staticmethod
+    def _captured_query_holder():
+        """Helper that records the SQLAlchemy queries passed to db.execute.
+
+        Returns a (holder, side_effect) tuple. The holder is a list that will
+        accumulate every query invoked. The side_effect funnels into the
+        existing mock-result helpers used elsewhere in this module.
+        """
+        from unittest.mock import MagicMock as _MagicMock
+
+        captured: list = []
+
+        async def _side_effect(query, *args, **kwargs):
+            captured.append(query)
+            # First call (count): return scalar_one == 0
+            # Second call (items): return scalars().all() == []
+            if len(captured) == 1:
+                result = _MagicMock()
+                result.scalar_one.return_value = 0
+                return result
+            return _mock_scalars_result([])
+
+        return captured, _side_effect
+
+    async def test_list_cases_with_q_long_uses_tsquery(self):
+        """`q` of >= 3 chars triggers the to_tsvector @@ plainto_tsquery branch."""
+        user = _make_user()
+        mock_db = _build_mock_session()
+        captured, side_effect = self._captured_query_holder()
+        mock_db.execute.side_effect = side_effect
+
+        app = _app_with_overrides(mock_db, user)
+        transport = ASGITransport(app=app)
+
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get("/api/v1/cases/?q=contract")
+
+        assert resp.status_code == 200
+        # Compile the items query (second call) and confirm tsquery operators are present
+        items_query = captured[1]
+        compiled = str(items_query.compile(compile_kwargs={"literal_binds": True}))
+        assert "to_tsvector" in compiled
+        assert "plainto_tsquery" in compiled
+
+    async def test_list_cases_with_q_short_uses_ilike(self):
+        """`q` of < 3 chars falls back to ILIKE to avoid wasteful tsquery work."""
+        user = _make_user()
+        mock_db = _build_mock_session()
+        captured, side_effect = self._captured_query_holder()
+        mock_db.execute.side_effect = side_effect
+
+        app = _app_with_overrides(mock_db, user)
+        transport = ASGITransport(app=app)
+
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get("/api/v1/cases/?q=ab")
+
+        assert resp.status_code == 200
+        items_query = captured[1]
+        compiled = str(items_query.compile(compile_kwargs={"literal_binds": True}))
+        assert "ILIKE" in compiled.upper()
+        assert "to_tsvector" not in compiled
+
+    async def test_list_cases_with_date_range(self):
+        """`date_from` and `date_to` add created_at >= / <= predicates."""
+        user = _make_user()
+        mock_db = _build_mock_session()
+        captured, side_effect = self._captured_query_holder()
+        mock_db.execute.side_effect = side_effect
+
+        app = _app_with_overrides(mock_db, user)
+        transport = ASGITransport(app=app)
+
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get(
+                "/api/v1/cases/?date_from=2026-01-01T00:00:00&date_to=2026-12-31T23:59:59"
+            )
+
+        assert resp.status_code == 200
+        items_query = captured[1]
+        compiled = str(items_query.compile(compile_kwargs={"literal_binds": True}))
+        assert "created_at" in compiled
+        assert "2026-01-01" in compiled
+        assert "2026-12-31" in compiled
+
+    async def test_list_cases_filters_compose(self):
+        """`q`, `date_from`, `status`, and `domain` all apply together."""
+        user = _make_user()
+        mock_db = _build_mock_session()
+        captured, side_effect = self._captured_query_holder()
+        mock_db.execute.side_effect = side_effect
+
+        app = _app_with_overrides(mock_db, user)
+        transport = ASGITransport(app=app)
+
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get(
+                "/api/v1/cases/"
+                "?q=contract"
+                "&date_from=2026-01-01T00:00:00"
+                "&status=pending"
+                "&domain=small_claims"
+            )
+
+        assert resp.status_code == 200
+        items_query = captured[1]
+        compiled = str(items_query.compile(compile_kwargs={"literal_binds": True}))
+        assert "to_tsvector" in compiled
+        assert "created_at" in compiled
+        assert "status" in compiled.lower()
+        assert "domain" in compiled.lower()
+
+
 class TestGetCaseDetail:
     async def test_get_case_detail(self):
         """GET /api/v1/cases/{id} returns 200 with case data."""
