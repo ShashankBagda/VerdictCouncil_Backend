@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
@@ -5,6 +7,8 @@ from starlette.routing import Route
 
 from src.api.middleware.metrics import MetricsMiddleware, metrics_endpoint
 from src.api.middleware.rate_limit import RateLimitMiddleware
+from src.shared.circuit_breaker import get_pair_search_breaker
+from src.tools.search_precedents import close_redis_client
 
 OPENAPI_TAGS = [
     {
@@ -110,6 +114,19 @@ def _custom_openapi(app: FastAPI) -> dict:
     return schema
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage shared async resources for the API process.
+
+    Currently closes the shared Redis client used by the precedent
+    search tool and the PAIR Search circuit breaker on shutdown so
+    connections are released cleanly.
+    """
+    yield
+    await close_redis_client()
+    await get_pair_search_breaker().close()
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title="VerdictCouncil API",
@@ -127,6 +144,7 @@ def create_app() -> FastAPI:
         contact={"name": "VerdictCouncil Team"},
         openapi_tags=OPENAPI_TAGS,
         servers=[{"url": "http://localhost:8000", "description": "Local development"}],
+        lifespan=lifespan,
     )
 
     # Override OpenAPI schema generation
