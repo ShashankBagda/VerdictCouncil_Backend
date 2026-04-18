@@ -176,6 +176,69 @@ class MeshPipelineRunner:
         )
         return state
 
+    async def run_from(
+        self,
+        case_state: CaseState,
+        start_agent: str,
+        judge_vector_store_id: str | None = None,
+        *,
+        db: Any = None,
+        run_id: str | None = None,
+    ) -> CaseState:
+        """Re-enter the mesh pipeline at `start_agent` and run downstream.
+
+        Topology-aware dispatch:
+            L1 agent      → L1[idx:] sequential + full L2 fanout + L3 sequential
+            L2 agent      → full L2 fanout + L3 sequential (aggregator barrier
+                            requires all three L2 agents to run as a unit)
+            L3 agent      → L3[idx:] sequential
+
+        Skips the input guardrail — the caller is re-running from a
+        mid-pipeline state, not raw input. All downstream hooks
+        (judge KB, escalation halt, governance halts) still fire.
+        """
+        state = case_state
+        run_id = run_id or uuid.uuid4().hex
+
+        if start_agent in L1_AGENTS:
+            l1_start = L1_AGENTS.index(start_agent)
+            for agent_name in L1_AGENTS[l1_start:]:
+                state = await self._invoke_agent_sequential(agent_name, state, run_id)
+                await self._checkpoint(db, state, run_id, agent_name)
+                if (
+                    agent_name == "complexity-routing"
+                    and state.status == CaseStatusEnum.escalated
+                ):
+                    return state
+            state = await self._invoke_l2_fanout(state, run_id)
+            await self._checkpoint(db, state, run_id, AGGREGATOR_NAME)
+            l3_start = 0
+        elif start_agent in L2_AGENTS:
+            state = await self._invoke_l2_fanout(state, run_id)
+            await self._checkpoint(db, state, run_id, AGGREGATOR_NAME)
+            l3_start = 0
+        elif start_agent in L3_AGENTS:
+            l3_start = L3_AGENTS.index(start_agent)
+        else:
+            raise ValueError(
+                f"Unknown start_agent '{start_agent}'. "
+                f"Must be one of {L1_AGENTS + L2_AGENTS + L3_AGENTS}"
+            )
+
+        for agent_name in L3_AGENTS[l3_start:]:
+            state = await self._invoke_agent_sequential(agent_name, state, run_id)
+            await self._checkpoint(db, state, run_id, agent_name)
+
+            if agent_name == "legal-knowledge" and judge_vector_store_id:
+                state = await self._apply_judge_kb_hook(state, judge_vector_store_id)
+
+            if agent_name == "governance-verdict":
+                maybe_halted = self._apply_governance_halts(state)
+                if maybe_halted is not None:
+                    return maybe_halted
+
+        return state
+
     # ------------------------------------------------------------------
     # Inter-agent hooks (ported from PipelineRunner)
     # ------------------------------------------------------------------

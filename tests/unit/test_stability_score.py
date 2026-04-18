@@ -71,51 +71,27 @@ def _decided_case_state(verdict: str = "liable", confidence: int = 80) -> CaseSt
 
 
 def _mock_runner_with_verdicts(verdicts: list[str]):
-    """Return a mock PipelineRunner whose _run_agent() returns states with the given verdicts.
+    """Return a mock runner whose `run_from()` returns one verdict per call.
 
-    The implementation calls _run_agent per agent in sequence. We track a
-    call counter and only change the verdict on the LAST agent call of each
-    perturbation scenario (i.e., when the full agent sequence completes).
+    The controller now calls `run_from(state, start_agent)` exactly once
+    per perturbation scenario, so the mock simply rotates through the
+    verdict list in call order.
     """
     runner = MagicMock()
-    call_idx = [0]
     verdict_idx = [0]
 
-    # We need to figure out how many agents get called per perturbation.
-    # For fact_toggle and evidence_exclusion, the number of agents differs.
-    # Instead, we apply the verdict on every call and let the last one stick.
-    async def mock_run_agent(agent_name, state):
+    async def mock_run_from(state, start_agent, **_):
         v = verdicts[verdict_idx[0] % len(verdicts)]
-        state = copy.deepcopy(state)
-        state.verdict_recommendation = {
-            "recommendation_type": v,
-            "recommended_outcome": f"Perturbation verdict: {v}",
-            "confidence_score": 75,
-        }
-        call_idx[0] += 1
-        return state
-
-    # We need to increment verdict_idx after each full scenario completes.
-    # Since create_scenario calls _run_agent for each agent in the slice,
-    # we use a wrapper around create_scenario instead. But that's complex.
-    # Simpler: track which agent is the last in the pipeline and increment there.
-    from src.pipeline.runner import AGENT_ORDER
-
-    last_agent = AGENT_ORDER[-1]
-
-    async def mock_run_agent_tracking(agent_name, state):
-        v = verdicts[verdict_idx[0] % len(verdicts)]
+        verdict_idx[0] += 1
         state = copy.deepcopy(state)
         state.verdict_recommendation = {
             "recommendation_type": v,
             "recommended_outcome": f"Verdict: {v}",
             "confidence_score": 75,
         }
-        if agent_name == last_agent:
-            verdict_idx[0] += 1
         return state
 
-    runner._run_agent = AsyncMock(side_effect=mock_run_agent_tracking)
+    runner.run_from = AsyncMock(side_effect=mock_run_from)
     return runner
 
 
