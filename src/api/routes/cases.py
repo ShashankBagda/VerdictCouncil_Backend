@@ -2,7 +2,7 @@ from datetime import datetime
 from io import BytesIO
 from uuid import UUID
 
-from fastapi import APIRouter, File, HTTPException, Query, Response, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Query, Response, UploadFile, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
@@ -183,6 +183,128 @@ async def get_case(
         )
 
     return case
+
+
+# --------------------------------------------------------------------------- #
+# Pipeline Trigger (US-??? — mesh path)
+# --------------------------------------------------------------------------- #
+
+
+async def _run_mesh_pipeline(case_id: UUID) -> None:
+    """Background task: run the mesh pipeline and persist results.
+
+    Loaded inline to avoid circular imports (mesh_runner_factory pulls
+    in Solace + Pydantic settings that other route handlers don't need
+    at import time). Owns its own DB session so it survives the
+    request-scoped session closing before the pipeline finishes.
+    """
+    import logging
+
+    from src.db.persist_case_results import persist_case_results
+    from src.pipeline.mesh_runner_factory import get_mesh_runner
+    from src.services.database import async_session
+    from src.shared.case_state import CaseState, CaseStatusEnum
+
+    logger = logging.getLogger(__name__)
+
+    async with async_session() as db:
+        case_row = await db.get(Case, case_id)
+        if case_row is None:
+            logger.error("Mesh pipeline triggered for missing case_id=%s", case_id)
+            return
+
+        # Build the starting CaseState from the intake case + its documents.
+        docs_result = await db.execute(
+            select(Document).where(Document.case_id == case_id)
+        )
+        documents = list(docs_result.scalars().all())
+        raw_documents = [
+            {
+                "doc_id": str(doc.id),
+                "filename": doc.filename,
+                "openai_file_id": doc.openai_file_id,
+                "file_type": doc.file_type,
+            }
+            for doc in documents
+        ]
+        starting_state = CaseState(
+            case_id=str(case_id),
+            case_metadata={"description": case_row.description or ""},
+            raw_documents=raw_documents,
+        )
+
+    try:
+        runner = await get_mesh_runner()
+        final_state = await runner.run(starting_state)
+    except Exception:
+        logger.exception("Mesh pipeline run failed for case_id=%s", case_id)
+        async with async_session() as db:
+            case_row = await db.get(Case, case_id)
+            if case_row is not None:
+                case_row.status = CaseStatus.failed_retryable
+                await db.commit()
+        return
+
+    if final_state.status == CaseStatusEnum.pending:
+        final_state.status = CaseStatusEnum.ready_for_review
+
+    async with async_session() as db:
+        await persist_case_results(db, case_id, final_state)
+
+
+@router.post(
+    "/{case_id}/process",
+    status_code=status.HTTP_202_ACCEPTED,
+    operation_id="trigger_case_processing",
+    summary="Trigger the mesh pipeline for a case",
+    description=(
+        "Kicks off the distributed 9-agent pipeline for a case. Returns "
+        "`202 Accepted` immediately; progress is observable via "
+        "`GET /api/v1/cases/{case_id}/status/stream` and final results "
+        "land in the relational tables (`Evidence`, `Fact`, `Verdict`, etc.) "
+        "once the pipeline completes."
+    ),
+    responses={
+        400: {"model": ErrorResponse, "description": "Case not eligible for processing"},
+        403: {"model": ErrorResponse, "description": "Not authorized to process this case"},
+        404: {"model": ErrorResponse, "description": "Case not found"},
+    },
+)
+async def trigger_case_processing(
+    case_id: UUID,
+    background_tasks: BackgroundTasks,
+    db: DBSession,
+    current_user: CurrentUser,
+) -> dict:
+    case = (await db.execute(select(Case).where(Case.id == case_id))).scalar_one_or_none()
+    if case is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
+    if current_user.role == UserRole.clerk and case.created_by != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to process this case",
+        )
+    if case.status not in (CaseStatus.pending, CaseStatus.failed_retryable):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Case must be in 'pending' or 'failed_retryable' status to trigger "
+                f"processing. Current status: '{case.status.value}'"
+            ),
+        )
+
+    case.status = CaseStatus.processing
+    await db.flush()
+
+    background_tasks.add_task(_run_mesh_pipeline, case_id)
+
+    return {
+        "case_id": str(case_id),
+        "status": CaseStatus.processing.value,
+        "message": (
+            "Mesh pipeline started. Subscribe to /status/stream for agent progress."
+        ),
+    }
 
 
 # --------------------------------------------------------------------------- #
