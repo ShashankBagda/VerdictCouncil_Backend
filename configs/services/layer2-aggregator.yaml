@@ -1,13 +1,15 @@
 # configs/services/layer2-aggregator.yaml
 #
-# Layer-2 fan-in aggregator. Waits for evidence-analysis, fact-reconstruction,
-# and witness-analysis to complete per (case_id, run_id), then publishes the
-# merged CaseState to the Layer-3 (legal-knowledge) request topic.
+# Layer-2 fan-in aggregator. Subscribes to the aggregator's native A2A
+# response wildcard: the mesh runner publishes each L2 agent request
+# (evidence-analysis / fact-reconstruction / witness-analysis) with
+# `replyTo` pointed into this wildcard, so responses route here by
+# Solace topic alone.
 #
-# The subscriptions below are aggregator-specific input topics: the mesh
-# pipeline runner republishes each Layer-2 agent's response envelope
-# (`{case_id, run_id, output, base_state}` JSON) to these topics so the
-# aggregator can stay decoupled from SAM's A2A envelope format.
+# The aggregator looks up per-sub-task correlation and per-run metadata
+# in Redis (keys written by the mesh runner before it publishes), runs
+# the Redis-backed barrier, and emits a `SendTaskResponse` envelope to
+# the mesh runner's reply-to topic once all three L2 agents report.
 !include ../shared_config.yaml
 
 apps:
@@ -20,15 +22,10 @@ apps:
       service_name: layer2-aggregator
       display_name: "Layer 2 Fan-In Aggregator"
 
-      subscriptions:
-        - topic: "verdictcouncil/aggregator/input/evidence-analysis"
-          agent_key: "evidence_analysis"        # maps to CaseState.evidence_analysis
-        - topic: "verdictcouncil/aggregator/input/fact-reconstruction"
-          agent_key: "extracted_facts"          # maps to CaseState.extracted_facts
-        - topic: "verdictcouncil/aggregator/input/witness-analysis"
-          agent_key: "witnesses"                # maps to CaseState.witnesses
-
-      output_topic: "verdictcouncil/a2a/v1/agent/request/legal-knowledge"
+      # Wildcard on the aggregator's own A2A response topic. Mesh runner
+      # must set `replyTo` on L2 requests to a child of this wildcard:
+      #   verdictcouncil/a2a/v1/agent/response/layer2-aggregator/<sub_task_id>
+      response_subscription_topic: "${NAMESPACE}/a2a/v1/agent/response/layer2-aggregator/>"
 
       redis_url: ${REDIS_URL}
 
@@ -36,4 +33,7 @@ apps:
         required_agents: ["evidence_analysis", "extracted_facts", "witnesses"]
         timeout_seconds: 120
         on_timeout: "halt_and_flag"
-        # Redis key format: vc:aggregator:{case_id}:{run_id} (see aggregator.py)
+        # Redis keys (see src/services/layer2_aggregator/component.py):
+        #   vc:aggregator:sub_task:<sub_task_id>  -> agent_key|case_id|run_id
+        #   vc:aggregator:run:<case_id>:<run_id>:meta -> {base_state, mesh_reply_to}
+        #   vc:aggregator:<case_id>:<run_id>      -> barrier hash (see aggregator.py)

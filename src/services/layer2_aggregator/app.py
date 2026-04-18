@@ -1,10 +1,9 @@
 """SAM App subclass that hosts the Layer-2 fan-in aggregator as a Solace service.
 
-This mirrors the shape of `solace_agent_mesh.agent.sac.app.SamAgentApp`: the
-class reads `app_config` from YAML, builds the broker subscription list from
-`subscriptions[*].topic`, injects a single `Layer2AggregatorComponent`, and
-enables broker input + output so the merged `CaseState` is published on
-`app_config.output_topic`.
+This mirrors the shape of `solace_agent_mesh.agent.sac.app.SamAgentApp`:
+the class reads `app_config` from YAML, subscribes to the aggregator's
+native A2A response wildcard, and injects a single
+`Layer2AggregatorComponent` that owns the Redis-backed barrier.
 
 YAML contract (see `configs/services/layer2-aggregator.yaml`):
 
@@ -15,12 +14,8 @@ YAML contract (see `configs/services/layer2-aggregator.yaml`):
           <<: *broker_connection
         app_config:
           namespace: ${NAMESPACE}
-          service_name: Layer2Aggregator
-          subscriptions:
-            - {topic: "...evidence-analysis", agent_key: "evidence_analysis"}
-            - {topic: "...fact-reconstruction", agent_key: "extracted_facts"}
-            - {topic: "...witness-analysis", agent_key: "witnesses"}
-          output_topic: "verdictcouncil/a2a/v1/agent/request/legal-knowledge"
+          service_name: layer2-aggregator
+          response_subscription_topic: "${NAMESPACE}/a2a/v1/agent/response/layer2-aggregator/>"
           redis_url: ${REDIS_URL}
 """
 
@@ -54,49 +49,32 @@ class Layer2AggregatorApp(App):
 
         namespace = app_config.get("namespace")
         service_name = app_config.get("service_name", "layer2-aggregator")
-        subscriptions = app_config.get("subscriptions") or []
-        output_topic = app_config.get("output_topic")
+        response_subscription_topic = app_config.get("response_subscription_topic")
         redis_url = app_config.get("redis_url")
 
         if not namespace:
             raise ValueError("Layer2AggregatorApp requires app_config.namespace")
-        if not subscriptions:
+        if not response_subscription_topic:
             raise ValueError(
-                "Layer2AggregatorApp requires app_config.subscriptions (at least one)"
+                "Layer2AggregatorApp requires app_config.response_subscription_topic"
             )
-        if not output_topic:
-            raise ValueError("Layer2AggregatorApp requires app_config.output_topic")
         if not redis_url:
             raise ValueError("Layer2AggregatorApp requires app_config.redis_url")
 
-        topic_map: Dict[str, str] = {}
-        broker_subscriptions = []
-        for sub in subscriptions:
-            topic = sub.get("topic")
-            agent_key = sub.get("agent_key")
-            if not (topic and agent_key):
-                raise ValueError(
-                    f"Each subscription needs both 'topic' and 'agent_key' (got {sub!r})"
-                )
-            topic_map[topic] = agent_key
-            broker_subscriptions.append({"topic": topic})
-
         log.info(
-            "Configuring Layer2AggregatorApp '%s' in namespace '%s' with %d subscriptions",
+            "Configuring Layer2AggregatorApp '%s' in namespace '%s' subscribing to %s",
             service_name,
             namespace,
-            len(broker_subscriptions),
+            response_subscription_topic,
         )
 
         component_definition = {
             "component_name": f"{service_name}_component",
             "component_class": Layer2AggregatorComponent,
             "component_config": {
-                "topic_map": topic_map,
-                "output_topic": output_topic,
                 "redis_url": redis_url,
             },
-            "subscriptions": broker_subscriptions,
+            "subscriptions": [{"topic": response_subscription_topic}],
         }
         app_info["components"] = [component_definition]
 

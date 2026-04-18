@@ -1,12 +1,23 @@
-"""SAM component that bridges broker messages to the Layer2Aggregator.
+"""SAM component that bridges native A2A responses to the Layer2Aggregator.
 
-The component subscribes to the 3 parallel-fan-in topics (evidence analysis,
-fact reconstruction, witness analysis) via the Solace AI Connector framework,
-and delegates to the existing async `Layer2Aggregator` in `aggregator.py` for
-the Redis-backed barrier logic.
+Subscribes to `verdictcouncil/a2a/v1/agent/response/layer2-aggregator/>`
+(the wildcard reply-to the mesh runner sets on L2 requests). Each
+inbound message is a `SendTaskResponse` envelope; the component:
 
-Because `ComponentBase.invoke` is synchronous but the aggregator is async, this
-component owns a dedicated asyncio event loop running in a daemon thread.
+1. Pulls the sub_task_id from the trailing topic segment.
+2. Looks up `vc:aggregator:sub_task:<sub_task_id>` in Redis for the
+   `(agent_key, case_id, run_id)` tuple written by the mesh runner
+   before it published the L2 requests.
+3. Looks up `vc:aggregator:run:<case_id>:<run_id>:meta` for the
+   original CaseState (``base_state``) and the mesh runner's
+   ``mesh_reply_to`` topic.
+4. Calls `Layer2Aggregator.receive_output(...)` to update the Redis
+   barrier. If the barrier fires, builds a fresh SendTaskResponse and
+   emits it to ``mesh_reply_to`` so the runner can resume the chain.
+
+Because `ComponentBase.invoke` is synchronous and the aggregator is
+async, the component owns a dedicated asyncio event loop running on
+a daemon thread (same pattern as `SamAgentApp`).
 """
 
 from __future__ import annotations
@@ -21,6 +32,11 @@ import redis.asyncio as redis
 
 from solace_ai_connector.components.component_base import ComponentBase
 
+from .a2a import (
+    build_send_task_response,
+    parse_send_task_response,
+    sub_task_id_from_topic,
+)
 from .aggregator import Layer2Aggregator
 
 logger = logging.getLogger(__name__)
@@ -29,28 +45,12 @@ logger = logging.getLogger(__name__)
 info = {
     "class_name": "Layer2AggregatorComponent",
     "description": (
-        "Fan-in barrier for the three parallel Layer-2 agents. "
-        "Waits for evidence-analysis, fact-reconstruction, and witness-analysis "
-        "to complete per (case_id, run_id), then publishes the merged CaseState "
-        "to the Layer-3 input topic."
+        "Fan-in barrier for the three parallel Layer-2 agents. Subscribes "
+        "to the native A2A response wildcard for the aggregator, merges "
+        "outputs per (case_id, run_id), and publishes a SendTaskResponse "
+        "envelope to the mesh runner's reply-to once all three report."
     ),
     "config_parameters": [
-        {
-            "name": "topic_map",
-            "required": True,
-            "type": "object",
-            "description": (
-                "Mapping from subscribed topic -> CaseState field name "
-                "(e.g. 'verdictcouncil/aggregator/input/evidence-analysis' -> "
-                "'evidence_analysis')."
-            ),
-        },
-        {
-            "name": "output_topic",
-            "required": True,
-            "type": "string",
-            "description": "Topic on which to publish the merged CaseState.",
-        },
         {
             "name": "redis_url",
             "required": True,
@@ -60,35 +60,30 @@ info = {
     ],
     "input_schema": {
         "type": "object",
-        "properties": {
-            "case_id": {"type": "string"},
-            "run_id": {"type": "string"},
-            "output": {"type": "object"},
-            "base_state": {"type": "object"},
-        },
-        "required": ["case_id", "run_id", "output", "base_state"],
+        "description": "JSON-RPC 2.0 SendTaskResponse envelope from an L2 agent.",
     },
     "output_schema": {
         "type": "object",
-        "description": "Merged CaseState dict, only emitted once the barrier is met.",
+        "description": (
+            "JSON-RPC 2.0 SendTaskResponse envelope carrying the merged "
+            "CaseState, only emitted once all three L2 agents report."
+        ),
     },
 }
 
 
+# Redis keys written by the mesh runner and read here.
+SUB_TASK_KEY_PREFIX = "vc:aggregator:sub_task:"
+RUN_META_KEY_PREFIX = "vc:aggregator:run:"
+
+
 class Layer2AggregatorComponent(ComponentBase):
-    """Bridges broker inputs to the async `Layer2Aggregator`."""
+    """Bridges native A2A response topics to the async `Layer2Aggregator`."""
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(info, **kwargs)
 
-        self._topic_map: dict[str, str] = self.get_config("topic_map") or {}
-        self._output_topic: str = self.get_config("output_topic")
         redis_url: str = self.get_config("redis_url")
-
-        if not self._topic_map:
-            raise ValueError("Layer2AggregatorComponent requires non-empty topic_map")
-        if not self._output_topic:
-            raise ValueError("Layer2AggregatorComponent requires output_topic")
         if not redis_url:
             raise ValueError("Layer2AggregatorComponent requires redis_url")
 
@@ -110,29 +105,51 @@ class Layer2AggregatorComponent(ComponentBase):
 
     def invoke(self, message: Any, data: Any) -> Any:
         topic = self._extract_topic(message)
-        agent_key = self._topic_map.get(topic)
-        if agent_key is None:
+        sub_task_id = sub_task_id_from_topic(topic)
+        if not sub_task_id:
             logger.warning(
-                "Layer2AggregatorComponent received message on unmapped topic %s; dropping",
+                "Layer2AggregatorComponent received message with no sub_task_id (topic=%r); dropping",
                 topic,
             )
             return None
 
-        payload = self._coerce_payload(data)
-        case_id = payload.get("case_id")
-        run_id = payload.get("run_id")
-        output = payload.get("output")
-        base_state = payload.get("base_state") or {}
+        correlation = asyncio.run_coroutine_threadsafe(
+            self._lookup_correlation(sub_task_id),
+            self._loop,
+        ).result()
+        if correlation is None:
+            logger.warning(
+                "Layer2AggregatorComponent has no correlation entry for sub_task_id=%s "
+                "(orphan response or expired TTL); dropping",
+                sub_task_id,
+            )
+            return None
+        agent_key, case_id, run_id = correlation
 
-        if not (case_id and run_id and output is not None):
+        output = parse_send_task_response(data)
+        if not output:
             logger.error(
-                "Malformed aggregator input on %s: missing case_id/run_id/output (keys=%s)",
-                topic,
-                sorted(payload.keys()),
+                "Empty/unparseable agent output for sub_task_id=%s agent_key=%s; dropping",
+                sub_task_id,
+                agent_key,
             )
             return None
 
-        future = asyncio.run_coroutine_threadsafe(
+        run_meta = asyncio.run_coroutine_threadsafe(
+            self._lookup_run_meta(case_id, run_id),
+            self._loop,
+        ).result()
+        if run_meta is None:
+            logger.error(
+                "No run metadata for case_id=%s run_id=%s; cannot merge (mesh runner "
+                "must stash base_state + mesh_reply_to before publishing L2 requests)",
+                case_id,
+                run_id,
+            )
+            return None
+        base_state, mesh_reply_to = run_meta
+
+        merged = asyncio.run_coroutine_threadsafe(
             self._aggregator.receive_output(
                 agent_key=agent_key,
                 case_id=case_id,
@@ -141,19 +158,58 @@ class Layer2AggregatorComponent(ComponentBase):
                 base_state=base_state,
             ),
             self._loop,
-        )
-        merged = future.result()
+        ).result()
 
         if merged is None:
             return None
 
         logger.info(
-            "Layer2 barrier met for case_id=%s run_id=%s — forwarding to %s",
+            "Layer2 barrier met for case_id=%s run_id=%s — emitting SendTaskResponse to %s",
             case_id,
             run_id,
-            self._output_topic,
+            mesh_reply_to,
         )
-        return {"payload": merged, "topic": self._output_topic}
+        envelope = build_send_task_response(
+            task_id=f"layer2-{case_id}-{run_id}",
+            session_id=run_id,
+            merged_state=merged,
+        )
+        return {"payload": envelope, "topic": mesh_reply_to}
+
+    async def _lookup_correlation(self, sub_task_id: str) -> tuple[str, str, str] | None:
+        """Read `agent_key|case_id|run_id` for an L2 sub-task id."""
+        raw = await self._redis.get(SUB_TASK_KEY_PREFIX + sub_task_id)
+        if raw is None:
+            return None
+        value = raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else raw
+        parts = value.split("|")
+        if len(parts) != 3:
+            logger.error(
+                "Malformed sub_task correlation for %s (expected 3 pipe-separated fields, got %r)",
+                sub_task_id,
+                value,
+            )
+            return None
+        return parts[0], parts[1], parts[2]
+
+    async def _lookup_run_meta(self, case_id: str, run_id: str) -> tuple[dict, str] | None:
+        """Read `{base_state, mesh_reply_to}` for a pipeline run."""
+        key = f"{RUN_META_KEY_PREFIX}{case_id}:{run_id}:meta"
+        raw = await self._redis.get(key)
+        if raw is None:
+            return None
+        text = raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else raw
+        try:
+            meta = json.loads(text)
+        except json.JSONDecodeError:
+            logger.error("Malformed run meta for %s: %r", key, text)
+            return None
+        base_state = meta.get("base_state") or {}
+        mesh_reply_to = meta.get("mesh_reply_to") or ""
+        if not mesh_reply_to:
+            logger.error("Run meta for %s missing mesh_reply_to", key)
+            return None
+        return base_state, mesh_reply_to
 
     @staticmethod
     def _extract_topic(message: Any) -> str:
@@ -164,16 +220,6 @@ class Layer2AggregatorComponent(ComponentBase):
             return topic() or ""
         direct = getattr(message, "topic", None)
         return direct or ""
-
-    @staticmethod
-    def _coerce_payload(data: Any) -> dict:
-        if isinstance(data, dict):
-            return data
-        if isinstance(data, (bytes, bytearray)):
-            return json.loads(data.decode("utf-8"))
-        if isinstance(data, str):
-            return json.loads(data)
-        return {}
 
     def stop_component(self) -> None:
         try:
