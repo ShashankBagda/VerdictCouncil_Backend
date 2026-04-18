@@ -1,0 +1,42 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: stuck-case-watchdog
+  namespace: verdictcouncil
+  labels:
+    app: verdictcouncil
+    component: stuck-case-watchdog
+spec:
+  # Every 5 minutes. With a 30-min stuck threshold, worst-case
+  # user-visible spinner is ~35 min before flipping to failed_retryable.
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        metadata:
+          labels:
+            app: verdictcouncil
+            component: stuck-case-watchdog
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: watchdog
+              image: verdictcouncil:latest
+              # Override the image's default ENTRYPOINT
+              # ("python -m solace_agent_mesh.main") so we run the watchdog
+              # script instead of booting a SAM agent.
+              command: ["python", "-m", "src.services.stuck_case_watchdog"]
+              envFrom:
+                - secretRef:
+                    name: verdictcouncil-secrets
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 128Mi
+                limits:
+                  cpu: 100m
+                  memory: 256Mi
