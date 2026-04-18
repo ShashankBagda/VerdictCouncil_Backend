@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: solace
-          image: solace/solace-pubsub-standard:latest
+          image: solace/solace-pubsub-standard:10.25.0.217
           ports:
             - containerPort: 55555
             - containerPort: 8080

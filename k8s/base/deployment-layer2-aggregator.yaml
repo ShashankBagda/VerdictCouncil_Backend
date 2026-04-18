@@ -7,7 +7,7 @@ metadata:
     app: verdictcouncil
     component: layer2-aggregator
 spec:
-  replicas: 0 # EPIC-6-BLOCKED: solace_agent_mesh.services.aggregator.app does not exist in v1.4.7
+  replicas: 1
   selector:
     matchLabels:
       app: verdictcouncil
