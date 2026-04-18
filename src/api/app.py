@@ -7,6 +7,7 @@ from starlette.routing import Route
 
 from src.api.middleware.metrics import MetricsMiddleware, metrics_endpoint
 from src.api.middleware.rate_limit import RateLimitMiddleware
+from src.pipeline.mesh_runner_factory import close_mesh_a2a_client
 from src.shared.circuit_breaker import get_pair_search_breaker
 from src.tools.search_precedents import close_redis_client
 
@@ -125,6 +126,7 @@ async def lifespan(app: FastAPI):
     yield
     await close_redis_client()
     await get_pair_search_breaker().close()
+    await close_mesh_a2a_client()
 
 
 def create_app() -> FastAPI:
