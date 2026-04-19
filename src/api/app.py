@@ -163,9 +163,13 @@ def create_app() -> FastAPI:
         decisions,
         escalation,
         health,
+        hearing_notes,
+        hearing_pack,
         judge,
         knowledge_base,
         precedent_search,
+        reopen_requests,
+        senior_inbox,
         what_if,
     )
 
@@ -175,6 +179,9 @@ def create_app() -> FastAPI:
     app.include_router(decisions.router, prefix="/api/v1/cases", tags=["decisions"])
     app.include_router(what_if.router, prefix="/api/v1/cases", tags=["what-if"])
     app.include_router(judge.router, prefix="/api/v1/cases", tags=["judge"])
+    app.include_router(hearing_pack.router, prefix="/api/v1/cases", tags=["judge"])
+    app.include_router(hearing_notes.router, prefix="/api/v1/cases", tags=["judge"])
+    app.include_router(reopen_requests.router, prefix="/api/v1/cases", tags=["judge"])
     app.include_router(audit.router, prefix="/api/v1/audit", tags=["audit"])
     app.include_router(dashboard.router, prefix="/api/v1/dashboard", tags=["dashboard"])
     app.include_router(health.router, prefix="/api/v1/health", tags=["health"])
@@ -185,6 +192,7 @@ def create_app() -> FastAPI:
         knowledge_base.router, prefix="/api/v1/knowledge-base", tags=["knowledge-base"]
     )
     app.include_router(escalation.router, prefix="/api/v1/escalated-cases", tags=["escalation"])
+    app.include_router(senior_inbox.router, prefix="/api/v1/senior-inbox", tags=["escalation"])
 
     # Prometheus-compatible metrics (excluded from OpenAPI spec)
     app.routes.append(Route("/metrics", metrics_endpoint, methods=["GET"], include_in_schema=False))
