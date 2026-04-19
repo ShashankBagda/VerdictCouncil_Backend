@@ -51,6 +51,13 @@ def seed() -> None:
     Base.metadata.create_all(engine)
 
     with Session(engine) as session:
+        # Check if already seeded
+        from sqlalchemy import select
+        existing = session.execute(select(User).limit(1)).scalar_one_or_none()
+        if existing:
+            print("Database already seeded — skipping.")
+            return
+
         # ------------------------------------------------------------------ Users
         judge = User(
             id=uuid.UUID("00000000-0000-4000-a000-000000000001"),
@@ -80,7 +87,7 @@ def seed() -> None:
         # ------------------------------------------------------------------ Cases
         case_traffic = Case(
             id=uuid.UUID("10000000-0000-4000-a000-000000000001"),
-            domain=CaseDomain.criminal,
+            domain=CaseDomain.traffic_violation,
             status=CaseStatus.pending,
             jurisdiction_valid=True,
             complexity=CaseComplexity.low,
@@ -89,7 +96,7 @@ def seed() -> None:
         )
         case_small_claims_1 = Case(
             id=uuid.UUID("10000000-0000-4000-a000-000000000002"),
-            domain=CaseDomain.civil,
+            domain=CaseDomain.small_claims,
             status=CaseStatus.processing,
             jurisdiction_valid=True,
             complexity=CaseComplexity.medium,
@@ -98,7 +105,7 @@ def seed() -> None:
         )
         case_small_claims_2 = Case(
             id=uuid.UUID("10000000-0000-4000-a000-000000000003"),
-            domain=CaseDomain.civil,
+            domain=CaseDomain.small_claims,
             status=CaseStatus.decided,
             jurisdiction_valid=True,
             complexity=CaseComplexity.low,
