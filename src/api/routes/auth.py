@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+import secrets
 from uuid import UUID
 
 import bcrypt as _bcrypt
@@ -7,9 +8,15 @@ from fastapi import APIRouter, Cookie, HTTPException, Response, status
 from sqlalchemy import select
 
 from src.api.deps import CurrentUser, DBSession, _hash_jwt_token
-from src.api.schemas.auth import LoginRequest, RegisterRequest, UserResponse
+from src.api.schemas.auth import (
+    LoginRequest,
+    PasswordResetRequest,
+    PasswordResetVerifyRequest,
+    RegisterRequest,
+    UserResponse,
+)
 from src.api.schemas.common import ErrorResponse, MessageResponse, ValidationErrorResponse
-from src.models.user import Session, User
+from src.models.user import PasswordResetToken, Session, User
 from src.shared.config import settings
 
 router = APIRouter()
@@ -43,6 +50,10 @@ def _create_token(user: User) -> str:
         "exp": datetime.now(UTC) + timedelta(hours=TOKEN_EXPIRY_HOURS),
     }
     return jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
+
+
+def _hash_reset_token(token: str) -> str:
+    return _hash_jwt_token(token)
 
 
 # --------------------------------------------------------------------------- #
@@ -278,3 +289,84 @@ async def logout(
 )
 async def me(current_user: CurrentUser) -> User:
     return current_user
+
+
+@router.post(
+    "/request-reset",
+    response_model=dict,
+    operation_id="request_password_reset",
+    summary="Request password reset",
+    description="Create a password reset token for a registered user email.",
+    openapi_extra={"security": []},
+)
+async def request_password_reset(body: PasswordResetRequest, db: DBSession) -> dict:
+    result = await db.execute(select(User).where(User.email == body.email))
+    user = result.scalar_one_or_none()
+
+    if not user:
+        return {"message": "If the email exists, a reset token has been issued."}
+
+    raw_token = secrets.token_urlsafe(32)
+    reset_token = PasswordResetToken(
+        user_id=user.id,
+        token_hash=_hash_reset_token(raw_token),
+        expires_at=datetime.now(UTC) + timedelta(minutes=30),
+    )
+    db.add(reset_token)
+    await db.flush()
+
+    # NOTE: This project currently has no email service; expose token for dev flow.
+    return {
+        "message": "If the email exists, a reset token has been issued.",
+        "reset_token": raw_token,
+        "expires_at": reset_token.expires_at.isoformat(),
+    }
+
+
+@router.post(
+    "/verify-reset",
+    response_model=MessageResponse,
+    operation_id="verify_password_reset",
+    summary="Verify password reset token",
+    description="Verify a reset token and set a new password.",
+    openapi_extra={"security": []},
+    responses={
+        400: {"model": ErrorResponse, "description": "Invalid or expired token"},
+    },
+)
+async def verify_password_reset(body: PasswordResetVerifyRequest, db: DBSession) -> dict:
+    token_hash = _hash_reset_token(body.token)
+    result = await db.execute(
+        select(PasswordResetToken).where(PasswordResetToken.token_hash == token_hash)
+    )
+    reset_token = result.scalar_one_or_none()
+
+    if (
+        not reset_token
+        or reset_token.used_at is not None
+        or reset_token.expires_at <= datetime.now(UTC)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset token",
+        )
+
+    user_result = await db.execute(select(User).where(User.id == reset_token.user_id))
+    user = user_result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid reset token",
+        )
+
+    user.password_hash = _hash_password(body.new_password)
+    reset_token.used_at = datetime.now(UTC)
+
+    # Invalidate active sessions after password reset.
+    sessions_result = await db.execute(select(Session).where(Session.user_id == user.id))
+    sessions = sessions_result.scalars().all()
+    for session in sessions:
+        session.expires_at = datetime.now(UTC)
+
+    await db.flush()
+    return {"message": "Password reset successful"}

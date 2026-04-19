@@ -15,12 +15,13 @@ from src.models.case import (
     Verdict,
     Witness,
 )
-from src.models.user import Session, User
+from src.models.user import PasswordResetToken, Session, User
 
 __all__ = [
     "Base",
     "User",
     "Session",
+    "PasswordResetToken",
     "Case",
     "Party",
     "Document",
