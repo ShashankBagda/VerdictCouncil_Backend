@@ -1,4 +1,6 @@
 from collections.abc import AsyncGenerator, Callable
+import hashlib
+from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
@@ -7,7 +9,7 @@ from fastapi import Cookie, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.models.user import User, UserRole
+from src.models.user import Session, User, UserRole
 from src.services.database import async_session
 from src.shared.config import settings
 
@@ -23,6 +25,10 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 
 DBSession = Annotated[AsyncSession, Depends(get_db)]
+
+
+def _hash_jwt_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
 async def get_current_user(
@@ -61,6 +67,20 @@ async def get_current_user(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found",
+        )
+
+    session_result = await db.execute(
+        select(Session).where(
+            Session.user_id == user.id,
+            Session.jwt_token_hash == _hash_jwt_token(vc_token),
+            Session.expires_at > datetime.now(UTC),
+        )
+    )
+    session = session_result.scalar_one_or_none()
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session revoked or expired",
         )
 
     return user

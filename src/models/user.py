@@ -19,6 +19,7 @@ class UserRole(str, enum.Enum):
     judge = "judge"
     admin = "admin"
     clerk = "clerk"
+    senior_judge = "senior_judge"
 
 
 class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
