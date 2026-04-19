@@ -39,11 +39,10 @@ DATABASE_URL = os.getenv(
 
 
 def _hash_password(password: str) -> str:
-    """Hash password using bcrypt (matches auth.py's pwd_context)."""
-    from passlib.context import CryptContext
+    """Hash password using bcrypt directly (avoids passlib version conflicts)."""
+    import bcrypt
 
-    ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
-    return ctx.hash(password)
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 
 def seed() -> None:

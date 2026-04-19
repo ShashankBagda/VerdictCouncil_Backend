@@ -1,8 +1,8 @@
 from datetime import UTC, datetime, timedelta
 
+import bcrypt as _bcrypt
 import jwt
 from fastapi import APIRouter, HTTPException, Response, status
-from passlib.context import CryptContext
 from sqlalchemy import select
 
 from src.api.deps import CurrentUser, DBSession
@@ -12,7 +12,6 @@ from src.models.user import User
 from src.shared.config import settings
 
 router = APIRouter()
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 TOKEN_EXPIRY_HOURS = 24
 
@@ -21,6 +20,14 @@ _COOKIE_KWARGS: dict[str, object] = {
     "httponly": True,
     "samesite": "lax",
 }
+
+
+def _hash_password(password: str) -> str:
+    return _bcrypt.hashpw(password.encode("utf-8"), _bcrypt.gensalt()).decode("utf-8")
+
+
+def _verify_password(plain: str, hashed: str) -> bool:
+    return _bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
 
 
 # --------------------------------------------------------------------------- #
@@ -68,7 +75,7 @@ async def register(body: RegisterRequest, db: DBSession) -> User:
         name=body.name,
         email=body.email,
         role=body.role,
-        password_hash=pwd_context.hash(body.password),
+        password_hash=_hash_password(body.password),
     )
     db.add(user)
     try:
@@ -100,7 +107,7 @@ async def login(body: LoginRequest, response: Response, db: DBSession) -> dict:
     result = await db.execute(select(User).where(User.email == body.email))
     user = result.scalar_one_or_none()
 
-    if not user or not pwd_context.verify(body.password, user.password_hash):
+    if not user or not _verify_password(body.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
