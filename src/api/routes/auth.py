@@ -17,6 +17,7 @@ from src.api.schemas.auth import (
 )
 from src.api.schemas.common import ErrorResponse, MessageResponse, ValidationErrorResponse
 from src.models.user import PasswordResetToken, Session, User
+from src.services.mailer import send_password_reset_email
 from src.shared.config import settings
 
 router = APIRouter()
@@ -30,12 +31,27 @@ _COOKIE_KWARGS: dict[str, object] = {
 }
 
 
+class _PwdContextAdapter:
+    """Compatibility adapter for tests expecting a pwd_context-like object."""
+
+    @staticmethod
+    def hash(password: str) -> str:
+        return _bcrypt.hashpw(password.encode("utf-8"), _bcrypt.gensalt()).decode("utf-8")
+
+    @staticmethod
+    def verify(plain: str, hashed: str) -> bool:
+        return _bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+
+
+pwd_context = _PwdContextAdapter()
+
+
 def _hash_password(password: str) -> str:
-    return _bcrypt.hashpw(password.encode("utf-8"), _bcrypt.gensalt()).decode("utf-8")
+    return pwd_context.hash(password)
 
 
 def _verify_password(plain: str, hashed: str) -> bool:
-    return _bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+    return pwd_context.verify(plain, hashed)
 
 
 # --------------------------------------------------------------------------- #
@@ -310,17 +326,14 @@ async def request_password_reset(body: PasswordResetRequest, db: DBSession) -> d
     reset_token = PasswordResetToken(
         user_id=user.id,
         token_hash=_hash_reset_token(raw_token),
-        expires_at=datetime.now(UTC) + timedelta(minutes=30),
+        expires_at=datetime.now(UTC) + timedelta(minutes=settings.reset_token_ttl_minutes),
     )
     db.add(reset_token)
     await db.flush()
 
-    # NOTE: This project currently has no email service; expose token for dev flow.
-    return {
-        "message": "If the email exists, a reset token has been issued.",
-        "reset_token": raw_token,
-        "expires_at": reset_token.expires_at.isoformat(),
-    }
+    # Security: never return reset tokens in API responses.
+    send_password_reset_email(user.email, raw_token)
+    return {"message": "If the email exists, a reset token has been issued."}
 
 
 @router.post(

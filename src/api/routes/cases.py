@@ -24,6 +24,79 @@ from src.shared.sanitization import sanitize_user_input
 router = APIRouter()
 
 
+def _escape_pdf_text(text: str) -> str:
+    return text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+
+def _build_simple_pdf(title: str, payload: dict) -> bytes:
+    lines = [
+        title,
+        f"Case ID: {payload.get('id')}",
+        f"Domain: {payload.get('domain')}",
+        f"Status: {payload.get('status')}",
+        "",
+        "Description:",
+        (payload.get("description") or "")[:1000],
+        "",
+        "Parties:",
+    ]
+    for party in payload.get("parties", [])[:20]:
+        lines.append(f"- {party.get('name')} ({party.get('role')})")
+
+    lines.append("")
+    lines.append("Verdicts:")
+    for verdict in payload.get("verdicts", [])[:20]:
+        lines.append(
+            f"- {verdict.get('recommendation_type')}: {verdict.get('recommended_outcome') or ''}"
+        )
+
+    y_start = 770
+    y_step = 16
+    text_commands: list[str] = ["BT", "/F1 11 Tf"]
+    for index, line in enumerate(lines[:40]):
+        y = y_start - (index * y_step)
+        text_commands.append(f"1 0 0 1 40 {y} Tm ({_escape_pdf_text(str(line))}) Tj")
+    text_commands.append("ET")
+    content_stream = "\n".join(text_commands).encode("utf-8")
+
+    objects: list[bytes] = []
+    objects.append(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n")
+    objects.append(b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n")
+    objects.append(
+        b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+        b"/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\nendobj\n"
+    )
+    objects.append(b"4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n")
+    objects.append(
+        f"5 0 obj\n<< /Length {len(content_stream)} >>\nstream\n".encode("utf-8")
+        + content_stream
+        + b"\nendstream\nendobj\n"
+    )
+
+    pdf = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for obj in objects:
+        offsets.append(len(pdf))
+        pdf.extend(obj)
+
+    xref_offset = len(pdf)
+    pdf.extend(f"xref\n0 {len(objects) + 1}\n".encode("utf-8"))
+    pdf.extend(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        pdf.extend(f"{offset:010d} 00000 n \n".encode("utf-8"))
+
+    pdf.extend(
+        (
+            "trailer\n"
+            f"<< /Size {len(objects) + 1} /Root 1 0 R >>\n"
+            "startxref\n"
+            f"{xref_offset}\n"
+            "%%EOF"
+        ).encode("utf-8")
+    )
+    return bytes(pdf)
+
+
 # --------------------------------------------------------------------------- #
 # Endpoints
 # --------------------------------------------------------------------------- #
@@ -152,7 +225,7 @@ async def get_case(
     "/{case_id}/export",
     operation_id="export_case",
     summary="Export case record",
-    description="Export a case in JSON format. PDF placeholder returns 501 until renderer is added.",
+    description="Export a case in JSON or PDF format.",
     responses={
         404: {"model": ErrorResponse, "description": "Case not found"},
     },
@@ -239,9 +312,11 @@ async def export_case(
         )
 
     if format.lower() == "pdf":
-        raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail="PDF export renderer is not configured yet. Use format=json.",
+        pdf_content = _build_simple_pdf(f"Case Export - {case_id}", export_payload)
+        return Response(
+            content=pdf_content,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"attachment; filename=case-{case_id}.pdf"},
         )
 
     raise HTTPException(

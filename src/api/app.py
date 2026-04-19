@@ -62,6 +62,10 @@ OPENAPI_TAGS = [
         "name": "escalation",
         "description": "Escalated case review and resolution workflow.",
     },
+    {
+        "name": "admin",
+        "description": "Administrative controls for vector stores, user actions, and costs.",
+    },
 ]
 
 
@@ -155,6 +159,7 @@ def create_app() -> FastAPI:
     app.add_middleware(RateLimitMiddleware)
 
     from src.api.routes import (
+        admin,
         audit,
         auth,
         case_data,
@@ -193,6 +198,7 @@ def create_app() -> FastAPI:
     )
     app.include_router(escalation.router, prefix="/api/v1/escalated-cases", tags=["escalation"])
     app.include_router(senior_inbox.router, prefix="/api/v1/senior-inbox", tags=["escalation"])
+    app.include_router(admin.router, prefix="/api/v1/admin", tags=["admin"])
 
     # Prometheus-compatible metrics (excluded from OpenAPI spec)
     app.routes.append(Route("/metrics", metrics_endpoint, methods=["GET"], include_in_schema=False))

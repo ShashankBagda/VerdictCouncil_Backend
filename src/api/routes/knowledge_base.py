@@ -5,17 +5,28 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, File, HTTPException, UploadFile, status
 from openai import AsyncOpenAI
 
 from src.api.deps import require_role
-from src.api.schemas.common import ErrorResponse
+from src.api.schemas.common import ErrorResponse, MessageResponse
 from src.api.schemas.knowledge_base import (
+    KnowledgeBaseDocument,
+    KnowledgeBaseDocumentListResponse,
+    KnowledgeBaseSearchRequest,
+    KnowledgeBaseSearchResponse,
     KnowledgeBaseStatusResponse,
     PairApiStatus,
     VectorStoreStatus,
 )
 from src.models.user import User, UserRole
+from src.services.knowledge_base_store import (
+    delete_document,
+    initialize_store,
+    list_documents,
+    save_document,
+    search_documents,
+)
 from src.shared.circuit_breaker import get_pair_search_breaker
 from src.shared.config import settings
 
@@ -90,3 +101,76 @@ async def get_knowledge_base_status(
         vector_store=vector_store,
         last_checked=datetime.now(UTC),
     )
+
+
+@router.post(
+    "/initialize",
+    response_model=MessageResponse,
+    operation_id="initialize_knowledge_base",
+    summary="Initialize knowledge base storage",
+    description="Prepare local knowledge base storage and metadata index.",
+    responses={403: {"model": ErrorResponse, "description": "Insufficient permissions"}},
+)
+async def initialize_knowledge_base(
+    current_user: User = require_role(UserRole.judge),
+) -> dict:
+    initialize_store()
+    return {"message": "Knowledge base initialized"}
+
+
+@router.get(
+    "/documents",
+    response_model=KnowledgeBaseDocumentListResponse,
+    operation_id="list_knowledge_base_documents",
+    summary="List knowledge base documents",
+)
+async def list_knowledge_base_documents(
+    current_user: User = require_role(UserRole.judge),
+) -> dict:
+    data = list_documents()
+    return data
+
+
+@router.post(
+    "/documents",
+    response_model=KnowledgeBaseDocument,
+    operation_id="upload_knowledge_base_document",
+    summary="Upload a document to the knowledge base",
+)
+async def upload_knowledge_base_document(
+    file: UploadFile = File(...),
+    current_user: User = require_role(UserRole.judge),
+) -> dict:
+    if not file.filename:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Filename is required")
+
+    return await save_document(file)
+
+
+@router.delete(
+    "/documents/{file_id}",
+    response_model=MessageResponse,
+    operation_id="delete_knowledge_base_document",
+    summary="Delete a knowledge base document",
+)
+async def delete_knowledge_base_document(
+    file_id: str,
+    current_user: User = require_role(UserRole.judge),
+) -> dict:
+    deleted = delete_document(file_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+    return {"message": "Document deleted"}
+
+
+@router.post(
+    "/search",
+    response_model=KnowledgeBaseSearchResponse,
+    operation_id="search_knowledge_base",
+    summary="Search the knowledge base",
+)
+async def search_knowledge_base(
+    body: KnowledgeBaseSearchRequest,
+    current_user: User = require_role(UserRole.judge),
+) -> dict:
+    return search_documents(body.query, limit=body.limit)
