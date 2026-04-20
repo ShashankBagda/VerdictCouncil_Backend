@@ -15,6 +15,19 @@ _XML_INJECTION_PATTERNS = [
 ]
 
 
+def detect_injection(text: str) -> bool:
+    """Return True when text matches any known prompt-injection pattern.
+
+    Used by guardrails.check_input_injection as the layer-1 regex scan
+    before falling back to a lightweight LLM classifier.
+    """
+    if not text:
+        return False
+    return any(pattern.search(text) for pattern in _INJECTION_PATTERNS) or any(
+        pattern.search(text) for pattern in _XML_INJECTION_PATTERNS
+    )
+
+
 def sanitize_document_content(text: str) -> str:
     """Remove prompt injection patterns from document content.
 

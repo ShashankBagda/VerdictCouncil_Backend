@@ -29,6 +29,19 @@ class LoginRequest(BaseModel):
     password: str = Field(..., description="Account password")
 
 
+class PasswordResetRequestBody(BaseModel):
+    """Request a password reset link."""
+
+    email: EmailStr = Field(..., description="Email address to send the reset link to")
+
+
+class PasswordResetVerifyBody(BaseModel):
+    """Consume a password reset token and set a new password."""
+
+    token: str = Field(..., min_length=1, description="Reset token from email link")
+    new_password: str = Field(..., min_length=8, description="New password (min 8 characters)")
+
+
 class UserResponse(BaseModel):
     """User profile response (excludes sensitive fields)."""
 

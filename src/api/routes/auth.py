@@ -1,16 +1,27 @@
 import hashlib
+import logging
+import secrets
 from datetime import UTC, datetime, timedelta
 
 import bcrypt
 import jwt
-from fastapi import APIRouter, Cookie, HTTPException, Response, status
+from fastapi import APIRouter, BackgroundTasks, Cookie, HTTPException, Response, status
 from sqlalchemy import select
 
 from src.api.deps import CurrentUser, DBSession
-from src.api.schemas.auth import LoginRequest, RegisterRequest, UserResponse
+from src.api.schemas.auth import (
+    LoginRequest,
+    PasswordResetRequestBody,
+    PasswordResetVerifyBody,
+    RegisterRequest,
+    UserResponse,
+)
 from src.api.schemas.common import ErrorResponse, MessageResponse, ValidationErrorResponse
-from src.models.user import Session, User
+from src.models.user import PasswordResetToken, Session, User
+from src.services.mailer import send_password_reset_email
 from src.shared.config import settings
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -244,6 +255,84 @@ async def extend_session(
         "session": {"expires_at": new_expires_at.isoformat()},
         "expires_at": new_expires_at.isoformat(),
     }
+
+
+@router.post(
+    "/request-reset",
+    response_model=MessageResponse,
+    operation_id="request_password_reset",
+    summary="Request a password reset link",
+    description="Generate a password reset token and email the link. Always returns 200 "
+    "to avoid email enumeration. If SMTP is not configured the link is logged "
+    "server-side at WARNING level for manual delivery.",
+    openapi_extra={"security": []},
+)
+async def request_password_reset(
+    body: PasswordResetRequestBody,
+    background_tasks: BackgroundTasks,
+    db: DBSession,
+) -> dict:
+    result = await db.execute(select(User).where(User.email == body.email))
+    user = result.scalar_one_or_none()
+
+    if user:
+        raw_token = secrets.token_urlsafe(32)
+        expires_at = datetime.now(UTC) + timedelta(minutes=settings.reset_token_ttl_minutes)
+        db.add(
+            PasswordResetToken(
+                user_id=user.id,
+                token_hash=_hash_jwt_token(raw_token),
+                expires_at=expires_at,
+            )
+        )
+        await db.flush()
+        background_tasks.add_task(send_password_reset_email, user.email, raw_token)
+    else:
+        logger.info("password reset requested for unknown email (ignored)")
+
+    return {"message": "If the email is registered, a reset link has been sent"}
+
+
+@router.post(
+    "/verify-reset",
+    response_model=MessageResponse,
+    operation_id="verify_password_reset",
+    summary="Consume a password reset token and set a new password",
+    description="Validates the reset token, sets the user's new password, and marks the "
+    "token as used. Tokens are single-use and expire after the configured TTL.",
+    responses={
+        400: {"model": ErrorResponse, "description": "Invalid or expired reset token"},
+        422: {"model": ValidationErrorResponse, "description": "Validation error"},
+    },
+    openapi_extra={"security": []},
+)
+async def verify_password_reset(body: PasswordResetVerifyBody, db: DBSession) -> dict:
+    token_hash = _hash_jwt_token(body.token)
+    result = await db.execute(
+        select(PasswordResetToken).where(PasswordResetToken.token_hash == token_hash)
+    )
+    reset_token = result.scalar_one_or_none()
+
+    now = datetime.now(UTC)
+    if not reset_token or reset_token.used_at is not None or reset_token.expires_at <= now:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset token",
+        )
+
+    user_result = await db.execute(select(User).where(User.id == reset_token.user_id))
+    user = user_result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset token",
+        )
+
+    user.password_hash = _hash_password(body.new_password)
+    reset_token.used_at = now
+    await db.flush()
+
+    return {"message": "Password has been reset"}
 
 
 @router.get(

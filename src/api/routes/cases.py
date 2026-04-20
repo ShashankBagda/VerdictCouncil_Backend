@@ -1,6 +1,7 @@
+import logging
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query, Response, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
@@ -12,7 +13,7 @@ from src.api.schemas.cases import (
     CaseListResponse,
     CaseResponse,
 )
-from src.api.schemas.common import ErrorResponse, ValidationErrorResponse
+from src.api.schemas.common import ErrorResponse, MessageResponse, ValidationErrorResponse
 from src.models.case import (
     Case,
     CaseDomain,
@@ -23,6 +24,8 @@ from src.services.case_report_data import build_case_report_data
 from src.services.hearing_pack import assemble_pack
 from src.services.pdf_export import render_case_report_pdf
 from src.services.pipeline_events import subscribe as subscribe_pipeline_events
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -254,3 +257,118 @@ async def stream_pipeline_status(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+# --------------------------------------------------------------------------- #
+# Pipeline trigger
+# --------------------------------------------------------------------------- #
+
+
+async def _run_case_pipeline(case_id: UUID) -> None:
+    """Background task: run the 9-agent pipeline for a case and persist results.
+
+    Imports are deferred to keep FastAPI module-import cheap and to open a fresh
+    session for the background task.
+    """
+    from src.db.persist_case_results import persist_case_results
+    from src.models.case import CaseStatus as CaseStatusModel
+    from src.pipeline.runner import PipelineRunner
+    from src.services.database import async_session
+    from src.shared.case_state import CaseState
+
+    async with async_session() as db:
+        case_result = await db.execute(
+            select(Case).where(Case.id == case_id).options(selectinload(Case.documents))
+        )
+        case = case_result.scalar_one_or_none()
+        if not case:
+            logger.warning("run_case_pipeline: case %s not found", case_id)
+            return
+
+        case.status = CaseStatusModel.processing
+        await db.commit()
+
+        raw_documents = [
+            {
+                "document_id": str(d.id),
+                "filename": d.filename,
+                "file_type": d.file_type,
+            }
+            for d in case.documents
+        ]
+        initial_state = CaseState(case_id=str(case.id), raw_documents=raw_documents)
+
+    try:
+        final_state = await PipelineRunner().run(initial_state)
+    except Exception:
+        logger.exception("Pipeline run failed for case_id=%s", case_id)
+        async with async_session() as db:
+            await db.execute(select(Case).where(Case.id == case_id))
+            db_case = (
+                await db.execute(select(Case).where(Case.id == case_id))
+            ).scalar_one_or_none()
+            if db_case:
+                db_case.status = CaseStatusModel.failed
+                await db.commit()
+        return
+
+    async with async_session() as db:
+        await persist_case_results(db, case_id, final_state)
+
+
+@router.post(
+    "/{case_id}/process",
+    response_model=MessageResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    operation_id="process_case",
+    summary="Start the 9-agent pipeline for a case",
+    description="Kicks off the multi-agent pipeline asynchronously. Returns 202 "
+    "immediately. Subscribe to `GET /cases/{case_id}/status/stream` for "
+    "progress updates, or poll `GET /cases/{case_id}/status` for a snapshot.",
+    responses={
+        400: {
+            "model": ErrorResponse,
+            "description": "Case has no documents or is in a terminal state",
+        },
+        403: {"model": ErrorResponse, "description": "Not authorized"},
+        404: {"model": ErrorResponse, "description": "Case not found"},
+    },
+)
+async def process_case(
+    case_id: UUID,
+    background_tasks: BackgroundTasks,
+    db: DBSession,
+    current_user: CurrentUser,
+) -> MessageResponse:
+    result = await db.execute(
+        select(Case).where(Case.id == case_id).options(selectinload(Case.documents))
+    )
+    case = result.scalar_one_or_none()
+    if not case:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
+
+    if current_user.role == UserRole.clerk and case.created_by != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to run this case",
+        )
+
+    if case.status in (CaseStatus.processing,):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Pipeline already running for this case",
+        )
+    if case.status in (CaseStatus.decided, CaseStatus.closed):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Case is in terminal status '{case.status.value}' and cannot be reprocessed",
+        )
+    if not case.documents:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Case has no uploaded documents",
+        )
+
+    background_tasks.add_task(_run_case_pipeline, case_id)
+
+    return MessageResponse(message="Pipeline started")

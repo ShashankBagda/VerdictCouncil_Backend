@@ -8,6 +8,7 @@ from src.tools.sam.search_precedents_tool import (
     SEARCH_PRECEDENTS_SCHEMA,
     SearchPrecedentsTool,
 )
+from src.tools.search_precedents import SearchResult
 
 
 class TestSearchPrecedentsTool:
@@ -64,11 +65,15 @@ class TestSearchPrecedentsTool:
     async def test_run_async_impl_delegates(self):
         tool = SearchPrecedentsTool()
         mock_results = [{"citation": "SGHC 123", "similarity_score": 0.95}]
+        mock_search_result = SearchResult(
+            precedents=mock_results,
+            metadata={"source_failed": False, "fallback_used": False, "pair_status": "ok"},
+        )
 
         with patch(
-            "src.tools.search_precedents.search_precedents",
+            "src.tools.search_precedents.search_precedents_with_meta",
             new_callable=AsyncMock,
-            return_value=mock_results,
+            return_value=mock_search_result,
         ):
             result = await tool._run_async_impl(
                 args={
@@ -90,9 +95,9 @@ class TestSearchPrecedentsTool:
         }
 
         with patch(
-            "src.tools.search_precedents.search_precedents",
+            "src.tools.search_precedents.search_precedents_with_meta",
             new_callable=AsyncMock,
-            return_value=[],
+            return_value=SearchResult(precedents=[]),
         ) as mock_fn:
             await tool._run_async_impl(args=expected_args)
             mock_fn.assert_called_once_with(**expected_args)

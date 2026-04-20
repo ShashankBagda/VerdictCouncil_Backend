@@ -15,6 +15,14 @@ class Settings(BaseSettings):
     reset_token_ttl_minutes: int = 30
     password_reset_base_url: str = "http://localhost:5173/reset-password"
 
+    # Comma-separated list of origins permitted by CORS. Use `cors_origins_list`
+    # to read the parsed form.
+    frontend_origins: str = "http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173"
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        return [o.strip() for o in self.frontend_origins.split(",") if o.strip()]
+
     # Optional SMTP config for password reset delivery.
     smtp_host: str = ""
     smtp_port: int = 587
