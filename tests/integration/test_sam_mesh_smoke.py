@@ -29,8 +29,8 @@ import json
 import logging
 import os
 import socket
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
 
 import pytest
 
@@ -141,9 +141,7 @@ async def _echo_subscriber(
                 envelope = json.loads(payload_str)
             else:
                 body_bytes = message.get_payload_as_bytes() or b""
-                envelope = (
-                    json.loads(body_bytes.decode("utf-8")) if body_bytes else {}
-                )
+                envelope = json.loads(body_bytes.decode("utf-8")) if body_bytes else {}
             topic = message.get_destination_name()
             reply_to = message.get_property(REPLY_TO_PROPERTY)
         except Exception as exc:  # noqa: BLE001 — diagnostic only
@@ -152,9 +150,7 @@ async def _echo_subscriber(
 
         task_id = envelope.get("id")
         session_id = (envelope.get("params") or {}).get("sessionId")
-        parts = (
-            ((envelope.get("params") or {}).get("message") or {}).get("parts") or []
-        )
+        parts = ((envelope.get("params") or {}).get("message") or {}).get("parts") or []
         payload = {}
         for p in parts:
             if isinstance(p, dict) and p.get("type") == "data":
@@ -247,9 +243,7 @@ class TestSingleAgentRoundTrip:
                 "agent_name": "case-processing",
             }
             envelope = build_send_task_request(task_id, session_id, payload)
-            reply_to = (
-                f"{NAMESPACE}/a2a/v1/agent/response/mesh-runner/{task_id}"
-            )
+            reply_to = f"{NAMESPACE}/a2a/v1/agent/response/mesh-runner/{task_id}"
 
             request_topic = f"{NAMESPACE}/a2a/v1/agent/request/case-processing"
             await client.publish(request_topic, envelope, reply_to=reply_to)
@@ -263,9 +257,7 @@ class TestSingleAgentRoundTrip:
         assert echoed == payload, "DataPart payload must round-trip unchanged"
         assert stats["received"] >= 1
         assert stats["published"] >= 1
-        assert any(
-            t.endswith("/agent/request/case-processing") for t in stats["topics"]
-        )
+        assert any(t.endswith("/agent/request/case-processing") for t in stats["topics"])
 
     @pytest.mark.asyncio
     async def test_parallel_publishes_correlate_by_task_id(self) -> None:
@@ -275,12 +267,8 @@ class TestSingleAgentRoundTrip:
 
             async def one_roundtrip(agent: str, marker: str) -> dict:
                 task_id = new_task_id(f"{agent}-smoke")
-                envelope = build_send_task_request(
-                    task_id, "session-smoke-2", {"marker": marker}
-                )
-                reply_to = (
-                    f"{NAMESPACE}/a2a/v1/agent/response/mesh-runner/{task_id}"
-                )
+                envelope = build_send_task_request(task_id, "session-smoke-2", {"marker": marker})
+                reply_to = f"{NAMESPACE}/a2a/v1/agent/response/mesh-runner/{task_id}"
                 await client.publish(
                     f"{NAMESPACE}/a2a/v1/agent/request/{agent}",
                     envelope,

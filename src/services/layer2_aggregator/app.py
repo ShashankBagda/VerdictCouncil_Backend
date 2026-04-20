@@ -21,13 +21,12 @@ YAML contract (see `configs/services/layer2-aggregator.yaml`):
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
 from solace_ai_connector.common.log import log
 from solace_ai_connector.flow.app import App
 
 from .component import Layer2AggregatorComponent
-
 
 info = {
     "class_name": "Layer2AggregatorApp",
@@ -42,9 +41,9 @@ info = {
 class Layer2AggregatorApp(App):
     """Hosts a single `Layer2AggregatorComponent` with SAM-style config wiring."""
 
-    app_schema: Dict[str, Any] = {}
+    app_schema: dict[str, Any] = {}
 
-    def __init__(self, app_info: Dict[str, Any], **kwargs: Any) -> None:
+    def __init__(self, app_info: dict[str, Any], **kwargs: Any) -> None:
         app_config = app_info.get("app_config") or {}
 
         namespace = app_config.get("namespace")
@@ -55,9 +54,7 @@ class Layer2AggregatorApp(App):
         if not namespace:
             raise ValueError("Layer2AggregatorApp requires app_config.namespace")
         if not response_subscription_topic:
-            raise ValueError(
-                "Layer2AggregatorApp requires app_config.response_subscription_topic"
-            )
+            raise ValueError("Layer2AggregatorApp requires app_config.response_subscription_topic")
         if not redis_url:
             raise ValueError("Layer2AggregatorApp requires app_config.redis_url")
 

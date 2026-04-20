@@ -1,6 +1,7 @@
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Response, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
@@ -18,8 +19,26 @@ from src.models.case import (
     CaseStatus,
 )
 from src.models.user import User, UserRole
+from src.services.case_report_data import build_case_report_data
+from src.services.hearing_pack import assemble_pack
+from src.services.pdf_export import render_case_report_pdf
+from src.services.pipeline_events import subscribe as subscribe_pipeline_events
 
 router = APIRouter()
+
+
+async def _load_case_for_export(case_id: UUID, db, current_user: User) -> Case:
+    """Fetch a case and enforce clerk ownership. Raises 404/403."""
+    result = await db.execute(select(Case).where(Case.id == case_id))
+    case = result.scalar_one_or_none()
+    if not case:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
+    if current_user.role == UserRole.clerk and case.created_by != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to view this case",
+        )
+    return case
 
 
 # --------------------------------------------------------------------------- #
@@ -142,3 +161,96 @@ async def get_case(
         )
 
     return case
+
+
+@router.get(
+    "/{case_id}/report.pdf",
+    operation_id="export_case_report_pdf",
+    summary="Export the case as a PDF report",
+    description="Render a case summary PDF covering parties, evidence, facts, arguments, "
+    "verdict, and fairness report.",
+    responses={
+        403: {"model": ErrorResponse, "description": "Not authorized to view this case"},
+        404: {"model": ErrorResponse, "description": "Case not found"},
+    },
+)
+async def export_case_report_pdf(
+    case_id: UUID,
+    db: DBSession,
+    current_user: CurrentUser,
+) -> Response:
+    await _load_case_for_export(case_id, db, current_user)
+    data = await build_case_report_data(db, case_id)
+    if data is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
+    pdf_bytes = render_case_report_pdf(data)
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "content-disposition": f'attachment; filename="case-{case_id}-report.pdf"',
+        },
+    )
+
+
+@router.get(
+    "/{case_id}/hearing-pack",
+    operation_id="export_hearing_pack",
+    summary="Export the hearing pack zip for a case",
+    description="Assemble a zip archive of manifest, case summary, evidence, facts, "
+    "arguments, and verdict for in-court review.",
+    responses={
+        403: {"model": ErrorResponse, "description": "Not authorized to view this case"},
+        404: {"model": ErrorResponse, "description": "Case not found"},
+    },
+)
+async def export_hearing_pack(
+    case_id: UUID,
+    db: DBSession,
+    current_user: CurrentUser,
+) -> Response:
+    await _load_case_for_export(case_id, db, current_user)
+    data = await build_case_report_data(db, case_id)
+    if data is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
+    zip_bytes = assemble_pack(data)
+    return Response(
+        content=zip_bytes,
+        media_type="application/zip",
+        headers={
+            "content-disposition": f'attachment; filename="case-{case_id}-hearing-pack.zip"',
+        },
+    )
+
+
+@router.get(
+    "/{case_id}/status/stream",
+    operation_id="stream_pipeline_status",
+    summary="Stream pipeline progress events via SSE",
+    description="Server-Sent Events stream backed by the Redis progress pub/sub. "
+    "Closes when the governance-verdict agent reaches a terminal phase.",
+    responses={
+        403: {"model": ErrorResponse, "description": "Not authorized to view this case"},
+        404: {"model": ErrorResponse, "description": "Case not found"},
+    },
+)
+async def stream_pipeline_status(
+    case_id: UUID,
+    db: DBSession,
+    current_user: CurrentUser,
+) -> StreamingResponse:
+    await _load_case_for_export(case_id, db, current_user)
+
+    async def event_generator():
+        async for payload in subscribe_pipeline_events(case_id):
+            yield f"data: {payload}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )

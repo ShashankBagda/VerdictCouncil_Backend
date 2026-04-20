@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Query
-from sqlalchemy import func, select
+from sqlalchemy import select
 
 from src.api.deps import DBSession, require_role
 from src.models.case import Case, CaseStatus, ReopenRequest, ReopenRequestStatus, Verdict
@@ -25,18 +25,22 @@ async def list_senior_inbox(
     current_user: User = require_role(UserRole.senior_judge),
 ) -> dict:
     escalated_cases = (
-        await db.execute(select(Case).where(Case.status == CaseStatus.escalated))
-    ).scalars().all()
+        (await db.execute(select(Case).where(Case.status == CaseStatus.escalated))).scalars().all()
+    )
 
     pending_reopen = (
-        await db.execute(
-            select(ReopenRequest).where(ReopenRequest.status == ReopenRequestStatus.pending)
+        (
+            await db.execute(
+                select(ReopenRequest).where(ReopenRequest.status == ReopenRequestStatus.pending)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     amended_verdicts = (
-        await db.execute(select(Verdict).where(Verdict.amendment_of.is_not(None)))
-    ).scalars().all()
+        (await db.execute(select(Verdict).where(Verdict.amendment_of.is_not(None)))).scalars().all()
+    )
 
     items: list[dict] = []
 
@@ -61,7 +65,9 @@ async def list_senior_inbox(
                 "type": "reopen",
                 "case_id": str(request_item.case_id),
                 "priority": "medium",
-                "submitted_at": request_item.created_at.isoformat() if request_item.created_at else None,
+                "submitted_at": request_item.created_at.isoformat()
+                if request_item.created_at
+                else None,
                 "status": request_item.status.value,
                 "reason": request_item.reason,
             }
@@ -82,7 +88,9 @@ async def list_senior_inbox(
         )
 
     priority_order = {"high": 0, "medium": 1, "low": 2}
-    items.sort(key=lambda x: (priority_order.get(x.get("priority", "low"), 3), x.get("submitted_at") or ""))
+    items.sort(
+        key=lambda x: (priority_order.get(x.get("priority", "low"), 3), x.get("submitted_at") or "")
+    )
 
     total = len(items)
     start = (page - 1) * per_page

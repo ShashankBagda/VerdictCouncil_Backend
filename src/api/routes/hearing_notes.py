@@ -51,7 +51,10 @@ async def create_hearing_note(
             case_id=case_id,
             agent_name="judge",
             action="hearing_note_create",
-            input_payload={"section_reference": body.section_reference, "note_type": body.note_type},
+            input_payload={
+                "section_reference": body.section_reference,
+                "note_type": body.note_type,
+            },
             output_payload={"note_id": str(note.id)},
         )
     )

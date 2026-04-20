@@ -38,7 +38,6 @@ from src.models.case import (
 )
 from src.shared.case_state import AuditEntry, CaseState, CaseStatusEnum
 
-
 # ---------------------------------------------------------------------------
 # Test double
 # ---------------------------------------------------------------------------

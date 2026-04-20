@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import UTC, datetime
+from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -21,7 +21,6 @@ from src.services.layer2_aggregator.a2a import (
 )
 from src.services.layer2_aggregator.app import Layer2AggregatorApp
 from src.services.layer2_aggregator.component import Layer2AggregatorComponent
-
 
 # ---------------------------------------------------------------------------
 # Layer2AggregatorApp — config validation + component wiring
@@ -66,9 +65,7 @@ def test_app_sets_broker_subscription_to_response_wildcard():
     _, _, resolved = _build_app(app_info)
 
     broker_subs = resolved["components"][0]["subscriptions"]
-    assert broker_subs == [
-        {"topic": "verdictcouncil/a2a/v1/agent/response/layer2-aggregator/>"}
-    ]
+    assert broker_subs == [{"topic": "verdictcouncil/a2a/v1/agent/response/layer2-aggregator/>"}]
 
 
 def test_app_sets_broker_input_output_and_queue_name():
@@ -101,9 +98,7 @@ def test_app_rejects_missing_required_field(missing_field):
 
 def test_sub_task_id_from_topic_returns_trailing_segment():
     assert (
-        sub_task_id_from_topic(
-            "verdictcouncil/a2a/v1/agent/response/layer2-aggregator/task-abc123"
-        )
+        sub_task_id_from_topic("verdictcouncil/a2a/v1/agent/response/layer2-aggregator/task-abc123")
         == "task-abc123"
     )
     assert sub_task_id_from_topic("") == ""
@@ -129,9 +124,7 @@ def test_parse_send_task_response_extracts_data_part():
     assert parse_send_task_response(json.dumps(envelope).encode()) == {
         "evidence_analysis": {"exhibits": []}
     }
-    assert parse_send_task_response(json.dumps(envelope)) == {
-        "evidence_analysis": {"exhibits": []}
-    }
+    assert parse_send_task_response(json.dumps(envelope)) == {"evidence_analysis": {"exhibits": []}}
 
 
 def test_parse_send_task_response_falls_back_to_text_part_json():
@@ -251,15 +244,17 @@ def test_invoke_drops_orphan_response_with_no_correlation(caplog):
     component._redis.get = MagicMock(return_value=_as_async(None))
 
     topic = "verdictcouncil/a2a/v1/agent/response/layer2-aggregator/orphan-123"
-    with patch(
-        "src.services.layer2_aggregator.component.asyncio.run_coroutine_threadsafe",
-        side_effect=_resolve,
+    with (
+        patch(
+            "src.services.layer2_aggregator.component.asyncio.run_coroutine_threadsafe",
+            side_effect=_resolve,
+        ),
+        caplog.at_level("WARNING"),
     ):
-        with caplog.at_level("WARNING"):
-            result = component.invoke(
-                _message_on(topic),
-                _response_envelope({"evidence_analysis": {}}, "orphan-123"),
-            )
+        result = component.invoke(
+            _message_on(topic),
+            _response_envelope({"evidence_analysis": {}}, "orphan-123"),
+        )
 
     assert result is None
     assert any("orphan response" in rec.getMessage() for rec in caplog.records)
@@ -278,12 +273,14 @@ def test_invoke_drops_empty_agent_output(caplog):
 
     topic = "verdictcouncil/a2a/v1/agent/response/layer2-aggregator/task-1"
     empty_envelope = {"jsonrpc": "2.0", "id": "task-1", "result": {}}
-    with patch(
-        "src.services.layer2_aggregator.component.asyncio.run_coroutine_threadsafe",
-        side_effect=_resolve,
+    with (
+        patch(
+            "src.services.layer2_aggregator.component.asyncio.run_coroutine_threadsafe",
+            side_effect=_resolve,
+        ),
+        caplog.at_level("ERROR"),
     ):
-        with caplog.at_level("ERROR"):
-            result = component.invoke(_message_on(topic), empty_envelope)
+        result = component.invoke(_message_on(topic), empty_envelope)
 
     assert result is None
     assert any("unparseable" in rec.getMessage() for rec in caplog.records)
@@ -304,12 +301,14 @@ def test_invoke_errors_when_run_meta_missing(caplog):
 
     topic = "verdictcouncil/a2a/v1/agent/response/layer2-aggregator/task-1"
     envelope = _response_envelope({"evidence_analysis": {"exhibits": []}}, "task-1")
-    with patch(
-        "src.services.layer2_aggregator.component.asyncio.run_coroutine_threadsafe",
-        side_effect=_resolve,
+    with (
+        patch(
+            "src.services.layer2_aggregator.component.asyncio.run_coroutine_threadsafe",
+            side_effect=_resolve,
+        ),
+        caplog.at_level("ERROR"),
     ):
-        with caplog.at_level("ERROR"):
-            result = component.invoke(_message_on(topic), envelope)
+        result = component.invoke(_message_on(topic), envelope)
 
     assert result is None
     assert any("No run metadata" in rec.getMessage() for rec in caplog.records)
@@ -326,7 +325,9 @@ def test_invoke_returns_none_when_barrier_not_met():
             return json.dumps(
                 {
                     "base_state": {"case_id": "c-1"},
-                    "mesh_reply_to": "verdictcouncil/a2a/v1/agent/response/mesh-runner/layer2-c-1-r-1",
+                    "mesh_reply_to": (
+                        "verdictcouncil/a2a/v1/agent/response/mesh-runner/layer2-c-1-r-1"
+                    ),
                 }
             ).encode()
         return None
@@ -404,12 +405,14 @@ def test_invoke_rejects_malformed_correlation_string(caplog):
 
     topic = "verdictcouncil/a2a/v1/agent/response/layer2-aggregator/task-bad"
     envelope = _response_envelope({"evidence_analysis": {}}, "task-bad")
-    with patch(
-        "src.services.layer2_aggregator.component.asyncio.run_coroutine_threadsafe",
-        side_effect=_resolve,
+    with (
+        patch(
+            "src.services.layer2_aggregator.component.asyncio.run_coroutine_threadsafe",
+            side_effect=_resolve,
+        ),
+        caplog.at_level("ERROR"),
     ):
-        with caplog.at_level("ERROR"):
-            result = component.invoke(_message_on(topic), envelope)
+        result = component.invoke(_message_on(topic), envelope)
 
     assert result is None
     assert any("Malformed sub_task correlation" in rec.getMessage() for rec in caplog.records)

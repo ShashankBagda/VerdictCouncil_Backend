@@ -92,14 +92,13 @@ def _make_runner(
 @pytest.fixture(autouse=True)
 def _silence_sse(monkeypatch):
     """Swap out Redis-backed progress publisher with a no-op."""
-    monkeypatch.setattr(
-        "src.pipeline.mesh_runner.publish_progress", AsyncMock(return_value=None)
-    )
+    monkeypatch.setattr("src.pipeline.mesh_runner.publish_progress", AsyncMock(return_value=None))
 
 
 @pytest.fixture(autouse=True)
 def _skip_guardrail(monkeypatch):
     """Default: input guardrail returns non-blocked (no sanitization)."""
+
     async def _noop(_text, _client):
         return {"blocked": False, "method": "", "reason": "", "sanitized_text": ""}
 
@@ -210,9 +209,7 @@ async def test_l2_fanout_publishes_three_parallel_with_aggregator_reply_to():
 
     # All three replyTo's point at the aggregator wildcard
     for _topic, _env, reply_to in l2_pubs:
-        assert reply_to.startswith(
-            f"{NAMESPACE}/a2a/v1/agent/response/{AGGREGATOR_NAME}/"
-        )
+        assert reply_to.startswith(f"{NAMESPACE}/a2a/v1/agent/response/{AGGREGATOR_NAME}/")
 
     # Redis stashes present: per sub-task correlation + per-run meta
     sub_task_keys = [k for k in redis.store if k.startswith("vc:aggregator:sub_task:")]
@@ -242,9 +239,11 @@ async def test_l2_fanout_raises_on_barrier_timeout():
 
     runner = _make_runner(a2a, redis)
     # Patch the barrier timeout to fail fast
-    with patch("src.pipeline.mesh_runner.L2_BARRIER_TIMEOUT_SECONDS", 0.05):
-        with pytest.raises(asyncio.TimeoutError):
-            await runner._invoke_l2_fanout(_case_state(), run_id="r1")
+    with (
+        patch("src.pipeline.mesh_runner.L2_BARRIER_TIMEOUT_SECONDS", 0.05),
+        pytest.raises(asyncio.TimeoutError),
+    ):
+        await runner._invoke_l2_fanout(_case_state(), run_id="r1")
 
 
 # ---------------------------------------------------------------------------

@@ -1,5 +1,5 @@
-from datetime import UTC, datetime, timedelta
 import hashlib
+from datetime import UTC, datetime, timedelta
 
 import bcrypt
 import jwt
@@ -185,7 +185,9 @@ async def session_info(
     )
     session = result.scalar_one_or_none()
     if not session:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session revoked or expired")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Session revoked or expired"
+        )
 
     return {
         "user": UserResponse.model_validate(current_user).model_dump(mode="json"),
@@ -217,7 +219,9 @@ async def extend_session(
     )
     session = result.scalar_one_or_none()
     if not session:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session revoked or expired")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Session revoked or expired"
+        )
 
     new_token = _create_token(current_user)
     new_expires_at = datetime.now(UTC) + timedelta(hours=TOKEN_EXPIRY_HOURS)
