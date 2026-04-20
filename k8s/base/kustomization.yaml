@@ -4,7 +4,8 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - secrets.yaml
-  - solace-statefulset.yaml
+  - solace-ha.yaml
+  - solace-bootstrap-job.yaml
   - deployment-web-gateway.yaml
   - deployment-api-service.yaml
   - deployment-case-processing.yaml
@@ -20,6 +21,5 @@ resources:
   - cronjob-stuck-case-watchdog.yaml
   - service-web-gateway.yaml
   - service-api-service.yaml
-  - service-solace.yaml
   - ingress.yaml
   - hpa-web-gateway.yaml

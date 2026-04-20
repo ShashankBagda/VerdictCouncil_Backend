@@ -1,0 +1,37 @@
+# Values for Solace PubSub+ HA on VerdictCouncil.
+#
+# Rendered via:
+#   helm template solace-broker solacecharts/pubsubplus-ha \
+#     -f values.yaml --namespace verdictcouncil \
+#     > k8s/base/solace-ha-rendered.yaml
+#
+# Chart: solacecharts/pubsubplus-ha 3.9.0
+# Image: solace/solace-pubsub-standard:10.25.0.217 (free Standard edition)
+# Cluster: DigitalOcean K8s (do-block-storage)
+
+# Pin the Service name to the legacy `solace-broker` hostname so existing
+# secrets.yaml / configs/shared_config.yaml entries keep working.
+fullnameOverride: solace-broker
+
+solace:
+  # 3-node HA redundancy group: primary + backup + monitor.
+  redundancy: true
+  # `dev` tier: 100 max connections, 1 CPU / 3.4Gi memory per pod.
+  # Bump to `prod1k` / `prod10k` before GA if load profile demands it.
+  size: dev
+  # TEMPORARY — replace with usernameAdminPasswordSecretName before staging.
+  usernameAdminPassword: admin
+  podDisruptionBudgetForHA: true
+
+image:
+  repository: solace/solace-pubsub-standard
+  tag: "10.25.0.217"
+  pullPolicy: IfNotPresent
+
+storage:
+  persistent: true
+  size: 20Gi
+  storageClassName: do-block-storage
+
+service:
+  type: ClusterIP

@@ -9,7 +9,7 @@ Usage:
 
 import pytest
 
-from src.pipeline.runner import PipelineRunner
+from src.pipeline.mesh_runner_factory import get_mesh_runner
 from src.shared.case_state import CaseState
 
 from .fixtures import ALL_FIXTURES
@@ -73,8 +73,8 @@ class TestPipelineEval:
     """
 
     @pytest.fixture
-    def runner(self):
-        return PipelineRunner()
+    async def runner(self):
+        return await get_mesh_runner()
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(

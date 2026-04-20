@@ -208,6 +208,52 @@ doctl databases configuration update <redis-cluster-id> \
 
 ---
 
+## 8.5a Solace Event Broker (Self-Hosted HA)
+
+VerdictCouncil runs a self-hosted Solace PubSub+ Software Event Broker on DOKS rather than Solace Cloud. Image is pinned to `solace/solace-pubsub-standard:10.25.0.217` in `docker-compose.infra.yml` and `k8s/base/solace-statefulset.yaml`.
+
+### HA Topology
+
+Production deploys a **3-node redundancy group** via a `replicas: 3` StatefulSet:
+
+| Pod Ordinal | Role | Purpose |
+|---|---|---|
+| `solace-broker-0` | Primary | Active messaging node — clients connect here by default |
+| `solace-broker-1` | Backup | Standby messaging node — takes over on primary failure |
+| `solace-broker-2` | Monitor | Tie-breaker only — prevents split-brain, carries no message traffic |
+
+Standard edition (free tier) supports full HA redundancy groups. The Enterprise paywall is connection count (1000 client connections on Standard), not HA.
+
+### Required Ports
+
+| Port | Purpose | Exposed via |
+|---|---|---|
+| 55555 | SMF (client messaging) | ClusterIP service `solace-broker` |
+| 8080 | SEMP (management API) | ClusterIP service `solace-broker` |
+| 5550 | Health check | ClusterIP service `solace-broker` |
+| 8741 | HA config-sync | Headless per-pod service only |
+| 8300–8302 | HA mate-link / VRRP | Headless per-pod service only |
+
+### Backend Connection
+
+The backend and all SAM agents use a comma-separated `SOLACE_BROKER_URL` so a broker outage on the primary fails over to the backup:
+
+```
+SOLACE_BROKER_URL=tcp://solace-broker-0.solace-broker:55555,tcp://solace-broker-1.solace-broker:55555
+```
+
+Implemented via `src/shared/config.py` (parses comma-separated list into broker endpoints).
+
+### Storage
+
+Each pod gets its own 20 GiB `do-block-storage` PVC via `volumeClaimTemplates`. Spool directories are per-ordinal — never share a PVC across broker pods.
+
+### Local Dev
+
+`docker-compose.infra.yml` mirrors a 2-node HA pair (primary + backup only, no monitor — local failover testing doesn't need split-brain protection).
+
+---
+
 ## 8.6 VPC & Networking
 
 All resources should be in the same VPC for private networking:

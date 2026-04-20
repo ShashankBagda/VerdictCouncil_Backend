@@ -812,3 +812,83 @@ class PipelineRunner:
             state.status,
         )
         return state
+
+    async def run_from(
+        self,
+        case_state: CaseState,
+        start_agent: str,
+        judge_vector_store_id: str | None = None,
+    ) -> CaseState:
+        """Re-enter the pipeline at `start_agent` and run downstream.
+
+        Used by WhatIfController: the caller already holds a populated
+        CaseState (from a prior run) and wants to re-execute only the
+        tail of the pipeline. Skips the input guardrail — the state is
+        no longer raw input. All post-agent hooks (judge KB, escalation
+        halts, governance halts) fire for any downstream agent they
+        apply to.
+        """
+        if start_agent not in AGENT_ORDER:
+            raise ValueError(
+                f"Unknown start_agent '{start_agent}'. "
+                f"Must be one of {AGENT_ORDER}"
+            )
+
+        start_index = AGENT_ORDER.index(start_agent)
+        state = case_state
+
+        for agent_name in AGENT_ORDER[start_index:]:
+            logger.info("Pipeline step (run_from): %s", agent_name)
+            state = await self._run_agent(agent_name, state)
+
+            if agent_name == "legal-knowledge" and judge_vector_store_id:
+                try:
+                    from src.services.knowledge_base import search_kb
+
+                    query = (
+                        state.case_metadata.get("description", "") if state.case_metadata else ""
+                    )
+                    if not query and state.extracted_facts:
+                        query = str(state.extracted_facts)[:500]
+                    kb_results = await search_kb(
+                        judge_vector_store_id,
+                        query,
+                        max_results=5,
+                    )
+                    state = state.model_copy(update={"judge_kb_results": kb_results})
+                except Exception as exc:
+                    logger.warning("Judge KB search failed: %s", exc)
+
+            if agent_name == "complexity-routing" and state.status == CaseStatusEnum.escalated:
+                logger.warning(
+                    "Pipeline halted at complexity-routing: escalated (case_id=%s)",
+                    state.case_id,
+                )
+                return state
+
+            if agent_name == "governance-verdict":
+                integrity = validate_output_integrity(state.model_dump())
+                if not integrity["passed"]:
+                    logger.error(
+                        "Output integrity check FAILED (case_id=%s): %s",
+                        state.case_id,
+                        integrity["issues"],
+                    )
+                    state = append_audit_entry(
+                        state,
+                        agent="guardrails",
+                        action="output_integrity_failed",
+                        output_payload=integrity,
+                    )
+                    state.status = CaseStatusEnum.escalated
+                    return state
+
+                if state.fairness_check and state.fairness_check.get("critical_issues_found"):
+                    logger.warning(
+                        "Pipeline halted at governance-verdict: critical fairness (case_id=%s)",
+                        state.case_id,
+                    )
+                    state = state.model_copy(update={"status": CaseStatusEnum.escalated})
+                    return state
+
+        return state

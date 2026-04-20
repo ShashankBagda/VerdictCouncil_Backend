@@ -44,7 +44,7 @@ async def _run_whatif_scenario(scenario_id: uuid.UUID) -> None:
     Imports are deferred to avoid circular dependencies and to create
     a fresh database session for the background task.
     """
-    from src.pipeline.runner import PipelineRunner
+    from src.pipeline.mesh_runner_factory import get_mesh_runner
     from src.services.database import async_session
     from src.services.whatif_controller.controller import WhatIfController
     from src.services.whatif_controller.diff_engine import generate_diff
@@ -74,7 +74,8 @@ async def _run_whatif_scenario(scenario_id: uuid.UUID) -> None:
                 run_id=scenario.original_run_id,
             )
 
-            controller = WhatIfController(PipelineRunner())
+            runner = await get_mesh_runner()
+            controller = WhatIfController(runner)
             modified_state = await controller.create_scenario(
                 case_state,
                 scenario.modification_type.value,
@@ -105,7 +106,7 @@ async def _run_whatif_scenario(scenario_id: uuid.UUID) -> None:
 
 async def _run_stability_computation(stability_id: uuid.UUID) -> None:
     """Background task that computes the stability score."""
-    from src.pipeline.runner import PipelineRunner
+    from src.pipeline.mesh_runner_factory import get_mesh_runner
     from src.services.database import async_session
     from src.services.whatif_controller.controller import WhatIfController
     from src.shared.case_state import CaseState
@@ -127,7 +128,8 @@ async def _run_stability_computation(stability_id: uuid.UUID) -> None:
                 run_id=stability.run_id,
             )
 
-            controller = WhatIfController(PipelineRunner())
+            runner = await get_mesh_runner()
+            controller = WhatIfController(runner)
             score_result = await controller.compute_stability_score(
                 case_state, n=stability.perturbation_count
             )

@@ -1,39 +1,39 @@
 # configs/services/layer2-aggregator.yaml
+#
+# Layer-2 fan-in aggregator. Subscribes to the aggregator's native A2A
+# response wildcard: the mesh runner publishes each L2 agent request
+# (evidence-analysis / fact-reconstruction / witness-analysis) with
+# `replyTo` pointed into this wildcard, so responses route here by
+# Solace topic alone.
+#
+# The aggregator looks up per-sub-task correlation and per-run metadata
+# in Redis (keys written by the mesh runner before it publishes), runs
+# the Redis-backed barrier, and emits a `SendTaskResponse` envelope to
+# the mesh runner's reply-to topic once all three L2 agents report.
+!include ../shared_config.yaml
+
 apps:
   - name: layer2-aggregator
-    app_module: solace_agent_mesh.services.aggregator.app
+    app_module: src.services.layer2_aggregator.app
     broker:
       <<: *broker_connection
     app_config:
       namespace: ${NAMESPACE}
-      service_name: "Layer2Aggregator"
+      service_name: layer2-aggregator
       display_name: "Layer 2 Fan-In Aggregator"
 
-      subscriptions:
-        - topic: "verdictcouncil/a2a/v1/agent/response/evidence-analysis"
-          agent_key: "evidence_analysis"        # maps to CaseState.evidence_analysis
-        - topic: "verdictcouncil/a2a/v1/agent/response/fact-reconstruction"
-          agent_key: "extracted_facts"           # maps to CaseState.extracted_facts
-        - topic: "verdictcouncil/a2a/v1/agent/response/witness-analysis"
-          agent_key: "witnesses"                 # maps to CaseState.witnesses
+      # Wildcard on the aggregator's own A2A response topic. Mesh runner
+      # must set `replyTo` on L2 requests to a child of this wildcard:
+      #   verdictcouncil/a2a/v1/agent/response/layer2-aggregator/<sub_task_id>
+      response_subscription_topic: "${NAMESPACE}/a2a/v1/agent/response/layer2-aggregator/>"
 
-      output_topic: "verdictcouncil/a2a/v1/agent/request/legal-knowledge"
+      redis_url: ${REDIS_URL}
 
       barrier:
         required_agents: ["evidence_analysis", "extracted_facts", "witnesses"]
         timeout_seconds: 120
         on_timeout: "halt_and_flag"
-        # Redis key includes run_id to isolate concurrent/what-if executions:
-        # key format: {key_prefix}{case_id}:{run_id}
-
-      state_backend: "redis"
-      redis:
-        host: ${REDIS_HOST}
-        port: ${REDIS_PORT}
-        password: ${REDIS_PASSWORD}
-        db: 1
-        key_prefix: "vc:aggregator:"
-        ttl_seconds: 300
-
-      session_service: *default_session_service
-      artifact_service: *default_artifact_service
+        # Redis keys (see src/services/layer2_aggregator/component.py):
+        #   vc:aggregator:sub_task:<sub_task_id>  -> agent_key|case_id|run_id
+        #   vc:aggregator:run:<case_id>:<run_id>:meta -> {base_state, mesh_reply_to}
+        #   vc:aggregator:<case_id>:<run_id>      -> barrier hash (see aggregator.py)

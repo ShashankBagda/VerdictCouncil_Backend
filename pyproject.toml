@@ -71,3 +71,6 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = [
+    "mesh_smoke: live SAM mesh smoke tests — require Solace broker reachable on localhost:55555 and INTEGRATION_TESTS=1",
+]

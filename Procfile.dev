@@ -8,6 +8,5 @@ legal-knowledge:      python -m solace_agent_mesh.cli.main --config configs/agen
 argument-construction: python -m solace_agent_mesh.cli.main --config configs/agents/argument-construction.yaml
 deliberation:         python -m solace_agent_mesh.cli.main --config configs/agents/deliberation.yaml
 governance-verdict:   python -m solace_agent_mesh.cli.main --config configs/agents/governance-verdict.yaml
-# EPIC-6-BLOCKED: solace_agent_mesh.services.aggregator.app does not exist in v1.4.7; not built yet
-# layer2-aggregator:    python -m solace_agent_mesh.cli.main --config configs/services/layer2-aggregator.yaml
+layer2-aggregator:    python -m solace_agent_mesh.cli.main --config configs/services/layer2-aggregator.yaml
 api:                  uvicorn src.api.app:app --host 0.0.0.0 --port 8001 --reload
