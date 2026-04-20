@@ -114,6 +114,12 @@ class RecommendationType(str, enum.Enum):
     manual_decision = "manual_decision"
 
 
+class ReopenRequestStatus(str, enum.Enum):
+    pending = "pending"
+    approved = "approved"
+    rejected = "rejected"
+
+
 # ---------------------------------------------------------------------------
 # Models
 # ---------------------------------------------------------------------------
@@ -157,6 +163,12 @@ class Case(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         back_populates="case", cascade="all, delete-orphan"
     )
     deliberations: Mapped[list[Deliberation]] = relationship(
+        back_populates="case", cascade="all, delete-orphan"
+    )
+    hearing_notes: Mapped[list[HearingNote]] = relationship(
+        back_populates="case", cascade="all, delete-orphan"
+    )
+    reopen_requests: Mapped[list[ReopenRequest]] = relationship(
         back_populates="case", cascade="all, delete-orphan"
     )
     verdicts: Mapped[list[Verdict]] = relationship(
@@ -333,8 +345,59 @@ class Verdict(UUIDPrimaryKeyMixin, Base):
     confidence_score: Mapped[int | None] = mapped_column(Integer)
     alternative_outcomes: Mapped[dict | None] = mapped_column(JSONB)
     fairness_report: Mapped[dict | None] = mapped_column(JSONB)
+    amendment_of: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("verdicts.id")
+    )
+    amendment_reason: Mapped[str | None] = mapped_column(Text)
+    amended_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
 
     case: Mapped[Case] = relationship(back_populates="verdicts")
+    amended_by_user: Mapped[User | None] = relationship(foreign_keys=[amended_by])
+
+
+class HearingNote(UUIDPrimaryKeyMixin, Base):
+    __tablename__ = "hearing_notes"
+
+    case_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("cases.id", ondelete="CASCADE"), nullable=False
+    )
+    judge_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    section_reference: Mapped[str | None] = mapped_column(String(255))
+    note_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    is_locked: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    case: Mapped[Case] = relationship(back_populates="hearing_notes")
+    judge: Mapped[User] = relationship()
+
+
+class ReopenRequest(UUIDPrimaryKeyMixin, Base):
+    __tablename__ = "reopen_requests"
+
+    case_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("cases.id", ondelete="CASCADE"), nullable=False
+    )
+    requested_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    reason: Mapped[str] = mapped_column(String(50), nullable=False)
+    justification: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[ReopenRequestStatus] = mapped_column(
+        Enum(ReopenRequestStatus), nullable=False, server_default=ReopenRequestStatus.pending.value
+    )
+    reviewed_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    review_notes: Mapped[str | None] = mapped_column(Text)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    case: Mapped[Case] = relationship(back_populates="reopen_requests")
+    requester: Mapped[User] = relationship(foreign_keys=[requested_by])
+    reviewer: Mapped[User | None] = relationship(foreign_keys=[reviewed_by])
 
 
 # Avoid circular import — import here for relationship resolution

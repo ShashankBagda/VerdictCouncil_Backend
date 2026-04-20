@@ -1,18 +1,18 @@
 from datetime import UTC, datetime, timedelta
+import hashlib
 
+import bcrypt
 import jwt
-from fastapi import APIRouter, HTTPException, Response, status
-from passlib.context import CryptContext
+from fastapi import APIRouter, Cookie, HTTPException, Response, status
 from sqlalchemy import select
 
 from src.api.deps import CurrentUser, DBSession
 from src.api.schemas.auth import LoginRequest, RegisterRequest, UserResponse
 from src.api.schemas.common import ErrorResponse, MessageResponse, ValidationErrorResponse
-from src.models.user import User
+from src.models.user import Session, User
 from src.shared.config import settings
 
 router = APIRouter()
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 TOKEN_EXPIRY_HOURS = 24
 
@@ -29,6 +29,22 @@ def _create_token(user: User) -> str:
         "exp": datetime.now(UTC) + timedelta(hours=TOKEN_EXPIRY_HOURS),
     }
     return jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
+
+
+def _hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+
+def _verify_password(password: str, password_hash: str) -> bool:
+    try:
+        return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
+    except ValueError:
+        # Invalid hash format should behave like invalid credentials.
+        return False
+
+
+def _hash_jwt_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
 # --------------------------------------------------------------------------- #
@@ -62,7 +78,7 @@ async def register(body: RegisterRequest, db: DBSession) -> User:
         name=body.name,
         email=body.email,
         role=body.role,
-        password_hash=pwd_context.hash(body.password),
+        password_hash=_hash_password(body.password),
     )
     db.add(user)
     try:
@@ -94,18 +110,28 @@ async def login(body: LoginRequest, response: Response, db: DBSession) -> dict:
     result = await db.execute(select(User).where(User.email == body.email))
     user = result.scalar_one_or_none()
 
-    if not user or not pwd_context.verify(body.password, user.password_hash):
+    if not user or not _verify_password(body.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
         )
 
     token = _create_token(user)
+    expires_at = datetime.now(UTC) + timedelta(hours=TOKEN_EXPIRY_HOURS)
+    db.add(
+        Session(
+            user_id=user.id,
+            jwt_token_hash=_hash_jwt_token(token),
+            expires_at=expires_at,
+        )
+    )
+    await db.flush()
+
     response.set_cookie(
         key="vc_token",
         value=token,
         httponly=True,
-        secure=True,
+        secure=settings.cookie_secure,
         samesite="lax",
         max_age=TOKEN_EXPIRY_HOURS * 3600,
     )
@@ -120,9 +146,100 @@ async def login(body: LoginRequest, response: Response, db: DBSession) -> dict:
     description="Delete the `vc_token` cookie to end the session.",
     openapi_extra={"security": []},
 )
-async def logout(response: Response) -> dict:
+async def logout(
+    response: Response,
+    db: DBSession,
+    vc_token: str | None = Cookie(default=None),
+) -> dict:
+    if vc_token:
+        result = await db.execute(
+            select(Session).where(Session.jwt_token_hash == _hash_jwt_token(vc_token))
+        )
+        session = result.scalar_one_or_none()
+        if session:
+            await db.delete(session)
+
     response.delete_cookie("vc_token")
     return {"message": "logged out"}
+
+
+@router.get(
+    "/session",
+    operation_id="get_session",
+    summary="Get current auth session",
+    description="Returns authenticated user and session expiry.",
+    responses={
+        401: {"model": ErrorResponse, "description": "Not authenticated"},
+    },
+)
+async def session_info(
+    current_user: CurrentUser,
+    db: DBSession,
+    vc_token: str | None = Cookie(default=None),
+) -> dict:
+    if not vc_token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+
+    result = await db.execute(
+        select(Session).where(Session.jwt_token_hash == _hash_jwt_token(vc_token))
+    )
+    session = result.scalar_one_or_none()
+    if not session:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session revoked or expired")
+
+    return {
+        "user": UserResponse.model_validate(current_user).model_dump(mode="json"),
+        "session": {"expires_at": session.expires_at.isoformat()},
+        "expires_at": session.expires_at.isoformat(),
+    }
+
+
+@router.post(
+    "/extend",
+    operation_id="extend_session",
+    summary="Extend current auth session",
+    description="Rotates the JWT cookie and extends session expiry.",
+    responses={
+        401: {"model": ErrorResponse, "description": "Not authenticated"},
+    },
+)
+async def extend_session(
+    response: Response,
+    current_user: CurrentUser,
+    db: DBSession,
+    vc_token: str | None = Cookie(default=None),
+) -> dict:
+    if not vc_token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+
+    result = await db.execute(
+        select(Session).where(Session.jwt_token_hash == _hash_jwt_token(vc_token))
+    )
+    session = result.scalar_one_or_none()
+    if not session:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session revoked or expired")
+
+    new_token = _create_token(current_user)
+    new_expires_at = datetime.now(UTC) + timedelta(hours=TOKEN_EXPIRY_HOURS)
+    session.jwt_token_hash = _hash_jwt_token(new_token)
+    session.expires_at = new_expires_at
+    await db.flush()
+
+    response.set_cookie(
+        key="vc_token",
+        value=new_token,
+        httponly=True,
+        secure=settings.cookie_secure,
+        samesite="lax",
+        max_age=TOKEN_EXPIRY_HOURS * 3600,
+    )
+
+    return {
+        "message": "session extended",
+        "user": UserResponse.model_validate(current_user).model_dump(mode="json"),
+        "session": {"expires_at": new_expires_at.isoformat()},
+        "expires_at": new_expires_at.isoformat(),
+    }
 
 
 @router.get(

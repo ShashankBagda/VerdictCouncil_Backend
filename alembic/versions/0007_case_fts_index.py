@@ -1,14 +1,14 @@
 """Add tsvector GIN index on cases.description for full-text search.
 
-Revision ID: 0004
-Revises: 0003
+Revision ID: 0007
+Revises: 0006
 Create Date: 2026-04-16
 """
 
 from alembic import op
 
-revision = "0004"
-down_revision = "0003"
+revision = "0007"
+down_revision = "0006"
 branch_labels = None
 depends_on = None
 

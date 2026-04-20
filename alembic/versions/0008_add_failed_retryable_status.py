@@ -1,14 +1,14 @@
 """Add failed_retryable value to casestatus enum.
 
-Revision ID: 0005
-Revises: 0004
+Revision ID: 0008
+Revises: 0007
 Create Date: 2026-04-16
 """
 
 from alembic import op
 
-revision = "0005"
-down_revision = "0004"
+revision = "0008"
+down_revision = "0007"
 branch_labels = None
 depends_on = None
 

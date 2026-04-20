@@ -7,7 +7,7 @@ Create Date: 2026-04-19
 
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, ENUM
 
 revision = "0005"
 down_revision = "0004"
@@ -16,14 +16,24 @@ depends_on = None
 
 
 def upgrade() -> None:
-    reopen_request_status = sa.Enum(
+    reopen_request_status = ENUM(
         "pending",
         "approved",
         "rejected",
         name="reopenrequeststatus",
         create_type=False,
     )
-    reopen_request_status.create(op.get_bind(), checkfirst=True)
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'reopenrequeststatus') THEN
+                CREATE TYPE reopenrequeststatus AS ENUM ('pending', 'approved', 'rejected');
+            END IF;
+        END
+        $$;
+        """
+    )
 
     op.add_column("verdicts", sa.Column("amendment_of", UUID(as_uuid=True), nullable=True))
     op.add_column("verdicts", sa.Column("amendment_reason", sa.Text(), nullable=True))
@@ -91,11 +101,4 @@ def downgrade() -> None:
     op.drop_column("verdicts", "amendment_reason")
     op.drop_column("verdicts", "amendment_of")
 
-    reopen_request_status = sa.Enum(
-        "pending",
-        "approved",
-        "rejected",
-        name="reopenrequeststatus",
-        create_type=False,
-    )
-    reopen_request_status.drop(op.get_bind(), checkfirst=True)
+    op.execute("DROP TYPE IF EXISTS reopenrequeststatus")
