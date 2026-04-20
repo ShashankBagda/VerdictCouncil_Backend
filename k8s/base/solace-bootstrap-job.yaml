@@ -17,8 +17,8 @@ metadata:
 type: Opaque
 stringData:
   bootstrap.sh: |
-    #!/bin/bash
-    set -eo pipefail
+    #!/bin/sh
+    set -eu
 
     SEMP="http://${SOLACE_HOST}:8080/SEMP/v2/config"
     AUTH="admin:${ADMIN_PASSWORD}"
@@ -35,12 +35,15 @@ stringData:
       sleep 5
     done
 
-    echo "Waiting for redundancy group to be active ..."
+    # Wait for the redundancy group to elect an active node. We hit the
+    # Service (not a specific pod), so whichever broker holds the
+    # `active="true"` label answers — if the group hasn't formed yet,
+    # `activeStandbyRole` is empty and we keep waiting.
+    echo "Waiting for redundancy group to elect an active node ..."
     for i in $(seq 1 60); do
-      state=$(curl -sfu "$AUTH" "${SEMP}/about/user" 2>/dev/null | head -c0 || true)
-      activity=$(curl -sfu "$AUTH" "http://${SOLACE_HOST}:8080/SEMP/v2/monitor/about/user" 2>/dev/null || true)
-      if curl -sfu "$AUTH" "http://${SOLACE_HOST}:8080/SEMP/v2/monitor/msgVpns/default" >/dev/null 2>&1; then
-        echo "Broker serving monitor API after ${i}s"
+      body=$(curl -sfu "$AUTH" "http://${SOLACE_HOST}:8080/SEMP/v2/monitor/redundancy" 2>/dev/null || true)
+      if echo "$body" | grep -q '"activeStandbyRole"[[:space:]]*:[[:space:]]*"[^"]\+"'; then
+        echo "Redundancy group active after ${i}s"
         break
       fi
       sleep 5

@@ -27,6 +27,26 @@ jobs:
       - name: Deploy to DOKS
         run: |
           doctl kubernetes cluster kubeconfig save ${{ secrets.DOKS_STAGING_CLUSTER_ID }}
+
+          # Apply base manifests first (Solace HA StatefulSet, SEMPv2
+          # bootstrap Job, Deployments, Services, etc.). Before this step
+          # existed, fresh staging clusters had no Deployment objects for
+          # `kubectl set image` to target, and the Solace HA rollout +
+          # VPN/user bootstrap never ran at all. Kustomize apply is
+          # idempotent, so rerunning on every push is cheap.
+          kubectl apply -k k8s/overlays/staging
+
+          # Wait for the SEMPv2 bootstrap Job to complete before the SAM
+          # agent pods start consuming credentials — without the VPN
+          # and vc-agent user in place every agent AUTH_FAILs on startup.
+          kubectl wait -n verdictcouncil-staging \
+            --for=condition=complete job/solace-bootstrap \
+            --timeout=300s || {
+              echo "Solace bootstrap Job did not complete — dumping logs"
+              kubectl logs -n verdictcouncil-staging job/solace-bootstrap --tail=200
+              exit 1
+            }
+
           kubectl set image -n verdictcouncil-staging \
             deployment/case-processing case-processing=${{ secrets.DOCR_REGISTRY }}/verdictcouncil:rc-${{ github.sha }} \
             deployment/complexity-routing complexity-routing=${{ secrets.DOCR_REGISTRY }}/verdictcouncil:rc-${{ github.sha }} \
