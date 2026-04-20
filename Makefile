@@ -1,4 +1,4 @@
-.PHONY: install lint typecheck test migrate infra-up infra-down dev clean
+.PHONY: install lint typecheck test migrate infra-up infra-down dev clean openapi-snapshot openapi-check smoke-contract
 
 install: ## Install dependencies
 	python3.12 -m venv .venv
@@ -36,6 +36,16 @@ dev: ## Start all agents via honcho (hybrid mode)
 
 clean: ## Remove build artifacts
 	rm -rf .venv build dist *.egg-info .pytest_cache .mypy_cache htmlcov .coverage
+
+openapi-snapshot: ## Regenerate docs/openapi.json from the FastAPI app
+	.venv/bin/python -m scripts.export_openapi docs/openapi.json
+
+openapi-check: openapi-snapshot ## Fail if docs/openapi.json is out of sync with the app
+	@git diff --exit-code docs/openapi.json \
+		|| (echo "docs/openapi.json is out of date — run 'make openapi-snapshot' and commit the diff"; exit 1)
+
+smoke-contract: ## Hit every frontend-used endpoint against a running API (needs seed)
+	.venv/bin/python -m scripts.smoke_frontend_contract
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-15s\033[0m %s\n", $$1, $$2}'
