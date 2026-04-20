@@ -8,16 +8,12 @@ parallel via Promise.allSettled.
 
 from __future__ import annotations
 
-import asyncio
-import json
 import logging
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Request, UploadFile, File, status
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, File, HTTPException, UploadFile, status
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
 
 from src.api.deps import CurrentUser, DBSession
 from src.api.schemas.cases import (
@@ -31,7 +27,7 @@ from src.api.schemas.cases import (
     VerdictResponse,
     WitnessResponse,
 )
-from src.api.schemas.common import ErrorResponse, MessageResponse
+from src.api.schemas.common import ErrorResponse
 from src.models.audit import AuditLog
 from src.models.case import (
     Argument,
@@ -264,80 +260,6 @@ async def get_pipeline_status(
         "overall_progress_percent": progress,
         "overall_status": overall,
     }
-
-
-# ---------------------------------------------------------------------------
-# SSE stream
-# ---------------------------------------------------------------------------
-
-
-@router.get(
-    "/{case_id}/status/stream",
-    operation_id="stream_pipeline_status",
-    summary="Stream pipeline status via SSE",
-    description="Server-Sent Events stream that pushes pipeline status updates "
-    "every 3 seconds. The stream closes when the pipeline reaches a terminal state.",
-    responses={
-        404: {"model": ErrorResponse, "description": "Case not found"},
-    },
-)
-async def stream_pipeline_status(
-    case_id: UUID,
-    request: Request,
-    db: DBSession,
-    current_user: CurrentUser,
-) -> StreamingResponse:
-    # Validate case exists and user has access
-    await _get_case_or_404(case_id, db, current_user)
-
-    async def event_generator():
-        from src.services.database import async_session as session_factory
-
-        while True:
-            if await request.is_disconnected():
-                break
-
-            async with session_factory() as fresh_db:
-                case_result = await fresh_db.execute(
-                    select(Case).where(Case.id == case_id)
-                )
-                case = case_result.scalar_one_or_none()
-                if not case:
-                    break
-
-                log_result = await fresh_db.execute(
-                    select(AuditLog)
-                    .where(AuditLog.case_id == case_id)
-                    .order_by(AuditLog.created_at.asc())
-                )
-                logs = list(log_result.scalars().all())
-
-            agents = _derive_agent_status(case, logs)
-            progress = _compute_progress(agents)
-            overall = _derive_overall_status(case, agents)
-
-            payload = json.dumps({
-                "agents": agents,
-                "overall_progress_percent": progress,
-                "overall_status": overall,
-            })
-            yield f"data: {payload}\n\n"
-
-            # Stop streaming if terminal
-            if overall in ("completed", "failed"):
-                break
-
-            await asyncio.sleep(3)
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
 
 
 # ---------------------------------------------------------------------------

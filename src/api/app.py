@@ -133,11 +133,13 @@ def create_app() -> FastAPI:
     from src.api.routes import (
         audit,
         auth,
+        case_data,
         cases,
         dashboard,
         decisions,
         escalation,
         health,
+        hearing_pack,
         judge,
         knowledge_base,
         precedent_search,
@@ -146,6 +148,8 @@ def create_app() -> FastAPI:
 
     app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
     app.include_router(cases.router, prefix="/api/v1/cases", tags=["cases"])
+    app.include_router(case_data.router, prefix="/api/v1/cases", tags=["cases"])
+    app.include_router(hearing_pack.router, prefix="/api/v1/cases", tags=["hearing-pack"])
     app.include_router(decisions.router, prefix="/api/v1/cases", tags=["decisions"])
     app.include_router(what_if.router, prefix="/api/v1/cases", tags=["what-if"])
     app.include_router(judge.router, prefix="/api/v1/cases", tags=["judge"])
