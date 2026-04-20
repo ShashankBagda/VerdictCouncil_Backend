@@ -49,7 +49,9 @@ OPENAPI_TAGS = [
     },
     {
         "name": "hearing-pack",
-        "description": "Generate a hearing preparation pack (summary, evidence, arguments, verdict).",
+        "description": (
+            "Generate a hearing preparation pack (summary, evidence, arguments, verdict)."
+        ),
     },
     {
         "name": "reopen-requests",
@@ -61,7 +63,9 @@ OPENAPI_TAGS = [
     },
     {
         "name": "admin",
-        "description": "Administrative operations: vector store refresh, user actions, cost config.",
+        "description": (
+            "Administrative operations: vector store refresh, user actions, cost config."
+        ),
     },
 ]
 
