@@ -164,7 +164,12 @@ class SolaceA2AClient:
     ) -> None:
         if self._publisher is None or self._service is None:
             raise RuntimeError("SolaceA2AClient.publish called before connect()")
-        body = json.dumps(envelope).encode("utf-8")
+        # NOTE: `message_builder().build()` fails on bytes in the
+        # installed Solace Python SDK (Fail / SOLCLIENT_SUBCODE_OK — a
+        # confusing surface error). Pass str so the SDK takes the
+        # string-attachment branch. json.dumps defaults to ASCII-safe
+        # output, so the JSON envelope survives the encode round-trip.
+        body = json.dumps(envelope)
         builder = self._service.message_builder()
         if reply_to:
             builder = builder.with_property(REPLY_TO_PROPERTY, reply_to)
@@ -200,13 +205,21 @@ class _ReplyHandler(MessageHandler):
         self._client = client
 
     def on_message(self, message: InboundMessage) -> None:
+        # Prefer string payload: our publisher sends via `build(str)`
+        # because `build(bytes)` silently fails on this SDK version.
+        # When the sender uses the string slot, `get_payload_as_bytes`
+        # does not return the string — only `get_payload_as_string` does.
         try:
-            payload_bytes = message.get_payload_as_bytes()
-            if payload_bytes:
-                envelope = json.loads(payload_bytes.decode("utf-8"))
+            payload_str = message.get_payload_as_string()
+            if payload_str:
+                envelope = json.loads(payload_str)
             else:
-                payload = message.get_payload_as_string() or ""
-                envelope = json.loads(payload) if payload else None
+                payload_bytes = message.get_payload_as_bytes()
+                envelope = (
+                    json.loads(payload_bytes.decode("utf-8"))
+                    if payload_bytes
+                    else None
+                )
         except Exception as exc:
             logger.error("SolaceA2AClient failed to parse inbound envelope: %s", exc)
             return

@@ -135,8 +135,15 @@ async def _echo_subscriber(
 
     def _handle_inbound(message: InboundMessage) -> None:
         try:
-            body_bytes = message.get_payload_as_bytes() or b""
-            envelope = json.loads(body_bytes.decode("utf-8")) if body_bytes else {}
+            # Publishers use `build(str)`, so read the string slot first.
+            payload_str = message.get_payload_as_string()
+            if payload_str:
+                envelope = json.loads(payload_str)
+            else:
+                body_bytes = message.get_payload_as_bytes() or b""
+                envelope = (
+                    json.loads(body_bytes.decode("utf-8")) if body_bytes else {}
+                )
             topic = message.get_destination_name()
             reply_to = message.get_property(REPLY_TO_PROPERTY)
         except Exception as exc:  # noqa: BLE001 — diagnostic only
@@ -165,9 +172,9 @@ async def _echo_subscriber(
             return
 
         response = build_send_task_response(task_id, session_id, payload)
-        outbound = (
-            service.message_builder().build(json.dumps(response).encode("utf-8"))
-        )
+        # SolaceA2AClient has a matching note: build(bytes) fails on
+        # this SDK build; build(str) works. JSON envelopes are ASCII.
+        outbound = service.message_builder().build(json.dumps(response))
 
         def _record() -> None:
             stats["received"] += 1
