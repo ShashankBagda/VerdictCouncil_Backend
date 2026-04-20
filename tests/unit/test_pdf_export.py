@@ -7,14 +7,24 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pypdf
 import pytest
-from httpx import ASGITransport, AsyncClient
 
-from src.api.app import create_app
-from src.api.deps import get_current_user, get_db
-from src.models.case import Case
-from src.models.user import User, UserRole
-from src.services.case_report_data import CaseReportData
-from src.services.pdf_export import render_case_report_pdf
+# WeasyPrint is only installed in environments that have the system pango
+# libraries available (our Linux CI + docker image). Local dev on macOS
+# without `brew install pango` does not install it. Skip the whole module
+# rather than hard-failing collection so pytest stays green everywhere.
+pytest.importorskip(
+    "weasyprint",
+    reason="WeasyPrint not installed — skipping PDF export tests",
+)
+
+from httpx import ASGITransport, AsyncClient  # noqa: E402
+
+from src.api.app import create_app  # noqa: E402
+from src.api.deps import get_current_user, get_db  # noqa: E402
+from src.models.case import Case  # noqa: E402
+from src.models.user import User, UserRole  # noqa: E402
+from src.services.case_report_data import CaseReportData  # noqa: E402
+from src.services.pdf_export import render_case_report_pdf  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Helpers

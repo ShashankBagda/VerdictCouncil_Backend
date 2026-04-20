@@ -11,6 +11,31 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# Key under which per-session precedent source metadata is stashed on the
+# SAM tool_context.state. The orchestrator lifts this into
+# CaseState.precedent_source_metadata after the agent turn completes.
+PRECEDENT_META_STATE_KEY = "precedent_source_metadata"
+
+
+def _merge_precedent_meta(
+    existing: dict[str, Any] | None,
+    new: dict[str, Any],
+) -> dict[str, Any]:
+    """Worst-of merge across multiple search_precedents calls in one session.
+
+    - First call wins for the initial snapshot.
+    - Any subsequent call with source_failed=True escalates the merged
+      record to source_failed=True and adopts that call's pair_status.
+    - Any other fields flow through from the existing record untouched.
+    """
+    if existing is None:
+        return dict(new)
+    if new.get("source_failed"):
+        existing["source_failed"] = True
+        existing["pair_status"] = new.get("pair_status", existing.get("pair_status"))
+    return existing
+
+
 # Parameter schema describing the search_precedents tool interface.
 # Uses plain dicts mirroring google.genai.types.Schema structure so
 # this module works without a hard dependency on the ADK package.
@@ -82,8 +107,21 @@ class SearchPrecedentsTool:
             tool_context: Optional SAM tool context (unused).
 
         Returns:
-            List of precedent dicts from the PAIR Search API.
+            List of precedent dicts from the PAIR Search API. Source
+            metadata (pair_status, source_failed, fallback_used) is
+            stashed on tool_context.state under PRECEDENT_META_STATE_KEY
+            when a context is provided, so the orchestrator can lift it
+            into CaseState.precedent_source_metadata.
         """
-        from src.tools.search_precedents import search_precedents
+        from src.tools.search_precedents import search_precedents_with_meta
 
-        return await search_precedents(**args)
+        search_result = await search_precedents_with_meta(**args)
+
+        state = getattr(tool_context, "state", None)
+        if isinstance(state, dict):
+            state[PRECEDENT_META_STATE_KEY] = _merge_precedent_meta(
+                state.get(PRECEDENT_META_STATE_KEY),
+                search_result.metadata,
+            )
+
+        return search_result.precedents
