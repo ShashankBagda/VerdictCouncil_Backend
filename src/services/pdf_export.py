@@ -10,7 +10,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
-from weasyprint import HTML
 
 from src.services.case_report_data import CaseReportData
 
@@ -23,6 +22,8 @@ _env = Environment(
 
 def render_case_report_pdf(data: CaseReportData) -> bytes:
     """Render the case report HTML template to PDF bytes."""
+    from weasyprint import HTML
+
     template = _env.get_template("case_report.html")
     html_str = template.render(case=data)
     return HTML(string=html_str).write_pdf()
