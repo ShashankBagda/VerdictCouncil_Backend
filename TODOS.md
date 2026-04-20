@@ -79,7 +79,6 @@
 - **US-020: Hearing Pack Generation** — Compile and export a hearing preparation pack (case summary, evidence, arguments, verdict)
   - **Completed:** v0.3.0 (2026-04-16) — `GET /api/v1/cases/{id}/hearing-pack` returns a zip via `src/services/hearing_pack.py`. Introduces shared `CaseReportData` projection in `src/services/case_report_data.py` (also used by US-027). PR #25.
 - **US-027: Case Report PDF Export** — Generate and download a PDF report of the full case analysis
-  - **Completed:** v0.3.0 (2026-04-16) — `GET /api/v1/cases/{id}/report.pdf` renders `src/templates/case_report.html` via WeasyPrint in `src/services/pdf_export.py`; Dockerfile updated with pango/cairo runtime deps. PR #26.
 
 ## Technical Debt (from adversarial review, v0.1.0.0)
 
@@ -87,16 +86,13 @@
 - **What:** `get_current_user` (deps.py) decodes the JWT but never validates against the `sessions` table. A revoked session remains valid until JWT expiry.
 - **Why:** A fired/suspended judge retains API access for the JWT lifetime with no kill switch.
 - **Priority:** P1 — security gap. Fix: check `Session.jwt_token_hash` and `expires_at` on every request.
-- **Completed:** 0172e3e (`fix(auth): validate JWT against sessions table on every request`) — `src/api/deps.py:68-86` joins `User`+`Session` and checks `jwt_token_hash` + `expires_at > now()` on every request.
 
 ### Verdict Ordering by UUID
 - **What:** `get_fairness_audit` orders `Verdict` by `id.desc()` (UUID v4 — random, not temporal). The Verdict model has no `created_at` column.
 - **Why:** On cases that re-run (via `return_to_pipeline`), the "most recent" verdict returned is random.
 - **Priority:** P2 — add `created_at` to Verdict + migration, then change `order_by` to `created_at.desc()`.
-- **Completed:** v0.2.0.0 (2026-04-15) — `created_at` added to Verdict model, ordering changed to `created_at DESC, id DESC`
 
 ### Redis Connection Leak in search_precedents.py
 - **What:** `_get_redis_client()` creates a new `redis.Redis` object on every call, never closes them.
 - **Why:** Under load this exhausts the Redis connection pool.
 - **Priority:** P2 — convert to a module-level singleton with proper lifecycle management.
-- **Completed:** feat/search-precedents-redis-singleton — module-level singleton in `src/tools/search_precedents.py`, `close_redis_client()` wired into FastAPI lifespan in `src/api/app.py`. Mirrors the pattern in `src/shared/circuit_breaker.py`.

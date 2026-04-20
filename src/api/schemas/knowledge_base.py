@@ -28,35 +28,3 @@ class KnowledgeBaseStatusResponse(BaseModel):
     pair_api: PairApiStatus
     vector_store: VectorStoreStatus
     last_checked: datetime
-
-
-class KnowledgeBaseDocument(BaseModel):
-    file_id: str
-    filename: str
-    content_type: str | None = None
-    size_bytes: int | None = None
-    uploaded_at: datetime | str | None = None
-    preview: str | None = None
-
-
-class KnowledgeBaseDocumentListResponse(BaseModel):
-    initialized: bool
-    items: list[KnowledgeBaseDocument]
-    total: int
-
-
-class KnowledgeBaseSearchRequest(BaseModel):
-    query: str
-    limit: int = 10
-
-
-class KnowledgeBaseSearchResult(BaseModel):
-    file_id: str
-    filename: str
-    content: str
-    score: float
-
-
-class KnowledgeBaseSearchResponse(BaseModel):
-    items: list[KnowledgeBaseSearchResult]
-    total: int
