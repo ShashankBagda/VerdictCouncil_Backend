@@ -29,7 +29,6 @@ class CaseCreateRequest(BaseModel):
     domain: CaseDomain = Field(
         ..., description="Legal domain of the case", examples=["small_claims"]
     )
-    description: str | None = Field(None, description="Free-text case description", max_length=2000)
 
 
 # ---------------------------------------------------------------------------
@@ -42,7 +41,6 @@ class CaseResponse(BaseModel):
 
     id: UUID = Field(..., description="Case ID")
     domain: CaseDomain = Field(..., description="Legal domain")
-    description: str | None = Field(None, description="Case description")
     status: CaseStatus = Field(..., description="Current case status")
     jurisdiction_valid: bool | None = Field(None, description="Whether jurisdiction is valid")
     complexity: str | None = Field(None, description="Case complexity level")
@@ -179,7 +177,6 @@ class CaseDetailResponse(BaseModel):
 
     id: UUID = Field(..., description="Case ID")
     domain: CaseDomain = Field(..., description="Legal domain")
-    description: str | None = Field(None, description="Case description")
     status: CaseStatus = Field(..., description="Current case status")
     jurisdiction_valid: bool | None = Field(None, description="Whether jurisdiction is valid")
     complexity: str | None = Field(None, description="Case complexity level")

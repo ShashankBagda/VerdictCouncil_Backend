@@ -42,24 +42,6 @@ OPENAPI_TAGS = [
             "PAIR API circuit breaker status and active probing for external service health."
         ),
     },
-    {
-        "name": "judge",
-        "description": (
-            "Judge-facing endpoints for fact disputes, evidence gaps, and fairness audits."
-        ),
-    },
-    {
-        "name": "precedent-search",
-        "description": "Ad-hoc precedent search via PAIR API.",
-    },
-    {
-        "name": "knowledge-base",
-        "description": "Vector store and knowledge base health status.",
-    },
-    {
-        "name": "escalation",
-        "description": "Escalated case review and resolution workflow.",
-    },
 ]
 
 
