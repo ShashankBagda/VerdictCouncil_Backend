@@ -17,6 +17,7 @@ resources:
   - deployment-deliberation.yaml
   - deployment-governance-verdict.yaml
   - deployment-layer2-aggregator.yaml
+  - cronjob-stuck-case-watchdog.yaml
   - service-web-gateway.yaml
   - service-api-service.yaml
   - service-solace.yaml
