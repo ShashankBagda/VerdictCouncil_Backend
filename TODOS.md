@@ -92,6 +92,14 @@
   - **Completed:** v0.3.0 (2026-04-16) — `GET /api/v1/cases/{id}/hearing-pack` returns a zip via `src/services/hearing_pack.py`. Introduces shared `CaseReportData` projection in `src/services/case_report_data.py` (also used by US-027). PR #25.
 - **US-027: Case Report PDF Export** — Generate and download a PDF report of the full case analysis
 
+### Judicial Decision Amendment & History
+
+- **US (new):** Amend a published judicial decision and view its full amendment history.
+  - **What:** `POST /api/v1/cases/{case_id}/amend-decision` to submit an amended verdict (reason, amended reasoning, amended outcome) after a case has reached `decided`/`closed`. `GET /api/v1/cases/{case_id}/decision-history` to return the ordered amendment audit trail.
+  - **Why:** The frontend (`CaseDetail.jsx` "Amend Decision" action + `DecisionHistory` panel) wires these paths through `frontend/src/api/client.js` as `amendDecision()` and `getDecisionHistory()`, but the backend has never exposed them. Contract-alignment audit 2026-04-20 confirmed they are not just unmounted — they do not exist. The frontend silently fails today; aligning the contract (plan phase 5) empty-states these surfaces until the backend catches up.
+  - **Context:** Model impact likely spans `Verdict` + a new `VerdictAmendment` table (or equivalent) plus audit-log entries. Needs RBAC (judge/senior_judge), invariant checks (original verdict must exist and be non-draft), and a way to mark the amendment on the status stream.
+  - **Depends on:** OpenAPI contract alignment (feat/openapi-contract-alignment) — the frontend stops calling these paths until we implement them server-side, so there is no silent-failure regression while this backlog item is open.
+
 ## Technical Debt (from adversarial review, v0.1.0.0)
 
 ### Session Token Revocation
