@@ -91,8 +91,7 @@ class TestRegister:
         app.dependency_overrides[get_db] = lambda: mock_db
 
         transport = ASGITransport(app=app)
-        with patch("src.api.routes.auth.pwd_context") as mock_pwd:
-            mock_pwd.hash.return_value = "hashed_password"
+        with patch("src.api.routes.auth._hash_password", return_value="hashed_password"):
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 resp = await client.post(
                     "/api/v1/auth/register",
@@ -149,9 +148,7 @@ class TestLogin:
         app.dependency_overrides[get_db] = lambda: mock_db
 
         transport = ASGITransport(app=app)
-        with patch("src.api.routes.auth.pwd_context") as mock_pwd:
-            mock_pwd.verify.return_value = True
-
+        with patch("src.api.routes.auth._verify_password", return_value=True):
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 resp = await client.post(
                     "/api/v1/auth/login",
@@ -176,9 +173,7 @@ class TestLogin:
         app.dependency_overrides[get_db] = lambda: mock_db
 
         transport = ASGITransport(app=app)
-        with patch("src.api.routes.auth.pwd_context") as mock_pwd:
-            mock_pwd.verify.return_value = False
-
+        with patch("src.api.routes.auth._verify_password", return_value=False):
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 resp = await client.post(
                     "/api/v1/auth/login",
