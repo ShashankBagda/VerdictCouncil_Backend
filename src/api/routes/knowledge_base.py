@@ -1,4 +1,4 @@
-"""Knowledge base endpoints — vector store health + per-judge CRUD (US-017)."""
+"""Knowledge base status endpoint — vector store and PAIR API health (US-017)."""
 
 from __future__ import annotations
 
@@ -8,14 +8,25 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, File, HTTPException, UploadFile, status
 from openai import AsyncOpenAI
 
-from src.api.deps import CurrentUser, DBSession
-from src.api.schemas.common import ErrorResponse
+from src.api.deps import require_role
+from src.api.schemas.common import ErrorResponse, MessageResponse
 from src.api.schemas.knowledge_base import (
+    KnowledgeBaseDocument,
+    KnowledgeBaseDocumentListResponse,
+    KnowledgeBaseSearchRequest,
+    KnowledgeBaseSearchResponse,
     KnowledgeBaseStatusResponse,
     PairApiStatus,
     VectorStoreStatus,
 )
-from src.services import knowledge_base as kb_service
+from src.models.user import User, UserRole
+from src.services.knowledge_base_store import (
+    delete_document,
+    initialize_store,
+    list_documents,
+    save_document,
+    search_documents,
+)
 from src.shared.circuit_breaker import get_pair_search_breaker
 from src.shared.config import settings
 
@@ -40,13 +51,13 @@ def _get_openai_client() -> AsyncOpenAI:
     operation_id="get_knowledge_base_status",
     summary="Knowledge base and PAIR API health status",
     description="Returns the PAIR API circuit breaker state and vector store health. "
-    "Requires authenticated user.",
+    "Requires judge role.",
     responses={
         403: {"model": ErrorResponse, "description": "Insufficient permissions"},
     },
 )
 async def get_knowledge_base_status(
-    current_user: CurrentUser,
+    current_user: User = require_role(UserRole.judge),
 ) -> KnowledgeBaseStatusResponse:
     # PAIR circuit breaker status
     pair_status_dict = await get_pair_search_breaker().get_status()
@@ -94,99 +105,72 @@ async def get_knowledge_base_status(
 
 @router.post(
     "/initialize",
+    response_model=MessageResponse,
     operation_id="initialize_knowledge_base",
-    summary="Create a personal vector store for the current judge",
-    status_code=status.HTTP_201_CREATED,
+    summary="Initialize knowledge base storage",
+    description="Prepare local knowledge base storage and metadata index.",
+    responses={403: {"model": ErrorResponse, "description": "Insufficient permissions"}},
 )
-async def initialize_kb(
-    db: DBSession,
-    current_user: CurrentUser,
+async def initialize_knowledge_base(
+    current_user: User = require_role(UserRole.judge),
 ) -> dict:
-    if current_user.openai_vector_store_id:
-        return {
-            "vector_store_id": current_user.openai_vector_store_id,
-            "message": "Already initialized",
-        }
-
-    store_id = await kb_service.create_judge_vector_store(str(current_user.id))
-    current_user.openai_vector_store_id = store_id
-    await db.flush()
-
-    return {"vector_store_id": store_id, "message": "Knowledge base created"}
-
-
-@router.post(
-    "/documents",
-    operation_id="upload_kb_document",
-    summary="Upload a document to the judge's knowledge base",
-)
-async def upload_kb_document(
-    current_user: CurrentUser,
-    db: DBSession,
-    file: UploadFile = File(...),
-) -> dict:
-    if not current_user.openai_vector_store_id:
-        raise HTTPException(
-            status_code=400, detail="Knowledge base not initialized. Call POST /initialize first."
-        )
-
-    file_bytes = await file.read()
-    result = await kb_service.upload_document_to_kb(
-        current_user.openai_vector_store_id,
-        file_bytes,
-        file.filename or "document",
-    )
-    return result
+    initialize_store()
+    return {"message": "Knowledge base initialized"}
 
 
 @router.get(
     "/documents",
-    operation_id="list_kb_documents",
-    summary="List documents in the judge's knowledge base",
+    response_model=KnowledgeBaseDocumentListResponse,
+    operation_id="list_knowledge_base_documents",
+    summary="List knowledge base documents",
 )
-async def list_kb_documents(
-    current_user: CurrentUser,
+async def list_knowledge_base_documents(
+    current_user: User = require_role(UserRole.judge),
 ) -> dict:
-    if not current_user.openai_vector_store_id:
-        return {"documents": [], "initialized": False}
+    data = list_documents()
+    return data
 
-    docs = await kb_service.list_kb_files(current_user.openai_vector_store_id)
-    return {"documents": docs, "initialized": True}
+
+@router.post(
+    "/documents",
+    response_model=KnowledgeBaseDocument,
+    operation_id="upload_knowledge_base_document",
+    summary="Upload a document to the knowledge base",
+)
+async def upload_knowledge_base_document(
+    file: UploadFile = File(...),
+    current_user: User = require_role(UserRole.judge),
+) -> dict:
+    if not file.filename:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Filename is required")
+
+    return await save_document(file)
 
 
 @router.delete(
     "/documents/{file_id}",
-    operation_id="delete_kb_document",
-    summary="Delete a document from the judge's knowledge base",
+    response_model=MessageResponse,
+    operation_id="delete_knowledge_base_document",
+    summary="Delete a knowledge base document",
 )
-async def delete_kb_document(
+async def delete_knowledge_base_document(
     file_id: str,
-    current_user: CurrentUser,
+    current_user: User = require_role(UserRole.judge),
 ) -> dict:
-    if not current_user.openai_vector_store_id:
-        raise HTTPException(status_code=400, detail="Knowledge base not initialized")
-
-    await kb_service.delete_kb_file(current_user.openai_vector_store_id, file_id)
-    return {"message": "Document deleted", "file_id": file_id}
+    deleted = delete_document(file_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+    return {"message": "Document deleted"}
 
 
 @router.post(
     "/search",
-    operation_id="search_kb",
-    summary="Search the judge's knowledge base",
+    response_model=KnowledgeBaseSearchResponse,
+    operation_id="search_knowledge_base",
+    summary="Search the knowledge base",
 )
-async def search_kb_endpoint(
-    body: dict,
-    current_user: CurrentUser,
+async def search_knowledge_base(
+    body: KnowledgeBaseSearchRequest,
+    current_user: User = require_role(UserRole.judge),
 ) -> dict:
-    if not current_user.openai_vector_store_id:
-        return {"results": [], "message": "Knowledge base not initialized"}
-
-    query = body.get("query", "")
-    max_results = body.get("max_results", 5)
-    results = await kb_service.search_kb(
-        current_user.openai_vector_store_id,
-        query,
-        max_results=max_results,
-    )
-    return {"results": results, "query": query}
+    return search_documents(body.query, limit=body.limit)

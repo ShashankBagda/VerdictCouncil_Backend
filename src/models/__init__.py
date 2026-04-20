@@ -7,28 +7,33 @@ from src.models.case import (
     Document,
     Evidence,
     Fact,
+    HearingNote,
     LegalRule,
     Party,
     Precedent,
+    ReopenRequest,
     Verdict,
     Witness,
 )
-from src.models.user import Session, User
+from src.models.user import PasswordResetToken, Session, User
 
 __all__ = [
     "Base",
     "User",
     "Session",
+    "PasswordResetToken",
     "Case",
     "Party",
     "Document",
     "Evidence",
     "Fact",
+    "HearingNote",
     "Witness",
     "LegalRule",
     "Precedent",
     "Argument",
     "Deliberation",
     "Verdict",
+    "ReopenRequest",
     "AuditLog",
 ]

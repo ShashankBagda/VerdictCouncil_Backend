@@ -39,11 +39,10 @@ DATABASE_URL = os.getenv(
 
 
 def _hash_password(password: str) -> str:
-    """Hash password using bcrypt (matches auth.py's pwd_context)."""
-    from passlib.context import CryptContext
+    """Hash password using bcrypt directly (avoids passlib version conflicts)."""
+    import bcrypt
 
-    ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
-    return ctx.hash(password)
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 
 def seed() -> None:
@@ -51,13 +50,20 @@ def seed() -> None:
     Base.metadata.create_all(engine)
 
     with Session(engine) as session:
+        # Check if already seeded
+        from sqlalchemy import select
+        existing = session.execute(select(User).limit(1)).scalar_one_or_none()
+        if existing:
+            print("Database already seeded — skipping.")
+            return
+
         # ------------------------------------------------------------------ Users
         judge = User(
             id=uuid.UUID("00000000-0000-4000-a000-000000000001"),
             name="Judge Sarah Chen",
-            email="judge.chen@verdictcouncil.dev",
+            email="judge@verdictcouncil.sg",
             role=UserRole.judge,
-            password_hash=_hash_password("judge123"),
+            password_hash=_hash_password("password"),
         )
         admin = User(
             id=uuid.UUID("00000000-0000-4000-a000-000000000002"),
@@ -80,7 +86,7 @@ def seed() -> None:
         # ------------------------------------------------------------------ Cases
         case_traffic = Case(
             id=uuid.UUID("10000000-0000-4000-a000-000000000001"),
-            domain=CaseDomain.criminal,
+            domain=CaseDomain.traffic_violation,
             status=CaseStatus.pending,
             jurisdiction_valid=True,
             complexity=CaseComplexity.low,
@@ -89,7 +95,7 @@ def seed() -> None:
         )
         case_small_claims_1 = Case(
             id=uuid.UUID("10000000-0000-4000-a000-000000000002"),
-            domain=CaseDomain.civil,
+            domain=CaseDomain.small_claims,
             status=CaseStatus.processing,
             jurisdiction_valid=True,
             complexity=CaseComplexity.medium,
@@ -98,7 +104,7 @@ def seed() -> None:
         )
         case_small_claims_2 = Case(
             id=uuid.UUID("10000000-0000-4000-a000-000000000003"),
-            domain=CaseDomain.civil,
+            domain=CaseDomain.small_claims,
             status=CaseStatus.decided,
             jurisdiction_valid=True,
             complexity=CaseComplexity.low,

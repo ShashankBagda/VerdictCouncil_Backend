@@ -65,9 +65,6 @@ class CaseState(BaseModel):
     precedents: list[dict[str, Any]] = Field(default_factory=list)
     precedent_source_metadata: dict[str, Any] | None = None
 
-    # Judge's personal KB results (separate from legal precedents — not legal authority)
-    judge_kb_results: list[dict[str, Any]] = Field(default_factory=list)
-
     # Arguments (written by Argument Construction)
     arguments: dict[str, Any] | None = None
 

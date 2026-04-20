@@ -19,6 +19,7 @@ class UserRole(str, enum.Enum):
     judge = "judge"
     admin = "admin"
     clerk = "clerk"
+    senior_judge = "senior_judge"
 
 
 class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -28,9 +29,11 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     role: Mapped[UserRole] = mapped_column(Enum(UserRole), nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
-    openai_vector_store_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     sessions: Mapped[list[Session]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    password_reset_tokens: Mapped[list[PasswordResetToken]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
     cases: Mapped[list[Case]] = relationship(back_populates="created_by_user")
@@ -49,3 +52,19 @@ class Session(UUIDPrimaryKeyMixin, Base):
     )
 
     user: Mapped[User] = relationship(back_populates="sessions")
+
+
+class PasswordResetToken(UUIDPrimaryKeyMixin, Base):
+    __tablename__ = "password_reset_tokens"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    token_hash: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    user: Mapped[User] = relationship(back_populates="password_reset_tokens")

@@ -1,5 +1,5 @@
-import hashlib
 from collections.abc import AsyncGenerator, Callable
+import hashlib
 from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
@@ -25,6 +25,10 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 
 DBSession = Annotated[AsyncSession, Depends(get_db)]
+
+
+def _hash_jwt_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
 async def get_current_user(
@@ -57,30 +61,26 @@ async def get_current_user(
             detail="Invalid token payload",
         )
 
-    try:
-        uid = UUID(user_id)
-    except (ValueError, AttributeError):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token payload",
-        ) from None
-
-    # Verify active session + fetch user in one query
-    token_hash = hashlib.sha256(vc_token.encode()).hexdigest()
-    result = await db.execute(
-        select(User)
-        .join(Session, Session.user_id == User.id)
-        .where(
-            Session.user_id == uid,
-            Session.jwt_token_hash == token_hash,
-            Session.expires_at > datetime.now(UTC),
-        )
-    )
+    result = await db.execute(select(User).where(User.id == UUID(user_id)))
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Session expired or revoked",
+            detail="User not found",
+        )
+
+    session_result = await db.execute(
+        select(Session).where(
+            Session.user_id == user.id,
+            Session.jwt_token_hash == _hash_jwt_token(vc_token),
+            Session.expires_at > datetime.now(UTC),
+        )
+    )
+    session = session_result.scalar_one_or_none()
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session revoked or expired",
         )
 
     return user

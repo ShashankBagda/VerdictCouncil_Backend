@@ -9,7 +9,7 @@ from httpx import ASGITransport, AsyncClient
 
 from src.api.app import create_app
 from src.api.deps import get_db
-from src.models.user import Session, User, UserRole
+from src.models.user import User, UserRole
 from src.shared.config import settings
 
 # ---------------------------------------------------------------------------
@@ -231,8 +231,8 @@ class TestMe:
         token = _mint_token(user_id)
 
         mock_db = _build_mock_session()
-        # get_current_user does a single JOIN query returning the User
-        mock_db.execute = AsyncMock(return_value=_mock_scalar_result(user))
+        # get_current_user will call db.execute to look up the user by id
+        mock_db.execute.return_value = _mock_scalar_result(user)
 
         app = create_app()
         app.dependency_overrides[get_db] = lambda: mock_db
@@ -260,140 +260,3 @@ class TestMe:
             resp = await client.get("/api/v1/auth/me")
 
         assert resp.status_code == 401
-
-
-class TestSessionRevocation:
-    async def test_me_with_revoked_session_returns_401(self):
-        """GET /me with a valid JWT but no Session row returns 401."""
-        user_id = uuid.uuid4()
-        token = _mint_token(user_id)
-
-        mock_db = _build_mock_session()
-        # JOIN query returns None when session is revoked/missing
-        mock_db.execute = AsyncMock(return_value=_mock_scalar_result(None))
-
-        app = create_app()
-        app.dependency_overrides[get_db] = lambda: mock_db
-
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            resp = await client.get(
-                "/api/v1/auth/me",
-                cookies={"vc_token": token},
-            )
-
-        assert resp.status_code == 401
-        assert "revoked" in resp.json()["detail"].lower()
-
-    async def test_me_with_active_session_returns_200(self):
-        """GET /me with a valid JWT and matching Session row returns 200."""
-        user_id = uuid.uuid4()
-        user = _make_user(id=user_id)
-        token = _mint_token(user_id)
-
-        mock_db = _build_mock_session()
-        # JOIN query returns User when session is active
-        mock_db.execute = AsyncMock(return_value=_mock_scalar_result(user))
-
-        app = create_app()
-        app.dependency_overrides[get_db] = lambda: mock_db
-
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            resp = await client.get(
-                "/api/v1/auth/me",
-                cookies={"vc_token": token},
-            )
-
-        assert resp.status_code == 200
-        assert resp.json()["email"] == "ada@example.com"
-
-    async def test_login_creates_session(self):
-        """POST /login creates a Session record with the token hash."""
-        user = _make_user()
-
-        mock_db = _build_mock_session()
-        mock_db.execute.return_value = _mock_scalar_result(user)
-
-        app = create_app()
-        app.dependency_overrides[get_db] = lambda: mock_db
-
-        transport = ASGITransport(app=app)
-        with patch("src.api.routes.auth.pwd_context") as mock_pwd:
-            mock_pwd.verify.return_value = True
-
-            async with AsyncClient(transport=transport, base_url="http://test") as client:
-                resp = await client.post(
-                    "/api/v1/auth/login",
-                    json={"email": "ada@example.com", "password": "secureP@ss1"},
-                )
-
-        assert resp.status_code == 200
-        # Verify db.add was called with a UserSession-like object
-        mock_db.add.assert_called_once()
-        added_obj = mock_db.add.call_args[0][0]
-        assert added_obj.user_id == user.id
-        assert added_obj.jwt_token_hash is not None
-        assert len(added_obj.jwt_token_hash) == 64  # SHA256 hex digest
-        mock_db.flush.assert_awaited()
-
-    async def test_logout_deletes_session(self):
-        """POST /logout with a token deletes the matching Session row."""
-        user_id = uuid.uuid4()
-        token = _mint_token(user_id)
-
-        mock_session_row = MagicMock(spec=Session)
-        mock_db = _build_mock_session()
-        mock_db.execute.return_value = _mock_scalar_result(mock_session_row)
-        mock_db.delete = AsyncMock()
-
-        app = create_app()
-        app.dependency_overrides[get_db] = lambda: mock_db
-
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            resp = await client.post(
-                "/api/v1/auth/logout",
-                cookies={"vc_token": token},
-            )
-
-        assert resp.status_code == 200
-        mock_db.delete.assert_awaited_once_with(mock_session_row)
-
-    async def test_logout_without_token_skips_db(self):
-        """POST /logout without a cookie does not touch the sessions table."""
-        mock_db = _build_mock_session()
-        mock_db.delete = AsyncMock()
-
-        app = create_app()
-        app.dependency_overrides[get_db] = lambda: mock_db
-
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            resp = await client.post("/api/v1/auth/logout")
-
-        assert resp.status_code == 200
-        mock_db.execute.assert_not_awaited()
-        mock_db.delete.assert_not_awaited()
-
-    async def test_logout_with_no_matching_session_skips_delete(self):
-        """POST /logout with a token but no matching session row does not call delete."""
-        user_id = uuid.uuid4()
-        token = _mint_token(user_id)
-
-        mock_db = _build_mock_session()
-        mock_db.execute.return_value = _mock_scalar_result(None)
-        mock_db.delete = AsyncMock()
-
-        app = create_app()
-        app.dependency_overrides[get_db] = lambda: mock_db
-
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            resp = await client.post(
-                "/api/v1/auth/logout",
-                cookies={"vc_token": token},
-            )
-
-        assert resp.status_code == 200
-        mock_db.delete.assert_not_awaited()

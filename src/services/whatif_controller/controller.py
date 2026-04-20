@@ -13,28 +13,11 @@ import logging
 import uuid
 from typing import Any
 
-from typing import Protocol
-
+from src.pipeline.runner import AGENT_ORDER, PipelineRunner
 from src.services.whatif_controller.diff_engine import generate_diff
 from src.shared.case_state import CaseState
 
 logger = logging.getLogger(__name__)
-
-
-class _RunFromRunner(Protocol):
-    """Any pipeline runner that exposes `run_from(state, start_agent)`.
-
-    Both `PipelineRunner` (sequential) and `MeshPipelineRunner` (A2A)
-    satisfy this — the what-if controller doesn't care which backend
-    drives the re-entry.
-    """
-
-    async def run_from(
-        self,
-        case_state: CaseState,
-        start_agent: str,
-        judge_vector_store_id: str | None = ...,
-    ) -> CaseState: ...
 
 
 class WhatIfController:
@@ -48,7 +31,7 @@ class WhatIfController:
         "legal_interpretation": "legal-knowledge",  # Agent 6
     }
 
-    def __init__(self, pipeline_runner: _RunFromRunner) -> None:
+    def __init__(self, pipeline_runner: PipelineRunner) -> None:
         self._pipeline_runner = pipeline_runner
 
     async def create_scenario(
@@ -84,17 +67,24 @@ class WhatIfController:
         cloned.parent_run_id = case_state.run_id
         cloned.run_id = str(uuid.uuid4())
 
-        # Determine the earliest agent that must re-run
+        # Determine which agents to re-run
         start_agent = self.CHANGE_IMPACT_MAP[modification_type]
+        start_index = AGENT_ORDER.index(start_agent)
+        agents_to_run = AGENT_ORDER[start_index:]
 
         logger.info(
-            "What-if scenario: re-running from %s for case_id=%s, run_id=%s",
-            start_agent,
+            "What-if scenario: re-running agents %s for case_id=%s, run_id=%s",
+            agents_to_run,
             cloned.case_id,
             cloned.run_id,
         )
 
-        return await self._pipeline_runner.run_from(cloned, start_agent)
+        # Re-run the pipeline from the re-entry point onwards
+        state = cloned
+        for agent_name in agents_to_run:
+            state = await self._pipeline_runner._run_agent(agent_name, state)
+
+        return state
 
     def _apply_modification(
         self,

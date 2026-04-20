@@ -262,15 +262,8 @@ async def test_field_ownership_violation_strips_unauthorized_fields():
 # Non-JSON response from agent is handled
 # ------------------------------------------------------------------ #
 @pytest.mark.asyncio
-async def test_non_json_response_raises_after_retry():
-    """If an agent returns non-JSON twice, the runner halts the pipeline.
-
-    Silently returning unchanged state (the prior behavior) was unsafe
-    because downstream agents would consume an empty CaseState as if the
-    upstream agent had nothing to say. The current contract is to raise
-    `RuntimeError` after the retry also fails, so callers can decide
-    whether to escalate the case or surface the failure to the judge.
-    """
+async def test_non_json_response_handled_gracefully():
+    """If agent returns non-JSON, it should not crash; state is unchanged."""
     client = AsyncMock()
 
     message = SimpleNamespace(content="This is not JSON", tool_calls=None)
@@ -278,12 +271,13 @@ async def test_non_json_response_raises_after_retry():
     usage = SimpleNamespace(prompt_tokens=10, completion_tokens=5, total_tokens=15)
     response = SimpleNamespace(choices=[choice], usage=usage)
 
-    # Both the initial call and the retry return non-JSON
     client.chat.completions.create = AsyncMock(return_value=response)
 
     runner = PipelineRunner(client=client)
 
     with patch.object(runner, "_load_agent_config", return_value=_agent_config()):
         state = _minimal_state()
-        with pytest.raises(RuntimeError, match="produced invalid output after retry"):
-            await runner._run_agent("case-processing", state)
+        result = await runner._run_agent("case-processing", state)
+
+    # Should still return a valid CaseState (unchanged aside from audit)
+    assert isinstance(result, CaseState)

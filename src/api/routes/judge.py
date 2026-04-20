@@ -14,16 +14,11 @@ from sqlalchemy.dialects.postgresql import JSONB
 from src.api.deps import DBSession, require_role
 from src.api.schemas.common import ErrorResponse
 from src.api.schemas.judge import (
-    AdmissibilityFlagSummary,
-    ContradictionItem,
     DisputeFactRequest,
     DisputeFactResponse,
-    EvidenceDashboardResponse,
     EvidenceGapsResponse,
-    EvidenceStrengthBreakdown,
     FairnessAuditResponse,
     GovernanceFairnessEntry,
-    JurisdictionValidationResponse,
     UncorroboratedFact,
     WeakEvidenceItem,
 )
@@ -212,10 +207,7 @@ async def get_fairness_audit(
 
     # Most recent verdict fairness_report
     verdict_result = await db.execute(
-        select(Verdict)
-        .where(Verdict.case_id == case_id)
-        .order_by(Verdict.created_at.desc(), Verdict.id.desc())
-        .limit(1)
+        select(Verdict).where(Verdict.case_id == case_id).order_by(Verdict.id.desc()).limit(1)
     )
     verdict = verdict_result.scalar_one_or_none()
     verdict_fairness_report = verdict.fairness_report if verdict else None
@@ -248,189 +240,4 @@ async def get_fairness_audit(
         verdict_fairness_report=verdict_fairness_report,
         governance_checks=governance_checks,
         has_fairness_data=has_fairness_data,
-    )
-
-
-# --------------------------------------------------------------------------- #
-# US-003: Jurisdiction Validation Result
-# --------------------------------------------------------------------------- #
-
-
-def _extract_jurisdiction_issues(payload: dict | None) -> list[str]:
-    """Pull jurisdiction_issues from a case-processing audit payload.
-
-    The agent output may place issues at the top level or nested under
-    ``case_metadata`` depending on prompt revision; tolerate both shapes
-    and coerce non-string entries to strings.
-    """
-    if not payload:
-        return []
-    raw = payload.get("jurisdiction_issues")
-    if raw is None:
-        meta = payload.get("case_metadata") or {}
-        if isinstance(meta, dict):
-            raw = meta.get("jurisdiction_issues")
-    if not raw:
-        return []
-    if isinstance(raw, list):
-        return [str(item) for item in raw]
-    return [str(raw)]
-
-
-@router.get(
-    "/{case_id}/jurisdiction",
-    response_model=JurisdictionValidationResponse,
-    operation_id="get_jurisdiction_validation",
-    summary="Get the jurisdiction validation result for a case",
-    description="Surfaces Agent 1 (case-processing) jurisdiction validation output: "
-    "the top-level `jurisdiction_valid` flag from the Case record plus any "
-    "`jurisdiction_issues` recorded in the most recent case-processing audit log. "
-    "Requires judge role.",
-    responses={
-        403: {"model": ErrorResponse, "description": "Insufficient permissions"},
-        404: {"model": ErrorResponse, "description": "Case not found"},
-    },
-)
-async def get_jurisdiction_validation(
-    case_id: UUID,
-    db: DBSession,
-    current_user: User = require_role(UserRole.judge),
-) -> JurisdictionValidationResponse:
-    case_result = await db.execute(select(Case).where(Case.id == case_id))
-    case = case_result.scalar_one_or_none()
-    if case is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
-
-    audit_result = await db.execute(
-        select(AuditLog)
-        .where(
-            AuditLog.case_id == case_id,
-            AuditLog.agent_name == "case-processing",
-        )
-        .order_by(AuditLog.created_at.desc())
-        .limit(1)
-    )
-    audit_entry = audit_result.scalar_one_or_none()
-
-    payload = audit_entry.output_payload if audit_entry else None
-    return JurisdictionValidationResponse(
-        case_id=case_id,
-        jurisdiction_valid=case.jurisdiction_valid,
-        jurisdiction_issues=_extract_jurisdiction_issues(payload),
-        audit_payload=payload,
-        audit_log_id=audit_entry.id if audit_entry else None,
-        created_at=audit_entry.created_at if audit_entry else None,
-        has_validation_data=case.jurisdiction_valid is not None or audit_entry is not None,
-    )
-
-
-# --------------------------------------------------------------------------- #
-# US-006: Evidence Analysis Dashboard
-# --------------------------------------------------------------------------- #
-
-# Heuristic keys used to flag a Fact's corroboration JSONB as a contradiction
-# signal. Keep this conservative — anything matched here surfaces in the
-# dashboard, so prefer false-negatives over false-positives.
-_CONTRADICTION_KEYS = ("contradicts", "contradiction", "conflicts", "dispute_reason")
-
-
-def _summarize_strength(rows: list[Evidence]) -> EvidenceStrengthBreakdown:
-    summary = EvidenceStrengthBreakdown(total=len(rows))
-    for row in rows:
-        match row.strength:
-            case EvidenceStrength.strong:
-                summary.strong += 1
-            case EvidenceStrength.medium:
-                summary.medium += 1
-            case EvidenceStrength.weak:
-                summary.weak += 1
-            case _:
-                summary.unrated += 1
-    return summary
-
-
-def _summarize_admissibility(rows: list[Evidence]) -> list[AdmissibilityFlagSummary]:
-    """Tally each admissibility-flag key across all evidence rows."""
-    tallies: dict[str, dict[str, int]] = {}
-    for row in rows:
-        flags = row.admissibility_flags or {}
-        if not isinstance(flags, dict):
-            continue
-        for key, value in flags.items():
-            bucket = tallies.setdefault(key, {"truthy_count": 0, "falsy_count": 0})
-            if value:
-                bucket["truthy_count"] += 1
-            else:
-                bucket["falsy_count"] += 1
-    return [
-        AdmissibilityFlagSummary(
-            flag=key, truthy_count=counts["truthy_count"], falsy_count=counts["falsy_count"]
-        )
-        for key, counts in sorted(tallies.items())
-    ]
-
-
-def _extract_contradiction_notes(corroboration: dict | None) -> dict | None:
-    if not isinstance(corroboration, dict):
-        return None
-    notes = {k: v for k, v in corroboration.items() if k in _CONTRADICTION_KEYS}
-    return notes or None
-
-
-def _is_contradiction(fact: Fact) -> bool:
-    if fact.status == FactStatus.disputed:
-        return True
-    notes = _extract_contradiction_notes(fact.corroboration)
-    return notes is not None
-
-
-@router.get(
-    "/{case_id}/evidence-dashboard",
-    response_model=EvidenceDashboardResponse,
-    operation_id="get_evidence_dashboard",
-    summary="Get an aggregated evidence analysis dashboard for a case",
-    description="Returns evidence strength counts, admissibility flag tallies, and "
-    "facts that show contradiction signals (status=disputed or corroboration "
-    "entries naming a conflict). Requires judge role.",
-    responses={
-        403: {"model": ErrorResponse, "description": "Insufficient permissions"},
-        404: {"model": ErrorResponse, "description": "Case not found"},
-    },
-)
-async def get_evidence_dashboard(
-    case_id: UUID,
-    db: DBSession,
-    current_user: User = require_role(UserRole.judge),
-) -> EvidenceDashboardResponse:
-    case_result = await db.execute(select(Case).where(Case.id == case_id))
-    if case_result.scalar_one_or_none() is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
-
-    evidence_rows = list(
-        (await db.execute(select(Evidence).where(Evidence.case_id == case_id))).scalars().all()
-    )
-    fact_rows = list(
-        (await db.execute(select(Fact).where(Fact.case_id == case_id))).scalars().all()
-    )
-
-    contradictions = [
-        ContradictionItem(
-            fact_id=f.id,
-            description=f.description,
-            status=f.status,
-            confidence=f.confidence,
-            contradiction_notes=_extract_contradiction_notes(f.corroboration),
-        )
-        for f in fact_rows
-        if _is_contradiction(f)
-    ]
-
-    return EvidenceDashboardResponse(
-        case_id=case_id,
-        strength_summary=_summarize_strength(evidence_rows),
-        admissibility_flags_summary=_summarize_admissibility(evidence_rows),
-        contradictions=contradictions,
-        total_evidence_count=len(evidence_rows),
-        total_fact_count=len(fact_rows),
-        has_evidence_data=bool(evidence_rows or fact_rows),
     )

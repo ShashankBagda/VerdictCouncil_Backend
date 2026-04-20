@@ -8,7 +8,6 @@ from src.tools.sam.search_precedents_tool import (
     SEARCH_PRECEDENTS_SCHEMA,
     SearchPrecedentsTool,
 )
-from src.tools.search_precedents import SearchResult
 
 
 class TestSearchPrecedentsTool:
@@ -63,18 +62,13 @@ class TestSearchPrecedentsTool:
 
     @pytest.mark.asyncio
     async def test_run_async_impl_delegates(self):
-        """The wrapper unwraps SearchResult and returns just the precedent list."""
         tool = SearchPrecedentsTool()
-        mock_precedents = [{"citation": "SGHC 123", "similarity_score": 0.95}]
-        mock_result = SearchResult(
-            precedents=mock_precedents,
-            metadata={"source_failed": False, "fallback_used": False, "pair_status": "ok"},
-        )
+        mock_results = [{"citation": "SGHC 123", "similarity_score": 0.95}]
 
         with patch(
-            "src.tools.search_precedents.search_precedents_with_meta",
+            "src.tools.search_precedents.search_precedents",
             new_callable=AsyncMock,
-            return_value=mock_result,
+            return_value=mock_results,
         ):
             result = await tool._run_async_impl(
                 args={
@@ -84,7 +78,7 @@ class TestSearchPrecedentsTool:
                 }
             )
 
-        assert result == mock_precedents
+        assert result == mock_results
 
     @pytest.mark.asyncio
     async def test_run_async_impl_passes_args(self):
@@ -94,15 +88,11 @@ class TestSearchPrecedentsTool:
             "domain": "traffic",
             "max_results": 3,
         }
-        empty_result = SearchResult(
-            precedents=[],
-            metadata={"source_failed": False, "fallback_used": False, "pair_status": "ok"},
-        )
 
         with patch(
-            "src.tools.search_precedents.search_precedents_with_meta",
+            "src.tools.search_precedents.search_precedents",
             new_callable=AsyncMock,
-            return_value=empty_result,
+            return_value=[],
         ) as mock_fn:
             await tool._run_async_impl(args=expected_args)
             mock_fn.assert_called_once_with(**expected_args)

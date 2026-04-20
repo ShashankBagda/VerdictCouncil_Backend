@@ -11,18 +11,12 @@ import json
 import logging
 import os
 import re
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from uuid import UUID
 
 import yaml
 from openai import AsyncOpenAI
 
-from src.api.schemas.pipeline_events import PipelineProgressEvent
-from src.pipeline.agent_schemas import get_strict_json_schema, validate_agent_output
-from src.pipeline.guardrails import check_input_injection, validate_output_integrity
-from src.services.pipeline_events import publish_progress
 from src.shared.audit import append_audit_entry
 from src.shared.case_state import CaseState, CaseStatusEnum
 from src.shared.config import settings
@@ -504,50 +498,8 @@ class PipelineRunner:
 
         return json.dumps(result, default=str)
 
-    async def _emit_progress(
-        self,
-        agent_name: str,
-        case_id: str,
-        phase: str,
-        error: str | None = None,
-    ) -> None:
-        """Publish a PipelineProgressEvent for this agent step (US-002).
-
-        Best-effort: pub/sub failures are swallowed inside ``publish_progress``
-        so observability never blocks pipeline execution.
-        """
-        try:
-            event = PipelineProgressEvent(
-                case_id=UUID(case_id),
-                agent=agent_name,
-                phase=phase,  # type: ignore[arg-type]
-                step=AGENT_ORDER.index(agent_name) + 1,
-                ts=datetime.now(UTC),
-                error=error,
-            )
-        except (ValueError, KeyError):
-            # case_id is not a UUID, or agent_name not in AGENT_ORDER — skip
-            return
-        await publish_progress(event)
-
     async def _run_agent(self, agent_name: str, state: CaseState) -> CaseState:
         """Run a single agent step: call LLM, parse response, update state."""
-        await self._emit_progress(agent_name, state.case_id, "started")
-        try:
-            updated = await self._run_agent_inner(agent_name, state)
-        except Exception as exc:
-            await self._emit_progress(
-                agent_name,
-                state.case_id,
-                "failed",
-                error=str(exc)[:500],
-            )
-            raise
-        await self._emit_progress(agent_name, updated.case_id, "completed")
-        return updated
-
-    async def _run_agent_inner(self, agent_name: str, state: CaseState) -> CaseState:
-        """Inner agent execution — kept separate so SSE events wrap the whole call."""
         config = self._load_agent_config(agent_name)
         model = self._resolve_model(config)
         system_prompt = config.get("instruction", "")
@@ -563,24 +515,23 @@ class PipelineRunner:
         logger.info("Running agent '%s' with model '%s'", agent_name, model)
 
         # LLM call with optional tool use loop
-        # Use strict JSON schema if available, otherwise fall back to json_object
-        response_format = get_strict_json_schema(agent_name) or {"type": "json_object"}
-
         kwargs: dict[str, Any] = {
             "model": model,
             "messages": messages,
-            "response_format": response_format,
+            "response_format": {"type": "json_object"},
         }
         if tools:
             kwargs["tools"] = tools
 
         response = await self._client.chat.completions.create(**kwargs)
         choice = response.choices[0]
-        token_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        token_usage = None
         if response.usage:
-            token_usage["prompt_tokens"] += response.usage.prompt_tokens
-            token_usage["completion_tokens"] += response.usage.completion_tokens
-            token_usage["total_tokens"] += response.usage.total_tokens
+            token_usage = {
+                "prompt_tokens": response.usage.prompt_tokens,
+                "completion_tokens": response.usage.completion_tokens,
+                "total_tokens": response.usage.total_tokens,
+            }
 
         # Handle tool calls in a loop until the model returns a final response
         tool_calls_log: list[dict[str, Any]] = []
@@ -611,47 +562,26 @@ class PipelineRunner:
             response = await self._client.chat.completions.create(**kwargs)
             choice = response.choices[0]
             if response.usage:
-                token_usage["prompt_tokens"] += response.usage.prompt_tokens
-                token_usage["completion_tokens"] += response.usage.completion_tokens
-                token_usage["total_tokens"] += response.usage.total_tokens
+                token_usage = {
+                    "prompt_tokens": response.usage.prompt_tokens,
+                    "completion_tokens": response.usage.completion_tokens,
+                    "total_tokens": response.usage.total_tokens,
+                }
 
-        # Parse the final JSON response — retry once on failure, then fail closed
+        # Parse the final JSON response
         raw_content = choice.message.content or "{}"
         try:
             agent_output = json.loads(raw_content)
         except json.JSONDecodeError:
-            logger.warning(
-                "Agent '%s' returned non-JSON response, retrying once: %s",
+            logger.error(
+                "Agent '%s' returned non-JSON response: %s",
                 agent_name,
                 raw_content[:500],
             )
-            # Retry once with same parameters
-            try:
-                retry_response = await self._client.chat.completions.create(**kwargs)
-                retry_content = retry_response.choices[0].message.content or "{}"
-                agent_output = json.loads(retry_content)
-                raw_content = retry_content
-                if retry_response.usage:
-                    token_usage["prompt_tokens"] += retry_response.usage.prompt_tokens
-                    token_usage["completion_tokens"] += retry_response.usage.completion_tokens
-                    token_usage["total_tokens"] += retry_response.usage.total_tokens
-                logger.info("Agent '%s' retry succeeded", agent_name)
-            except (json.JSONDecodeError, Exception) as retry_err:
-                logger.error(
-                    "Agent '%s' failed on retry — halting agent: %s",
-                    agent_name,
-                    retry_err,
-                )
-                raise RuntimeError(
-                    f"Agent '{agent_name}' produced invalid output after retry. "
-                    f"Pipeline cannot continue safely."
-                ) from retry_err
+            agent_output = {}
 
         # Validate critical output fields have expected structure
         _validate_agent_output_structure(agent_name, agent_output)
-
-        # Validate output against Pydantic schema (warns on mismatch, does not halt)
-        validate_agent_output(agent_name, agent_output)
 
         # Merge agent output into CaseState (respecting field ownership)
         original_dict = state.model_dump()
@@ -699,11 +629,7 @@ class PipelineRunner:
 
         return updated_state
 
-    async def run(
-        self,
-        case_state: CaseState,
-        judge_vector_store_id: str | None = None,
-    ) -> CaseState:
+    async def run(self, case_state: CaseState) -> CaseState:
         """Run the full 9-agent pipeline sequentially.
 
         Accepts a CaseState with raw_documents populated and returns
@@ -716,49 +642,9 @@ class PipelineRunner:
         """
         state = case_state
 
-        # Input guardrail: check case description for injection attempts
-        description = state.case_metadata.get("description", "")
-        if description:
-            injection_result = await check_input_injection(description, self._client)
-            if injection_result["blocked"]:
-                logger.warning(
-                    "Input injection detected (method=%s, case_id=%s): %s",
-                    injection_result["method"],
-                    state.case_id,
-                    injection_result["reason"],
-                )
-                # Replace with sanitized version and continue
-                state.case_metadata["description"] = injection_result["sanitized_text"]
-                state = append_audit_entry(
-                    state,
-                    agent="guardrails",
-                    action="input_injection_blocked",
-                    input_payload={"method": injection_result["method"]},
-                    output_payload={"reason": injection_result["reason"]},
-                )
-
         for agent_name in AGENT_ORDER:
             logger.info("Pipeline step: %s", agent_name)
             state = await self._run_agent(agent_name, state)
-
-            # After legal-knowledge agent completes, search judge's personal KB
-            if agent_name == "legal-knowledge" and judge_vector_store_id:
-                try:
-                    from src.services.knowledge_base import search_kb
-
-                    query = (
-                        state.case_metadata.get("description", "") if state.case_metadata else ""
-                    )
-                    if not query and state.extracted_facts:
-                        query = str(state.extracted_facts)[:500]
-                    kb_results = await search_kb(
-                        judge_vector_store_id,
-                        query,
-                        max_results=5,
-                    )
-                    state = state.model_copy(update={"judge_kb_results": kb_results})
-                except Exception as exc:
-                    logger.warning("Judge KB search failed: %s", exc)
 
             # Halt after Agent 2 if case is escalated
             if agent_name == "complexity-routing" and state.status == CaseStatusEnum.escalated:
@@ -768,29 +654,6 @@ class PipelineRunner:
                     state.case_id,
                 )
                 return state
-
-            # Output guardrail after governance-verdict
-            if agent_name == "governance-verdict":
-                integrity = validate_output_integrity(state.model_dump())
-                if not integrity["passed"]:
-                    logger.error(
-                        "Output integrity check FAILED (case_id=%s): %s",
-                        state.case_id,
-                        integrity["issues"],
-                    )
-                    state = append_audit_entry(
-                        state,
-                        agent="guardrails",
-                        action="output_integrity_failed",
-                        output_payload=integrity,
-                    )
-                    state.status = CaseStatusEnum.escalated
-                    logger.warning(
-                        "Pipeline halted: output integrity failure, "
-                        "case escalated to human review (case_id=%s)",
-                        state.case_id,
-                    )
-                    return state
 
             # Halt after Agent 9 if fairness check found critical issues
             if (
@@ -811,84 +674,4 @@ class PipelineRunner:
             state.case_id,
             state.status,
         )
-        return state
-
-    async def run_from(
-        self,
-        case_state: CaseState,
-        start_agent: str,
-        judge_vector_store_id: str | None = None,
-    ) -> CaseState:
-        """Re-enter the pipeline at `start_agent` and run downstream.
-
-        Used by WhatIfController: the caller already holds a populated
-        CaseState (from a prior run) and wants to re-execute only the
-        tail of the pipeline. Skips the input guardrail — the state is
-        no longer raw input. All post-agent hooks (judge KB, escalation
-        halts, governance halts) fire for any downstream agent they
-        apply to.
-        """
-        if start_agent not in AGENT_ORDER:
-            raise ValueError(
-                f"Unknown start_agent '{start_agent}'. "
-                f"Must be one of {AGENT_ORDER}"
-            )
-
-        start_index = AGENT_ORDER.index(start_agent)
-        state = case_state
-
-        for agent_name in AGENT_ORDER[start_index:]:
-            logger.info("Pipeline step (run_from): %s", agent_name)
-            state = await self._run_agent(agent_name, state)
-
-            if agent_name == "legal-knowledge" and judge_vector_store_id:
-                try:
-                    from src.services.knowledge_base import search_kb
-
-                    query = (
-                        state.case_metadata.get("description", "") if state.case_metadata else ""
-                    )
-                    if not query and state.extracted_facts:
-                        query = str(state.extracted_facts)[:500]
-                    kb_results = await search_kb(
-                        judge_vector_store_id,
-                        query,
-                        max_results=5,
-                    )
-                    state = state.model_copy(update={"judge_kb_results": kb_results})
-                except Exception as exc:
-                    logger.warning("Judge KB search failed: %s", exc)
-
-            if agent_name == "complexity-routing" and state.status == CaseStatusEnum.escalated:
-                logger.warning(
-                    "Pipeline halted at complexity-routing: escalated (case_id=%s)",
-                    state.case_id,
-                )
-                return state
-
-            if agent_name == "governance-verdict":
-                integrity = validate_output_integrity(state.model_dump())
-                if not integrity["passed"]:
-                    logger.error(
-                        "Output integrity check FAILED (case_id=%s): %s",
-                        state.case_id,
-                        integrity["issues"],
-                    )
-                    state = append_audit_entry(
-                        state,
-                        agent="guardrails",
-                        action="output_integrity_failed",
-                        output_payload=integrity,
-                    )
-                    state.status = CaseStatusEnum.escalated
-                    return state
-
-                if state.fairness_check and state.fairness_check.get("critical_issues_found"):
-                    logger.warning(
-                        "Pipeline halted at governance-verdict: critical fairness (case_id=%s)",
-                        state.case_id,
-                    )
-                    state = state.model_copy(update={"status": CaseStatusEnum.escalated})
-                    return state
-
         return state

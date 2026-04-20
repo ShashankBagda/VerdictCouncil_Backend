@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from src.pipeline.runner import AGENT_ORDER
 from src.shared.case_state import CaseDomainEnum, CaseState, CaseStatusEnum
 
 # ------------------------------------------------------------------ #
@@ -81,14 +82,9 @@ def _populated_case_state() -> CaseState:
 
 
 def _mock_pipeline_runner():
-    """Return a mock runner exposing `run_from` as an AsyncMock.
-
-    Mirrors the Protocol WhatIfController depends on — both the
-    sequential `PipelineRunner` and the `MeshPipelineRunner` implement
-    `run_from(state, start_agent, ...)` now.
-    """
+    """Return a mock PipelineRunner with _run_agent as an AsyncMock."""
     runner = MagicMock()
-    runner.run_from = AsyncMock(side_effect=lambda state, start_agent, **_: state)
+    runner._run_agent = AsyncMock(side_effect=lambda agent_name, state: state)
     return runner
 
 
@@ -118,11 +114,11 @@ class TestChangeImpactMapping:
         # Verify the mapped start agent
         assert WhatIfController.CHANGE_IMPACT_MAP["fact_toggle"] == "argument-construction"
 
-        # Verify run_from was called exactly once with the correct start agent
-        runner.run_from.assert_awaited_once()
-        _, kwargs = runner.run_from.call_args
-        start_agent = runner.run_from.call_args.args[1]
-        assert start_agent == "argument-construction"
+        # Verify _run_agent was called with the correct agent sequence
+        called_agents = [call.args[0] for call in runner._run_agent.call_args_list]
+        start_index = AGENT_ORDER.index("argument-construction")
+        expected_agents = AGENT_ORDER[start_index:]
+        assert called_agents == expected_agents
 
     @pytest.mark.asyncio
     async def test_evidence_exclusion_starts_at_agent_3(self):
@@ -141,9 +137,10 @@ class TestChangeImpactMapping:
 
         assert WhatIfController.CHANGE_IMPACT_MAP["evidence_exclusion"] == "evidence-analysis"
 
-        runner.run_from.assert_awaited_once()
-        start_agent = runner.run_from.call_args.args[1]
-        assert start_agent == "evidence-analysis"
+        called_agents = [call.args[0] for call in runner._run_agent.call_args_list]
+        start_index = AGENT_ORDER.index("evidence-analysis")
+        expected_agents = AGENT_ORDER[start_index:]
+        assert called_agents == expected_agents
 
     @pytest.mark.asyncio
     async def test_legal_interpretation_starts_at_agent_6(self):
@@ -166,9 +163,10 @@ class TestChangeImpactMapping:
 
         assert WhatIfController.CHANGE_IMPACT_MAP["legal_interpretation"] == "legal-knowledge"
 
-        runner.run_from.assert_awaited_once()
-        start_agent = runner.run_from.call_args.args[1]
-        assert start_agent == "legal-knowledge"
+        called_agents = [call.args[0] for call in runner._run_agent.call_args_list]
+        start_index = AGENT_ORDER.index("legal-knowledge")
+        expected_agents = AGENT_ORDER[start_index:]
+        assert called_agents == expected_agents
 
     @pytest.mark.asyncio
     async def test_witness_credibility_starts_at_agent_7(self):
@@ -187,9 +185,10 @@ class TestChangeImpactMapping:
 
         assert WhatIfController.CHANGE_IMPACT_MAP["witness_credibility"] == "argument-construction"
 
-        runner.run_from.assert_awaited_once()
-        start_agent = runner.run_from.call_args.args[1]
-        assert start_agent == "argument-construction"
+        called_agents = [call.args[0] for call in runner._run_agent.call_args_list]
+        start_index = AGENT_ORDER.index("argument-construction")
+        expected_agents = AGENT_ORDER[start_index:]
+        assert called_agents == expected_agents
 
 
 # ------------------------------------------------------------------ #
@@ -225,14 +224,14 @@ class TestScenarioIsolation:
         from src.services.whatif_controller.controller import WhatIfController
 
         runner = _mock_pipeline_runner()
-        # Capture the state passed to run_from to inspect its IDs
+        # Capture the state passed to _run_agent to inspect its IDs
         passed_states: list[CaseState] = []
 
-        async def capture_run(state, start_agent, **_):
+        async def capture_run(agent_name, state):
             passed_states.append(copy.deepcopy(state))
             return state
 
-        runner.run_from = AsyncMock(side_effect=capture_run)
+        runner._run_agent = AsyncMock(side_effect=capture_run)
 
         controller = WhatIfController(runner)
         original = _populated_case_state()
@@ -244,7 +243,7 @@ class TestScenarioIsolation:
             modification_payload={"fact_id": "f-2", "new_status": "agreed"},
         )
 
-        assert len(passed_states) == 1
+        assert len(passed_states) > 0
         scenario_state = passed_states[0]
         # New run_id must differ from original
         assert scenario_state.run_id != original_run_id

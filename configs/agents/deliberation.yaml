@@ -21,9 +21,9 @@ apps:
         1. ESTABLISHED FACTS: Facts supported by evidence, with confidence.
         2. APPLICABLE LAW: Matched statutes with specific section references.
         3. APPLICATION: For each legal element, does the evidence satisfy it?
-        4. ARGUMENT EVALUATION (check the "domain" field in the input case state):
-           Traffic (domain = "traffic_violation"): prosecution vs defense argument strength.
-           SCT (domain = "small_claims"): claimant vs respondent position strength.
+        4. ARGUMENT EVALUATION:
+           Traffic: prosecution vs defense argument strength.
+           SCT: claimant vs respondent position strength.
         5. WITNESS ASSESSMENT: Credibility findings and their impact.
         6. PRECEDENT ALIGNMENT: How do similar cases inform this analysis?
         7. PRELIMINARY CONCLUSION: What does the chain suggest?

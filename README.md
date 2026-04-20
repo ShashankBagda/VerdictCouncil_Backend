@@ -20,14 +20,11 @@ Multi-agent AI judicial decision-support system. FastAPI backend with 9 speciali
 | Python | 3.12 | `brew install python@3.12` |
 | PostgreSQL | 15+ | `brew install postgresql@15` |
 | Redis | 7+ | `brew install redis` |
-| Pango (WeasyPrint runtime) | latest | `brew install pango` (Mac); Linux: `apt install libpango-1.0-0 libpangoft2-1.0-0` |
 | Docker | latest | [docker.com](https://docker.com) |
 | Node.js | latest | `brew install node` (required for Linear MCP server) |
 | GitHub CLI | latest | `brew install gh` |
 | Claude Code | latest | [claude.ai/code](https://claude.ai/code) |
 | linear-sdlc | latest | [linear-sdlc](https://github.com/douglasswm/linear-sdlc) |
-
-> Pango is required by WeasyPrint, which renders the case report PDF export (`GET /api/v1/cases/{id}/report.pdf`). Without it, that endpoint will raise an OSError at request time but the rest of the API is unaffected.
 
 ---
 
@@ -35,26 +32,9 @@ Multi-agent AI judicial decision-support system. FastAPI backend with 9 speciali
 
 ```bash
 cp .env.example .env          # fill in your values
-make install                  # create venv and install dependencies
-docker compose -f docker-compose.infra.yml up -d   # start postgres + redis + solace
-make migrate                  # run database migrations
-make dev                      # start all agents + API via honcho
+docker compose -f docker-compose.infra.yml up -d   # start postgres + redis
+make dev                      # run the API
 ```
-
-The API server runs on port **8001** (`Procfile.dev`). The SAM web gateway runs on port **8000** (`FASTAPI_PORT` in `.env`).
-
-Available make targets:
-
-| Target | Description |
-|--------|-------------|
-| `make install` | Create venv and install dependencies |
-| `make dev` | Start all agents via honcho |
-| `make test` | Run tests |
-| `make lint` | Run linter (ruff) |
-| `make typecheck` | Run type checker (mypy) |
-| `make migrate` | Run database migrations (alembic) |
-| `make infra-up` | Start local infrastructure |
-| `make infra-down` | Stop local infrastructure |
 
 See `docs/architecture/README.md` for the full architecture documentation.
 

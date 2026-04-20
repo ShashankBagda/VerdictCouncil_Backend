@@ -24,7 +24,7 @@ apps:
           - Whether a formal written statement exists.
           - Potential bias indicators.
 
-        PHASE 2 - TESTIMONY ANTICIPATION (domain = "traffic_violation" only):
+        PHASE 2 - TESTIMONY ANTICIPATION (traffic cases only):
         For each identified witness with a written statement:
           - Summarize their likely testimony based STRICTLY on the statement.
           - Identify strong points and areas vulnerable to challenge.
@@ -43,9 +43,7 @@ apps:
         not statistically calibrated measurements. They should be interpreted as
         directional signals (higher = stronger support) rather than precise probabilities.
 
-        For SCT cases (domain = "small_claims"): assess credibility of BOTH the Claimant's and Respondent's statements using the same criteria.
-
-        Check the "domain" field in the input case state to determine which phases apply.
+        For SCT cases: assess credibility of BOTH the Claimant's and Respondent's statements using the same criteria.
 
         CONSTRAINTS:
         - Assess ALL witnesses with equal rigor regardless of which side.

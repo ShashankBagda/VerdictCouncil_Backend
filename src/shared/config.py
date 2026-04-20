@@ -12,6 +12,19 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     jwt_secret: str = "change-me-in-production"  # validated at startup
     cookie_secure: bool = True
+    reset_token_ttl_minutes: int = 30
+    password_reset_base_url: str = "http://localhost:5173/reset-password"
+
+    # Optional SMTP config for password reset delivery.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from_address: str = "no-reply@verdictcouncil.local"
+
+    # Local persistence for KB/admin runtime data.
+    knowledge_base_storage_dir: str = "data/knowledge_base"
+    admin_storage_dir: str = "data/admin"
 
     def model_post_init(self, __context: object) -> None:
         import warnings

@@ -166,25 +166,10 @@ async def test_knowledge_base_status_vector_store_unavailable():
     assert "Vector store health check failed" in data["vector_store"]["error"]
 
 
-async def test_knowledge_base_status_open_to_any_authenticated_user():
-    """The status endpoint deliberately allows any authenticated user
-    (see the route's docstring: "Requires authenticated user"). Clerks need
-    visibility into PAIR + vector store health when triaging cases, so the
-    endpoint is intentionally permissive — narrower per-judge KB CRUD lives
-    on the other knowledge-base routes.
-    """
+async def test_knowledge_base_status_non_judge_forbidden():
     clerk = _make_user(role=UserRole.clerk)
-    mock_breaker = AsyncMock()
-    mock_breaker.get_status = AsyncMock(return_value=_CLOSED_STATUS)
+    app = _app_with_overrides(clerk)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        resp = await ac.get("/api/v1/knowledge-base/status")
 
-    with (
-        patch("src.api.routes.knowledge_base.get_pair_search_breaker", return_value=mock_breaker),
-        patch("src.api.routes.knowledge_base.settings") as mock_settings,
-    ):
-        mock_settings.openai_vector_store_id = None
-
-        app = _app_with_overrides(clerk)
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-            resp = await ac.get("/api/v1/knowledge-base/status")
-
-    assert resp.status_code == 200
+    assert resp.status_code == 403

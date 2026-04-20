@@ -1,21 +1,26 @@
-import hashlib
 from datetime import UTC, datetime, timedelta
+import secrets
 from uuid import UUID
 
+import bcrypt as _bcrypt
 import jwt
 from fastapi import APIRouter, Cookie, HTTPException, Response, status
-from passlib.context import CryptContext
 from sqlalchemy import select
 
-from src.api.deps import CurrentUser, DBSession
-from src.api.schemas.auth import LoginRequest, RegisterRequest, UserResponse
+from src.api.deps import CurrentUser, DBSession, _hash_jwt_token
+from src.api.schemas.auth import (
+    LoginRequest,
+    PasswordResetRequest,
+    PasswordResetVerifyRequest,
+    RegisterRequest,
+    UserResponse,
+)
 from src.api.schemas.common import ErrorResponse, MessageResponse, ValidationErrorResponse
-from src.models.user import Session as UserSession
-from src.models.user import User
+from src.models.user import PasswordResetToken, Session, User
+from src.services.mailer import send_password_reset_email
 from src.shared.config import settings
 
 router = APIRouter()
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 TOKEN_EXPIRY_HOURS = 24
 
@@ -24,6 +29,29 @@ _COOKIE_KWARGS: dict[str, object] = {
     "httponly": True,
     "samesite": "lax",
 }
+
+
+class _PwdContextAdapter:
+    """Compatibility adapter for tests expecting a pwd_context-like object."""
+
+    @staticmethod
+    def hash(password: str) -> str:
+        return _bcrypt.hashpw(password.encode("utf-8"), _bcrypt.gensalt()).decode("utf-8")
+
+    @staticmethod
+    def verify(plain: str, hashed: str) -> bool:
+        return _bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+
+
+pwd_context = _PwdContextAdapter()
+
+
+def _hash_password(password: str) -> str:
+    return pwd_context.hash(password)
+
+
+def _verify_password(plain: str, hashed: str) -> bool:
+    return pwd_context.verify(plain, hashed)
 
 
 # --------------------------------------------------------------------------- #
@@ -38,6 +66,10 @@ def _create_token(user: User) -> str:
         "exp": datetime.now(UTC) + timedelta(hours=TOKEN_EXPIRY_HOURS),
     }
     return jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
+
+
+def _hash_reset_token(token: str) -> str:
+    return _hash_jwt_token(token)
 
 
 # --------------------------------------------------------------------------- #
@@ -71,7 +103,7 @@ async def register(body: RegisterRequest, db: DBSession) -> User:
         name=body.name,
         email=body.email,
         role=body.role,
-        password_hash=pwd_context.hash(body.password),
+        password_hash=_hash_password(body.password),
     )
     db.add(user)
     try:
@@ -103,19 +135,16 @@ async def login(body: LoginRequest, response: Response, db: DBSession) -> dict:
     result = await db.execute(select(User).where(User.email == body.email))
     user = result.scalar_one_or_none()
 
-    if not user or not pwd_context.verify(body.password, user.password_hash):
+    if not user or not _verify_password(body.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
         )
 
     token = _create_token(user)
-
-    # Create session record for token revocation support
-    token_hash = hashlib.sha256(token.encode()).hexdigest()
-    session = UserSession(
+    session = Session(
         user_id=user.id,
-        jwt_token_hash=token_hash,
+        jwt_token_hash=_hash_jwt_token(token),
         expires_at=datetime.now(UTC) + timedelta(hours=TOKEN_EXPIRY_HOURS),
     )
     db.add(session)
@@ -131,11 +160,105 @@ async def login(body: LoginRequest, response: Response, db: DBSession) -> dict:
 
 
 @router.post(
+    "/extend",
+    response_model=MessageResponse,
+    operation_id="extend_session",
+    summary="Extend session",
+    description="Mint a fresh session token and extend the active session by 24 hours.",
+)
+async def extend_session(
+    response: Response,
+    db: DBSession,
+    current_user: CurrentUser,
+    vc_token: str | None = Cookie(default=None),
+) -> dict:
+    if not vc_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+        )
+
+    result = await db.execute(
+        select(Session).where(
+            Session.user_id == current_user.id,
+            Session.jwt_token_hash == _hash_jwt_token(vc_token),
+            Session.expires_at > datetime.now(UTC),
+        )
+    )
+    session = result.scalar_one_or_none()
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session revoked or expired",
+        )
+
+    new_token = _create_token(current_user)
+    session.jwt_token_hash = _hash_jwt_token(new_token)
+    session.expires_at = datetime.now(UTC) + timedelta(hours=TOKEN_EXPIRY_HOURS)
+    await db.flush()
+
+    response.set_cookie(
+        **_COOKIE_KWARGS,
+        value=new_token,
+        secure=settings.cookie_secure,
+        max_age=TOKEN_EXPIRY_HOURS * 3600,
+    )
+    return {"message": "session extended"}
+
+
+@router.get(
+    "/session",
+    operation_id="get_session",
+    summary="Get active session details",
+    description="Return current authenticated user and active session metadata.",
+)
+async def get_session(
+    db: DBSession,
+    current_user: CurrentUser,
+    vc_token: str | None = Cookie(default=None),
+) -> dict:
+    if not vc_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+        )
+
+    result = await db.execute(
+        select(Session).where(
+            Session.user_id == current_user.id,
+            Session.jwt_token_hash == _hash_jwt_token(vc_token),
+            Session.expires_at > datetime.now(UTC),
+        )
+    )
+    session = result.scalar_one_or_none()
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session revoked or expired",
+        )
+
+    return {
+        "user": {
+            "id": str(current_user.id),
+            "name": current_user.name,
+            "email": current_user.email,
+            "role": current_user.role.value,
+        },
+        "session": {
+            "id": str(session.id),
+            "created_at": session.created_at.isoformat(),
+            "expires_at": session.expires_at.isoformat(),
+        },
+        "expires_at": session.expires_at.isoformat(),
+    }
+
+
+@router.post(
     "/logout",
     response_model=MessageResponse,
     operation_id="logout",
-    summary="Clear session cookie and revoke token",
-    description="Delete the `vc_token` cookie and revoke the session to end the session.",
+    summary="Clear session cookie",
+    description="Delete the `vc_token` cookie to end the session.",
     openapi_extra={"security": []},
 )
 async def logout(
@@ -144,7 +267,6 @@ async def logout(
     vc_token: str | None = Cookie(default=None),
 ) -> dict:
     if vc_token:
-        token_hash = hashlib.sha256(vc_token.encode()).hexdigest()
         try:
             payload = jwt.decode(
                 vc_token,
@@ -152,19 +274,20 @@ async def logout(
                 algorithms=["HS256"],
                 options={"verify_exp": False},
             )
-            uid = payload.get("sub")
-        except jwt.InvalidTokenError:
-            uid = None
-        if uid:
-            result = await db.execute(
-                select(UserSession).where(
-                    UserSession.user_id == UUID(uid),
-                    UserSession.jwt_token_hash == token_hash,
+            user_id = payload.get("sub")
+            if user_id:
+                session_result = await db.execute(
+                    select(Session).where(
+                        Session.user_id == UUID(user_id),
+                        Session.jwt_token_hash == _hash_jwt_token(vc_token),
+                    )
                 )
-            )
-            session = result.scalar_one_or_none()
-            if session:
-                await db.delete(session)
+                session = session_result.scalar_one_or_none()
+                if session:
+                    session.expires_at = datetime.now(UTC)
+                    await db.flush()
+        except jwt.InvalidTokenError:
+            pass
 
     response.delete_cookie(**_COOKIE_KWARGS, secure=settings.cookie_secure)
     return {"message": "logged out"}
@@ -182,3 +305,81 @@ async def logout(
 )
 async def me(current_user: CurrentUser) -> User:
     return current_user
+
+
+@router.post(
+    "/request-reset",
+    response_model=dict,
+    operation_id="request_password_reset",
+    summary="Request password reset",
+    description="Create a password reset token for a registered user email.",
+    openapi_extra={"security": []},
+)
+async def request_password_reset(body: PasswordResetRequest, db: DBSession) -> dict:
+    result = await db.execute(select(User).where(User.email == body.email))
+    user = result.scalar_one_or_none()
+
+    if not user:
+        return {"message": "If the email exists, a reset token has been issued."}
+
+    raw_token = secrets.token_urlsafe(32)
+    reset_token = PasswordResetToken(
+        user_id=user.id,
+        token_hash=_hash_reset_token(raw_token),
+        expires_at=datetime.now(UTC) + timedelta(minutes=settings.reset_token_ttl_minutes),
+    )
+    db.add(reset_token)
+    await db.flush()
+
+    # Security: never return reset tokens in API responses.
+    send_password_reset_email(user.email, raw_token)
+    return {"message": "If the email exists, a reset token has been issued."}
+
+
+@router.post(
+    "/verify-reset",
+    response_model=MessageResponse,
+    operation_id="verify_password_reset",
+    summary="Verify password reset token",
+    description="Verify a reset token and set a new password.",
+    openapi_extra={"security": []},
+    responses={
+        400: {"model": ErrorResponse, "description": "Invalid or expired token"},
+    },
+)
+async def verify_password_reset(body: PasswordResetVerifyRequest, db: DBSession) -> dict:
+    token_hash = _hash_reset_token(body.token)
+    result = await db.execute(
+        select(PasswordResetToken).where(PasswordResetToken.token_hash == token_hash)
+    )
+    reset_token = result.scalar_one_or_none()
+
+    if (
+        not reset_token
+        or reset_token.used_at is not None
+        or reset_token.expires_at <= datetime.now(UTC)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset token",
+        )
+
+    user_result = await db.execute(select(User).where(User.id == reset_token.user_id))
+    user = user_result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid reset token",
+        )
+
+    user.password_hash = _hash_password(body.new_password)
+    reset_token.used_at = datetime.now(UTC)
+
+    # Invalidate active sessions after password reset.
+    sessions_result = await db.execute(select(Session).where(Session.user_id == user.id))
+    sessions = sessions_result.scalars().all()
+    for session in sessions:
+        session.expires_at = datetime.now(UTC)
+
+    await db.flush()
+    return {"message": "Password reset successful"}

@@ -22,21 +22,16 @@ async def vector_store_search(
     query: str,
     domain: str = "small_claims",
     max_results: int = 5,
-    vector_store_id: str | None = None,
 ) -> list[dict]:
     """Query OpenAI vector store for precedent cases.
 
     Returns results in the same format as PAIR API search results,
     tagged with source: "vector_store_fallback".
 
-    If ``vector_store_id`` is provided it takes precedence over the
-    global ``settings.openai_vector_store_id``.
-
     Returns empty list if vector store ID is not configured or
     if the API call fails.
     """
-    store_id = vector_store_id or settings.openai_vector_store_id
-    if not store_id:
+    if not settings.openai_vector_store_id:
         logger.warning("OPENAI_VECTOR_STORE_ID not configured; cannot use vector store fallback")
         raise VectorStoreError("Vector store not configured")
 
@@ -49,7 +44,7 @@ async def vector_store_search(
             tools=[
                 {
                     "type": "file_search",
-                    "vector_store_ids": [store_id],
+                    "vector_store_ids": [settings.openai_vector_store_id],
                     "max_num_results": max_results,
                 }
             ],

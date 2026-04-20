@@ -269,3 +269,18 @@ Available skills: `/plan-ceo-review`, `/plan-eng-review`, `/review`, `/ship`, `/
 
 If gstack skills aren't working, run `cd .claude/skills/gstack && ./setup` to build the binary and register skills.
 
+---
+
+## Linear SDLC
+
+Issues are managed via the **Linear MCP server** (configured by linear-sdlc setup). Never use the `linear` CLI directly.
+
+Available skills:
+- `/brainstorm` — Plan new features, search for duplicates, write specs
+- `/create-tickets` — Create Linear issues from spec files with dependencies
+- `/next` — Propose next ticket to work on (ranked by priority)
+- `/implement VER-XX` — Full implementation lifecycle (branch → code → specialist review → PR)
+- `/checkpoint` — Save/resume session state across conversations
+- `/health` — Code quality dashboard with composite scoring
+
+Install: see [linear-sdlc](https://github.com/douglasswm/linear-sdlc)
