@@ -100,6 +100,19 @@
   - **Context:** Model impact likely spans `Verdict` + a new `VerdictAmendment` table (or equivalent) plus audit-log entries. Needs RBAC (judge/senior_judge), invariant checks (original verdict must exist and be non-draft), and a way to mark the amendment on the status stream.
   - **Depends on:** OpenAPI contract alignment (feat/openapi-contract-alignment) — the frontend stops calling these paths until we implement them server-side, so there is no silent-failure regression while this backlog item is open.
 
+### Knowledge Base Admin Endpoints
+
+- **US (new):** Let judges initialize a private knowledge base, upload/delete corpus documents, and run semantic search over it.
+  - **What:**
+    - `POST /api/v1/knowledge-base/initialize` — provision the per-tenant vector store.
+    - `GET  /api/v1/knowledge-base/documents` — list indexed documents (filename, bytes, status).
+    - `POST /api/v1/knowledge-base/documents` — multipart upload → chunk → embed → index.
+    - `DELETE /api/v1/knowledge-base/documents/{file_id}` — remove the document + its embeddings.
+    - `POST /api/v1/knowledge-base/search` — semantic search returning scored fragments.
+  - **Why:** The frontend `KnowledgeBase.jsx` page was fully wired for upload/search/delete flows, but the backend only exposes `GET /api/v1/knowledge-base/status`. Contract-alignment audit 2026-04-20 confirmed these four routes have never been implemented. The frontend was silently failing on the upload-zone, inventory, and semantic-search panels; aligning the contract (plan phase 5) collapses the page to a read-only status view until the backend ships these endpoints.
+  - **Context:** Needs a real vector store (Chroma / pgvector / OpenAI file_search) + chunking + embedding pipeline, per-judge auth scoping, a background worker for ingestion, and a document status field (`pending` → `indexed`). `normalizeKnowledgeBaseStatus` in the frontend already expects `documents_count` / `chunks_count` / `last_updated_at` — mirror those in the response shape.
+  - **Depends on:** OpenAPI contract alignment (feat/openapi-contract-alignment) — the frontend stops calling these paths until we implement them server-side, so the KB page reports "deferred" rather than erroring while this backlog item is open.
+
 ## Technical Debt (from adversarial review, v0.1.0.0)
 
 ### Session Token Revocation
