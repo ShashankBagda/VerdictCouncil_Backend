@@ -238,6 +238,107 @@ class TestCaseOwnership:
         assert resp.status_code in (403, 404)
 
 
+class TestProcessCase:
+    async def test_process_case_accepted(self, monkeypatch):
+        """POST /api/v1/cases/{id}/process returns 202 and schedules a background task."""
+        user = _make_user()
+        mock_db = _build_mock_session()
+
+        doc = MagicMock()
+        doc.id = uuid.uuid4()
+        doc.filename = "evidence.pdf"
+        doc.file_type = "application/pdf"
+        case = _make_case(user.id, documents=[doc])
+        mock_db.execute.return_value = _mock_scalar_result(case)
+
+        scheduled = []
+        from src.api.routes import cases as cases_module
+
+        async def _noop_runner(_case_id):
+            scheduled.append(_case_id)
+
+        monkeypatch.setattr(cases_module, "_run_case_pipeline", _noop_runner)
+
+        app = _app_with_overrides(mock_db, user)
+        transport = ASGITransport(app=app)
+
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(f"/api/v1/cases/{case.id}/process")
+
+        assert resp.status_code == 202
+        assert resp.json()["message"]
+
+    async def test_process_case_rejects_empty_documents(self):
+        """POST /process returns 400 when the case has no documents."""
+        user = _make_user()
+        mock_db = _build_mock_session()
+
+        case = _make_case(user.id, documents=[])
+        mock_db.execute.return_value = _mock_scalar_result(case)
+
+        app = _app_with_overrides(mock_db, user)
+        transport = ASGITransport(app=app)
+
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(f"/api/v1/cases/{case.id}/process")
+
+        assert resp.status_code == 400
+
+    async def test_process_case_not_found(self):
+        """POST /process on an unknown case returns 404."""
+        user = _make_user()
+        mock_db = _build_mock_session()
+        mock_db.execute.return_value = _mock_scalar_result(None)
+
+        app = _app_with_overrides(mock_db, user)
+        transport = ASGITransport(app=app)
+
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(f"/api/v1/cases/{uuid.uuid4()}/process")
+
+        assert resp.status_code == 404
+
+    async def test_process_case_rejects_terminal_status(self):
+        """POST /process returns 400 when the case is already decided or closed."""
+        user = _make_user()
+        mock_db = _build_mock_session()
+
+        doc = MagicMock()
+        doc.id = uuid.uuid4()
+        doc.filename = "a.pdf"
+        doc.file_type = "application/pdf"
+        case = _make_case(user.id, documents=[doc], status=CaseStatus.decided)
+        mock_db.execute.return_value = _mock_scalar_result(case)
+
+        app = _app_with_overrides(mock_db, user)
+        transport = ASGITransport(app=app)
+
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(f"/api/v1/cases/{case.id}/process")
+
+        assert resp.status_code == 400
+
+
+class TestCors:
+    async def test_preflight_allows_vite_origin(self):
+        """OPTIONS preflight from the Vite dev origin is permitted."""
+        app = create_app()
+        transport = ASGITransport(app=app)
+
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.options(
+                "/api/v1/cases/",
+                headers={
+                    "Origin": "http://localhost:5173",
+                    "Access-Control-Request-Method": "POST",
+                    "Access-Control-Request-Headers": "Content-Type",
+                },
+            )
+
+        assert resp.status_code in (200, 204)
+        assert resp.headers.get("access-control-allow-origin") == "http://localhost:5173"
+
+
 class TestGetCaseResponseShape:
     async def test_response_contains_all_nested_entities(self):
         """GET /cases/{id} response includes all 12 nested entity lists."""

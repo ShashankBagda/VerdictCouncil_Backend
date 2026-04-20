@@ -5,6 +5,7 @@ from starlette.routing import Route
 
 from src.api.middleware.metrics import MetricsMiddleware, metrics_endpoint
 from src.api.middleware.rate_limit import RateLimitMiddleware
+from src.shared.config import settings
 
 OPENAPI_TAGS = [
     {
@@ -41,6 +42,26 @@ OPENAPI_TAGS = [
         "description": (
             "PAIR API circuit breaker status and active probing for external service health."
         ),
+    },
+    {
+        "name": "hearing-notes",
+        "description": "Judge-private hearing annotations: create, list, edit, lock, delete.",
+    },
+    {
+        "name": "hearing-pack",
+        "description": "Generate a hearing preparation pack (summary, evidence, arguments, verdict).",
+    },
+    {
+        "name": "reopen-requests",
+        "description": "Party-initiated reopen workflow: submit, list, and review requests.",
+    },
+    {
+        "name": "senior-inbox",
+        "description": "Senior judge inbox: items awaiting review across cases.",
+    },
+    {
+        "name": "admin",
+        "description": "Administrative operations: vector store refresh, user actions, cost config.",
     },
 ]
 
@@ -118,11 +139,7 @@ def create_app() -> FastAPI:
     # Order of execution: RateLimit -> Metrics -> CORS -> handler
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[
-            "http://localhost:3000",
-            "http://localhost:5173",
-            "http://127.0.0.1:5173",
-        ],
+        allow_origins=settings.cors_origins_list,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -131,6 +148,7 @@ def create_app() -> FastAPI:
     app.add_middleware(RateLimitMiddleware)
 
     from src.api.routes import (
+        admin,
         audit,
         auth,
         case_data,
@@ -139,20 +157,25 @@ def create_app() -> FastAPI:
         decisions,
         escalation,
         health,
+        hearing_notes,
         hearing_pack,
         judge,
         knowledge_base,
         precedent_search,
+        reopen_requests,
+        senior_inbox,
         what_if,
     )
 
     app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
     app.include_router(cases.router, prefix="/api/v1/cases", tags=["cases"])
     app.include_router(case_data.router, prefix="/api/v1/cases", tags=["cases"])
-    app.include_router(hearing_pack.router, prefix="/api/v1/cases", tags=["hearing-pack"])
     app.include_router(decisions.router, prefix="/api/v1/cases", tags=["decisions"])
     app.include_router(what_if.router, prefix="/api/v1/cases", tags=["what-if"])
     app.include_router(judge.router, prefix="/api/v1/cases", tags=["judge"])
+    app.include_router(hearing_notes.router, prefix="/api/v1/cases", tags=["hearing-notes"])
+    app.include_router(hearing_pack.router, prefix="/api/v1/cases", tags=["hearing-pack"])
+    app.include_router(reopen_requests.router, prefix="/api/v1/cases", tags=["reopen-requests"])
     app.include_router(audit.router, prefix="/api/v1/audit", tags=["audit"])
     app.include_router(dashboard.router, prefix="/api/v1/dashboard", tags=["dashboard"])
     app.include_router(health.router, prefix="/api/v1/health", tags=["health"])
@@ -163,6 +186,8 @@ def create_app() -> FastAPI:
         knowledge_base.router, prefix="/api/v1/knowledge-base", tags=["knowledge-base"]
     )
     app.include_router(escalation.router, prefix="/api/v1/escalated-cases", tags=["escalation"])
+    app.include_router(senior_inbox.router, prefix="/api/v1/senior-inbox", tags=["senior-inbox"])
+    app.include_router(admin.router, prefix="/api/v1/admin", tags=["admin"])
 
     # Prometheus-compatible metrics (excluded from OpenAPI spec)
     app.routes.append(Route("/metrics", metrics_endpoint, methods=["GET"], include_in_schema=False))
