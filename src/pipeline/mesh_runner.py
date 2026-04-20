@@ -140,10 +140,7 @@ class MeshPipelineRunner:
         for agent_name in L1_AGENTS:
             state = await self._invoke_agent_sequential(agent_name, state, run_id)
             await self._checkpoint(db, state, run_id, agent_name)
-            if (
-                agent_name == "complexity-routing"
-                and state.status == CaseStatusEnum.escalated
-            ):
+            if agent_name == "complexity-routing" and state.status == CaseStatusEnum.escalated:
                 logger.warning(
                     "Mesh pipeline halted at complexity-routing: escalated (case_id=%s)",
                     state.case_id,
@@ -205,10 +202,7 @@ class MeshPipelineRunner:
             for agent_name in L1_AGENTS[l1_start:]:
                 state = await self._invoke_agent_sequential(agent_name, state, run_id)
                 await self._checkpoint(db, state, run_id, agent_name)
-                if (
-                    agent_name == "complexity-routing"
-                    and state.status == CaseStatusEnum.escalated
-                ):
+                if agent_name == "complexity-routing" and state.status == CaseStatusEnum.escalated:
                     return state
             state = await self._invoke_l2_fanout(state, run_id)
             await self._checkpoint(db, state, run_id, AGGREGATOR_NAME)
@@ -276,9 +270,7 @@ class MeshPipelineRunner:
             query = state.case_metadata.get("description", "") if state.case_metadata else ""
             if not query and state.extracted_facts:
                 query = str(state.extracted_facts)[:500]
-            kb_results = await search_kb(
-                judge_vector_store_id, query, max_results=5
-            )
+            kb_results = await search_kb(judge_vector_store_id, query, max_results=5)
             return state.model_copy(update={"judge_kb_results": kb_results})
         except Exception as exc:
             logger.warning("Judge KB search failed: %s", exc)
@@ -365,9 +357,7 @@ class MeshPipelineRunner:
             agent_key = L2_AGENT_KEY[agent_name]
             sub_task_id = new_task_id(f"{agent_name}-{run_id[:8]}")
             await self._stash_sub_task(sub_task_id, agent_key, case_id, run_id)
-            agg_reply_to = _response_topic(
-                self._namespace, AGGREGATOR_NAME, sub_task_id
-            )
+            agg_reply_to = _response_topic(self._namespace, AGGREGATOR_NAME, sub_task_id)
             envelope = build_send_task_request(
                 task_id=sub_task_id,
                 session_id=run_id,
@@ -380,9 +370,7 @@ class MeshPipelineRunner:
                 },
             )
             request_topic = _request_topic(self._namespace, agent_name)
-            publish_coros.append(
-                self._a2a.publish(request_topic, envelope, reply_to=agg_reply_to)
-            )
+            publish_coros.append(self._a2a.publish(request_topic, envelope, reply_to=agg_reply_to))
             await self._emit_progress(agent_name, state, "started")
 
         await asyncio.gather(*publish_coros)
@@ -393,9 +381,7 @@ class MeshPipelineRunner:
             )
         except TimeoutError:
             for agent_name in L2_AGENTS:
-                await self._emit_progress(
-                    agent_name, state, "failed", error="L2 barrier timeout"
-                )
+                await self._emit_progress(agent_name, state, "failed", error="L2 barrier timeout")
             raise
 
         merged_dict = parse_send_task_response(merged_response)
@@ -463,9 +449,7 @@ class MeshPipelineRunner:
         """
         payload = parse_send_task_response(envelope)
         if not payload:
-            raise RuntimeError(
-                f"Empty/unparseable response from agent {agent_name!r}"
-            )
+            raise RuntimeError(f"Empty/unparseable response from agent {agent_name!r}")
         # If payload looks like a full CaseState (has case_id), validate directly.
         if "case_id" in payload:
             return CaseState.model_validate(payload)

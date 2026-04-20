@@ -104,11 +104,15 @@ async def review_reopen_request(
     current_user: User = require_role(UserRole.senior_judge),
 ) -> ReopenRequest:
     result = await db.execute(
-        select(ReopenRequest).where(ReopenRequest.id == request_id, ReopenRequest.case_id == case_id)
+        select(ReopenRequest).where(
+            ReopenRequest.id == request_id, ReopenRequest.case_id == case_id
+        )
     )
     request_item = result.scalar_one_or_none()
     if not request_item:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Reopen request not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Reopen request not found"
+        )
 
     if request_item.requested_by == current_user.id:
         raise HTTPException(
@@ -116,7 +120,9 @@ async def review_reopen_request(
             detail="Two-person rule: cannot review your own reopen request",
         )
 
-    request_item.status = ReopenRequestStatus.approved if body.approve else ReopenRequestStatus.rejected
+    request_item.status = (
+        ReopenRequestStatus.approved if body.approve else ReopenRequestStatus.rejected
+    )
     request_item.reviewed_by = current_user.id
     request_item.reviewed_at = datetime.now(UTC)
     request_item.review_notes = body.review_notes

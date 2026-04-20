@@ -111,9 +111,7 @@ class SolaceA2AClient:
         await asyncio.to_thread(publisher.start)
         self._publisher = publisher
 
-        wildcard = (
-            f"{self._namespace}/a2a/v1/agent/response/{self._mesh_runner_name}/>"
-        )
+        wildcard = f"{self._namespace}/a2a/v1/agent/response/{self._mesh_runner_name}/>"
         receiver = (
             service.create_direct_message_receiver_builder()
             .with_subscriptions([TopicSubscription.of(wildcard)])
@@ -215,11 +213,7 @@ class _ReplyHandler(MessageHandler):
                 envelope = json.loads(payload_str)
             else:
                 payload_bytes = message.get_payload_as_bytes()
-                envelope = (
-                    json.loads(payload_bytes.decode("utf-8"))
-                    if payload_bytes
-                    else None
-                )
+                envelope = json.loads(payload_bytes.decode("utf-8")) if payload_bytes else None
         except Exception as exc:
             logger.error("SolaceA2AClient failed to parse inbound envelope: %s", exc)
             return

@@ -13,6 +13,7 @@ fires. On crash, callers can resume from the last persisted row.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 from typing import Any
@@ -73,10 +74,8 @@ async def persist_case_state(
             agent_name,
             exc,
         )
-        try:
+        with contextlib.suppress(Exception):
             await db.rollback()
-        except Exception:
-            pass
 
 
 def _serialize(state: CaseState) -> str:

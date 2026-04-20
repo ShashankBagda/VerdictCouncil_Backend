@@ -29,7 +29,6 @@ import threading
 from typing import Any
 
 import redis.asyncio as redis
-
 from solace_ai_connector.components.component_base import ComponentBase
 
 from .a2a import (
@@ -108,7 +107,8 @@ class Layer2AggregatorComponent(ComponentBase):
         sub_task_id = sub_task_id_from_topic(topic)
         if not sub_task_id:
             logger.warning(
-                "Layer2AggregatorComponent received message with no sub_task_id (topic=%r); dropping",
+                "Layer2AggregatorComponent received message with no sub_task_id "
+                "(topic=%r); dropping",
                 topic,
             )
             return None

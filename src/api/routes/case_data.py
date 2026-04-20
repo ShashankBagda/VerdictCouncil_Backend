@@ -119,16 +119,18 @@ def _derive_agent_status(case: Case, audit_logs: list[AuditLog]) -> list[dict[st
             start_time = logs[0].created_at.isoformat() if logs[0].created_at else None
             end_time = last.created_at.isoformat() if last.created_at else None
 
-        agents.append({
-            "agent_id": agent_id,
-            "name": AGENT_LABELS.get(agent_id, agent_id),
-            "status": agent_status,
-            "start_time": start_time,
-            "end_time": end_time,
-            "elapsed_seconds": None,
-            "error_message": None,
-            "output_summary": None,
-        })
+        agents.append(
+            {
+                "agent_id": agent_id,
+                "name": AGENT_LABELS.get(agent_id, agent_id),
+                "status": agent_status,
+                "start_time": start_time,
+                "end_time": end_time,
+                "elapsed_seconds": None,
+                "error_message": None,
+                "output_summary": None,
+            }
+        )
 
     # If case is in a terminal state, mark all pending agents accordingly
     if case.status in (CaseStatus.ready_for_review, CaseStatus.decided, CaseStatus.closed):
@@ -245,9 +247,7 @@ async def get_pipeline_status(
     case = await _get_case_or_404(case_id, db, current_user)
 
     result = await db.execute(
-        select(AuditLog)
-        .where(AuditLog.case_id == case_id)
-        .order_by(AuditLog.created_at.asc())
+        select(AuditLog).where(AuditLog.case_id == case_id).order_by(AuditLog.created_at.asc())
     )
     logs = list(result.scalars().all())
 
@@ -275,7 +275,9 @@ async def get_pipeline_status(
     responses={404: {"model": ErrorResponse}},
 )
 async def get_case_evidence(
-    case_id: UUID, db: DBSession, current_user: CurrentUser,
+    case_id: UUID,
+    db: DBSession,
+    current_user: CurrentUser,
 ) -> list[Evidence]:
     await _get_case_or_404(case_id, db, current_user)
     result = await db.execute(select(Evidence).where(Evidence.case_id == case_id))
@@ -290,7 +292,9 @@ async def get_case_evidence(
     responses={404: {"model": ErrorResponse}},
 )
 async def get_case_timeline(
-    case_id: UUID, db: DBSession, current_user: CurrentUser,
+    case_id: UUID,
+    db: DBSession,
+    current_user: CurrentUser,
 ) -> list[Fact]:
     await _get_case_or_404(case_id, db, current_user)
     result = await db.execute(
@@ -307,7 +311,9 @@ async def get_case_timeline(
     responses={404: {"model": ErrorResponse}},
 )
 async def get_case_witnesses(
-    case_id: UUID, db: DBSession, current_user: CurrentUser,
+    case_id: UUID,
+    db: DBSession,
+    current_user: CurrentUser,
 ) -> list[Witness]:
     await _get_case_or_404(case_id, db, current_user)
     result = await db.execute(select(Witness).where(Witness.case_id == case_id))
@@ -322,7 +328,9 @@ async def get_case_witnesses(
     responses={404: {"model": ErrorResponse}},
 )
 async def get_case_statutes(
-    case_id: UUID, db: DBSession, current_user: CurrentUser,
+    case_id: UUID,
+    db: DBSession,
+    current_user: CurrentUser,
 ) -> list[LegalRule]:
     await _get_case_or_404(case_id, db, current_user)
     result = await db.execute(select(LegalRule).where(LegalRule.case_id == case_id))
@@ -337,7 +345,9 @@ async def get_case_statutes(
     responses={404: {"model": ErrorResponse}},
 )
 async def get_case_precedents(
-    case_id: UUID, db: DBSession, current_user: CurrentUser,
+    case_id: UUID,
+    db: DBSession,
+    current_user: CurrentUser,
 ) -> list[Precedent]:
     await _get_case_or_404(case_id, db, current_user)
     result = await db.execute(select(Precedent).where(Precedent.case_id == case_id))
@@ -352,7 +362,9 @@ async def get_case_precedents(
     responses={404: {"model": ErrorResponse}},
 )
 async def get_case_arguments(
-    case_id: UUID, db: DBSession, current_user: CurrentUser,
+    case_id: UUID,
+    db: DBSession,
+    current_user: CurrentUser,
 ) -> list[Argument]:
     await _get_case_or_404(case_id, db, current_user)
     result = await db.execute(select(Argument).where(Argument.case_id == case_id))
@@ -367,7 +379,9 @@ async def get_case_arguments(
     responses={404: {"model": ErrorResponse}},
 )
 async def get_case_deliberation(
-    case_id: UUID, db: DBSession, current_user: CurrentUser,
+    case_id: UUID,
+    db: DBSession,
+    current_user: CurrentUser,
 ) -> list[Deliberation]:
     await _get_case_or_404(case_id, db, current_user)
     result = await db.execute(select(Deliberation).where(Deliberation.case_id == case_id))
@@ -382,7 +396,9 @@ async def get_case_deliberation(
     responses={404: {"model": ErrorResponse}},
 )
 async def get_case_verdict(
-    case_id: UUID, db: DBSession, current_user: CurrentUser,
+    case_id: UUID,
+    db: DBSession,
+    current_user: CurrentUser,
 ) -> list[Verdict]:
     await _get_case_or_404(case_id, db, current_user)
     result = await db.execute(select(Verdict).where(Verdict.case_id == case_id))

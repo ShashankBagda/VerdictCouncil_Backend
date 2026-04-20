@@ -361,7 +361,9 @@ class HearingNote(UUIDPrimaryKeyMixin, Base):
     case_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("cases.id", ondelete="CASCADE"), nullable=False
     )
-    judge_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    judge_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+    )
     content: Mapped[str] = mapped_column(Text, nullable=False)
     section_reference: Mapped[str | None] = mapped_column(String(255))
     note_type: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -381,13 +383,17 @@ class ReopenRequest(UUIDPrimaryKeyMixin, Base):
     case_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("cases.id", ondelete="CASCADE"), nullable=False
     )
-    requested_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    requested_by: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+    )
     reason: Mapped[str] = mapped_column(String(50), nullable=False)
     justification: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[ReopenRequestStatus] = mapped_column(
         Enum(ReopenRequestStatus), nullable=False, server_default=ReopenRequestStatus.pending.value
     )
-    reviewed_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    reviewed_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id")
+    )
     review_notes: Mapped[str | None] = mapped_column(Text)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
