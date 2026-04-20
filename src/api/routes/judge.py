@@ -241,3 +241,143 @@ async def get_fairness_audit(
         governance_checks=governance_checks,
         has_fairness_data=has_fairness_data,
     )
+
+
+# --------------------------------------------------------------------------- #
+# US-006: Evidence Dashboard
+# --------------------------------------------------------------------------- #
+
+
+@router.get(
+    "/{case_id}/evidence-dashboard",
+    operation_id="get_evidence_dashboard",
+    summary="Aggregate evidence and contradictions for a case",
+    description="Summarise evidence strength, admissibility-flag truthiness, and any "
+    "contradictions surfaced via disputed facts or corroboration. Requires judge role.",
+    responses={
+        403: {"model": ErrorResponse, "description": "Insufficient permissions"},
+        404: {"model": ErrorResponse, "description": "Case not found"},
+    },
+)
+async def get_evidence_dashboard(
+    case_id: UUID,
+    db: DBSession,
+    current_user: User = require_role(UserRole.judge),
+) -> dict:
+    case_result = await db.execute(select(Case).where(Case.id == case_id))
+    if case_result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
+
+    evidence_result = await db.execute(select(Evidence).where(Evidence.case_id == case_id))
+    evidence_rows = list(evidence_result.scalars().all())
+
+    fact_result = await db.execute(select(Fact).where(Fact.case_id == case_id))
+    fact_rows = list(fact_result.scalars().all())
+
+    strength_counts = {"strong": 0, "medium": 0, "weak": 0, "unrated": 0}
+    flag_counts: dict[str, dict[str, int]] = {}
+    for ev in evidence_rows:
+        key = ev.strength.value if ev.strength else "unrated"
+        strength_counts[key] = strength_counts.get(key, 0) + 1
+        if ev.admissibility_flags:
+            for flag_name, flag_value in ev.admissibility_flags.items():
+                bucket = flag_counts.setdefault(flag_name, {"truthy_count": 0, "falsy_count": 0})
+                if flag_value:
+                    bucket["truthy_count"] += 1
+                else:
+                    bucket["falsy_count"] += 1
+
+    strength_summary = {**strength_counts, "total": len(evidence_rows)}
+    admissibility_flags_summary = [
+        {"flag": name, "truthy_count": c["truthy_count"], "falsy_count": c["falsy_count"]}
+        for name, c in sorted(flag_counts.items())
+    ]
+
+    contradictions = []
+    for fact in fact_rows:
+        is_disputed = fact.status == FactStatus.disputed
+        corroboration = fact.corroboration if isinstance(fact.corroboration, dict) else {}
+        has_contradicts = "contradicts" in corroboration
+        if is_disputed or has_contradicts:
+            contradictions.append(
+                {
+                    "fact_id": str(fact.id),
+                    "description": fact.description,
+                    "status": fact.status.value if fact.status else None,
+                    "dispute_reason": corroboration.get("dispute_reason"),
+                    "contradicts": corroboration.get("contradicts"),
+                }
+            )
+
+    return {
+        "case_id": str(case_id),
+        "strength_summary": strength_summary,
+        "admissibility_flags_summary": admissibility_flags_summary,
+        "contradictions": contradictions,
+        "total_evidence_count": len(evidence_rows),
+        "total_fact_count": len(fact_rows),
+        "has_evidence_data": bool(evidence_rows or fact_rows),
+    }
+
+
+# --------------------------------------------------------------------------- #
+# US-003: Jurisdiction Validation
+# --------------------------------------------------------------------------- #
+
+
+def _extract_jurisdiction_issues(payload: dict | None) -> list[str]:
+    """Pull the issues list out of a case-processing audit payload."""
+    if not payload:
+        return []
+    if isinstance(payload.get("jurisdiction_issues"), list):
+        return list(payload["jurisdiction_issues"])
+    metadata = payload.get("case_metadata")
+    if isinstance(metadata, dict) and isinstance(metadata.get("jurisdiction_issues"), list):
+        return list(metadata["jurisdiction_issues"])
+    return []
+
+
+@router.get(
+    "/{case_id}/jurisdiction",
+    operation_id="get_jurisdiction_validation",
+    summary="Show jurisdiction validation for a case",
+    description="Combine the case-level jurisdiction_valid flag with the most recent "
+    "case-processing audit payload so the judge can see both the verdict and the reasoning. "
+    "Requires judge role.",
+    responses={
+        403: {"model": ErrorResponse, "description": "Insufficient permissions"},
+        404: {"model": ErrorResponse, "description": "Case not found"},
+    },
+)
+async def get_jurisdiction_validation(
+    case_id: UUID,
+    db: DBSession,
+    current_user: User = require_role(UserRole.judge),
+) -> dict:
+    case_result = await db.execute(select(Case).where(Case.id == case_id))
+    case = case_result.scalar_one_or_none()
+    if case is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
+
+    audit_result = await db.execute(
+        select(AuditLog)
+        .where(
+            AuditLog.case_id == case_id,
+            AuditLog.agent_name == "case-processing",
+            AuditLog.action == "agent_response",
+        )
+        .order_by(AuditLog.created_at.desc())
+        .limit(1)
+    )
+    audit = audit_result.scalar_one_or_none()
+    audit_payload = audit.output_payload if audit else None
+    audit_log_id = str(audit.id) if audit else None
+
+    return {
+        "case_id": str(case_id),
+        "jurisdiction_valid": case.jurisdiction_valid,
+        "jurisdiction_issues": _extract_jurisdiction_issues(audit_payload),
+        "audit_payload": audit_payload,
+        "audit_log_id": audit_log_id,
+        "has_validation_data": case.jurisdiction_valid is not None or audit is not None,
+    }
