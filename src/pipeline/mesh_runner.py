@@ -326,12 +326,23 @@ class MeshPipelineRunner:
 
         await self._emit_progress(agent_name, state, "started")
         try:
-            await self._a2a.publish(request_topic, envelope, reply_to=reply_to)
+            payload_hash = await self._a2a.publish(request_topic, envelope, reply_to=reply_to)
             response = await self._a2a.await_response(task_id, timeout=self._agent_timeout)
         except Exception as exc:
             await self._emit_progress(agent_name, state, "failed", error=str(exc)[:500])
             raise
 
+        state = append_audit_entry(
+            state,
+            agent="a2a",
+            action="agent_request_published",
+            input_payload={
+                "topic": request_topic,
+                "task_id": task_id,
+                "agent": agent_name,
+                "payload_sha256": payload_hash,
+            },
+        )
         updated = self._parse_agent_response(response, state, agent_name)
         await self._emit_progress(agent_name, updated, "completed")
         return updated
@@ -353,6 +364,7 @@ class MeshPipelineRunner:
         await self._stash_run_meta(case_id, run_id, state, mesh_reply_to)
 
         publish_coros = []
+        publish_meta: list[dict[str, str]] = []
         for agent_name in L2_AGENTS:
             agent_key = L2_AGENT_KEY[agent_name]
             sub_task_id = new_task_id(f"{agent_name}-{run_id[:8]}")
@@ -371,9 +383,19 @@ class MeshPipelineRunner:
             )
             request_topic = _request_topic(self._namespace, agent_name)
             publish_coros.append(self._a2a.publish(request_topic, envelope, reply_to=agg_reply_to))
+            publish_meta.append(
+                {"topic": request_topic, "task_id": sub_task_id, "agent": agent_name}
+            )
             await self._emit_progress(agent_name, state, "started")
 
-        await asyncio.gather(*publish_coros)
+        payload_hashes = await asyncio.gather(*publish_coros)
+        for meta, payload_hash in zip(publish_meta, payload_hashes, strict=True):
+            state = append_audit_entry(
+                state,
+                agent="a2a",
+                action="agent_request_published",
+                input_payload={**meta, "payload_sha256": payload_hash},
+            )
 
         try:
             merged_response = await self._a2a.await_response(
