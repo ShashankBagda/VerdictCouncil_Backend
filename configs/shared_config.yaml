@@ -9,8 +9,9 @@
 broker: &broker_connection
   broker_url: ${SOLACE_BROKER_URL}
   broker_vpn: ${SOLACE_BROKER_VPN}
-  username: ${SOLACE_BROKER_USERNAME}
-  password: ${SOLACE_BROKER_PASSWORD}
+  broker_username: ${SOLACE_BROKER_USERNAME}
+  broker_password: ${SOLACE_BROKER_PASSWORD}
+  reconnection_strategy: forever_retry
 
 # ──────────────────────────────────────────────
 # Model Definitions (OpenAI via LiteLLM)

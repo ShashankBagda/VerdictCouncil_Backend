@@ -8,7 +8,7 @@ apps:
       <<: *broker_connection
     app_config:
       namespace: ${NAMESPACE}
-      agent_name: witness-analysis
+      agent_name: witness_analysis
       display_name: "Witness Analysis Agent"
       supports_streaming: true
       model:

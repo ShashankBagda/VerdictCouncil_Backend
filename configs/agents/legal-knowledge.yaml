@@ -8,7 +8,7 @@ apps:
       <<: *broker_connection
     app_config:
       namespace: ${NAMESPACE}
-      agent_name: legal-knowledge
+      agent_name: legal_knowledge
       display_name: "Legal Knowledge Agent"
       supports_streaming: true
       model:
