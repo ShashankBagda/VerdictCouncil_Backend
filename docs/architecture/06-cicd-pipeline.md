@@ -19,7 +19,7 @@ VerdictCouncil deploys to **DigitalOcean** using the following managed services:
 
 | Workflow | Trigger | Purpose | Target |
 |---|---|---|---|
-| `ci.yml` | Push to `feat/*`, PR to `development` | Lint, test, security scan, build verification | — |
+| `ci.yml` | Push to any branch (`**`); PR into `development` or `main` | Ruff lint + format check, pytest with coverage, OpenAPI snapshot, `pip-audit` + `bandit` (advisory), Docker build verification | — |
 | `staging-deploy.yml` | Push to `release/*` | Build images, push to DOCR, deploy to DOKS staging | DOKS staging namespace |
 | `production-deploy.yml` | Push to `main` | Build release images, deploy to DOKS production, create GitHub Release | DOKS production namespace |
 
@@ -42,204 +42,101 @@ Application secrets (OPENAI_API_KEY, database credentials, etc.) are stored as K
 
 ## 6.2 CI Workflow
 
+The live workflow (`.github/workflows/ci.yml`) runs five jobs on every push and on PRs into `development` or `main`. Security scanning runs in advisory mode (`continue-on-error: true`); `mypy` and coverage gating are not currently enforced and are tracked as follow-up work.
+
 ```yaml
-# .github/workflows/ci.yml
+# .github/workflows/ci.yml — mirror of the live file
 name: CI
 
 on:
   push:
-    branches:
-      - 'feat/**'
+    branches: ["**"]
   pull_request:
-    branches:
-      - development
-
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
-
-env:
-  PYTHON_VERSION: '3.12'
+    branches: [development, main]
 
 jobs:
-  lint-and-typecheck:
-    name: Lint & Type Check
+  lint:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
+          python-version: "3.12"
+      - run: pip install ruff
+      - run: ruff check src/ tests/
+      - run: ruff format --check src/ tests/
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install ruff mypy
-          pip install -r requirements.txt
-
-      - name: Run ruff linter
-        run: ruff check . --output-format=github
-
-      - name: Run ruff formatter check
-        run: ruff format --check .
-
-      - name: Run mypy type checking
-        run: mypy src/ --ignore-missing-imports
-
-  unit-tests:
-    name: Unit Tests
+  test:
     runs-on: ubuntu-latest
-    needs: lint-and-typecheck
+    needs: lint
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install -r requirements-dev.txt
-
-      - name: Run unit tests with coverage
-        run: |
-          pytest tests/unit/ \
-            --cov=src \
-            --cov-report=xml \
-            --cov-report=term-missing \
-            --cov-fail-under=80 \
-            -v
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - run: pytest tests/ -v --tb=short --cov=src --cov-report=term-missing
         env:
-          OPENAI_API_KEY: "sk-test-mock-key"
+          OPENAI_API_KEY: ""
 
-      - name: Upload coverage report
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-report
-          path: coverage.xml
-
-  integration-tests:
-    name: Integration Tests
+  openapi:
     runs-on: ubuntu-latest
-    needs: unit-tests
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_DB: verdictcouncil_test
-          POSTGRES_USER: vc_test
-          POSTGRES_PASSWORD: test_password
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U vc_test"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-      redis:
-        image: redis:7
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+    needs: lint
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Install dependencies
+          python-version: "3.12"
+      - run: pip install -e .
+      - name: Regenerate OpenAPI snapshot
+        run: python -m scripts.export_openapi docs/openapi.json
+      - name: Verify docs/openapi.json is up to date
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install -r requirements-dev.txt
+          if ! git diff --exit-code docs/openapi.json; then
+            echo "::error::docs/openapi.json is out of date — run 'make openapi-snapshot' locally and commit the diff"
+            exit 1
+          fi
 
-      - name: Run database migrations
-        run: python -m alembic upgrade head
-        env:
-          DATABASE_URL: "postgresql://vc_test:test_password@localhost:5432/verdictcouncil_test"
-
-      - name: Run integration tests
-        run: |
-          pytest tests/integration/ \
-            -v \
-            --timeout=120
-        env:
-          DATABASE_URL: "postgresql://vc_test:test_password@localhost:5432/verdictcouncil_test"
-          REDIS_URL: "redis://localhost:6379/0"
-          OPENAI_API_KEY: "sk-test-mock-key"
-          SOLACE_BROKER_URL: "tcp://localhost:55555"
-
-  security-scan:
-    name: Security Scan
+  security:
     runs-on: ubuntu-latest
+    needs: lint
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
+          python-version: "3.12"
+      - run: pip install pip-audit bandit
+      - run: pip install -e .
+      - run: pip-audit
+        continue-on-error: true
+      - run: bandit -r src/ -ll
+        continue-on-error: true
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install pip-audit bandit
-          pip install -r requirements.txt
-
-      - name: Run pip-audit (dependency vulnerabilities)
-        run: pip-audit --strict --desc
-
-      - name: Run bandit (code security analysis)
-        run: bandit -r src/ -f json -o bandit-report.json || true
-
-      - name: Check bandit results
-        run: |
-          bandit -r src/ -ll -ii
-        continue-on-error: false
-
-      - name: Upload security report
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: security-reports
-          path: bandit-report.json
-
-  docker-build-test:
-    name: Docker Build Verification
+  docker:
     runs-on: ubuntu-latest
-    needs: [unit-tests, security-scan]
+    needs: test
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build single image (no push)
-        uses: docker/build-push-action@v5
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./Dockerfile
           push: false
-          tags: verdictcouncil/verdictcouncil:test
+          tags: verdictcouncil:test
           cache-from: type=gha
           cache-to: type=gha,mode=max
 ```
+
+### Gaps vs. target state
+
+The table below records differences between the live workflow and the production CI we aim for. Each row is tracked for follow-up rather than described as already in place.
+
+| Area | Today | Target |
+|---|---|---|
+| Type checking | Not run in CI | `mypy src/` enforced in `lint` job |
+| Coverage gate | `--cov-report=term-missing` only (advisory) | `--cov-fail-under=80` enforced |
+| Security scans | `pip-audit` + `bandit` advisory (`continue-on-error`) | Both enforced as hard failures |
+| Integration tests | No Postgres/Redis services in CI; `tests/integration/*` run only when `INTEGRATION_TESTS=1` | Dedicated `integration-tests` job with managed services |
 
 ---
 
