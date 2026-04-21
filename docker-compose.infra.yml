@@ -31,7 +31,7 @@ services:
     image: solace/solace-pubsub-standard:latest
     container_name: vc-solace
     ports:
-      - "55555:55555"   # SMF
+      - "55556:55555"   # SMF
       - "8080:8080"     # SEMP management
       - "1883:1883"     # MQTT
       - "5672:5672"     # AMQP

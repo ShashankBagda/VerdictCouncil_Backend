@@ -33,8 +33,11 @@ Multi-agent AI judicial decision-support system. FastAPI backend with 9 speciali
 ```bash
 cp .env.example .env          # fill in your values
 docker compose -f docker-compose.infra.yml up -d   # start postgres + redis
-make dev                      # run the API
+make dev                      # run web-gateway + 9 agents + layer2-aggregator + API
 ```
+
+`make dev` starts the full runnable local backend topology. The what-if controller
+logic runs inside the FastAPI process; it is not a separate local service.
 
 See `docs/architecture/README.md` for the full architecture documentation.
 

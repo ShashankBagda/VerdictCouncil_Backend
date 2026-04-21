@@ -8,44 +8,18 @@
 
 ```yaml
 # configs/services/layer2-aggregator.yaml
+!include ../shared_config.yaml
+
 apps:
   - name: layer2-aggregator
-    app_module: solace_agent_mesh.services.aggregator.app
+    app_module: src.services.layer2_aggregator.app
     broker:
       <<: *broker_connection
     app_config:
       namespace: ${NAMESPACE}
-      service_name: "Layer2Aggregator"
-      display_name: "Layer 2 Fan-In Aggregator"
-
-      subscriptions:
-        - topic: "verdictcouncil/a2a/v1/agent/response/evidence-analysis"
-          agent_key: "evidence_analysis"        # maps to CaseState.evidence_analysis
-        - topic: "verdictcouncil/a2a/v1/agent/response/fact-reconstruction"
-          agent_key: "extracted_facts"           # maps to CaseState.extracted_facts
-        - topic: "verdictcouncil/a2a/v1/agent/response/witness-analysis"
-          agent_key: "witnesses"                 # maps to CaseState.witnesses
-
-      output_topic: "verdictcouncil/a2a/v1/agent/request/legal-knowledge"
-
-      barrier:
-        required_agents: ["evidence_analysis", "extracted_facts", "witnesses"]
-        timeout_seconds: 120
-        on_timeout: "halt_and_flag"
-        # Redis key includes run_id to isolate concurrent/what-if executions:
-        # key format: {key_prefix}{case_id}:{run_id}
-
-      state_backend: "redis"
-      redis:
-        host: ${REDIS_HOST}
-        port: ${REDIS_PORT}
-        password: ${REDIS_PASSWORD}
-        db: 1
-        key_prefix: "vc:aggregator:"
-        ttl_seconds: 300
-
-      session_service: *default_session_service
-      artifact_service: *default_artifact_service
+      service_name: layer2-aggregator
+      response_subscription_topic: "${NAMESPACE}/a2a/v1/agent/response/layer2-aggregator/>"
+      redis_url: ${REDIS_URL}
 ```
 
 ### Python Implementation

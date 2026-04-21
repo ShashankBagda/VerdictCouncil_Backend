@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime
-from pathlib import Path
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from src.api.deps import DBSession, require_role
 from src.api.schemas.admin import (
@@ -18,16 +17,14 @@ from src.api.schemas.admin import (
     VectorStoreRefreshResponse,
 )
 from src.api.schemas.common import ErrorResponse
+from src.models.admin_event import AdminEvent
+from src.models.system_config import SystemConfig
 from src.models.user import Session, User, UserRole
 from src.shared.config import settings
 
 router = APIRouter()
 
-
-def _admin_storage_dir() -> Path:
-    path = Path(settings.admin_storage_dir)
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+_COST_CONFIG_KEY = "cost_config"
 
 
 @router.post(
@@ -40,17 +37,17 @@ def _admin_storage_dir() -> Path:
 )
 async def refresh_vector_store(
     body: VectorStoreRefreshRequest,
+    db: DBSession,
     current_user: User = require_role(UserRole.admin),
 ) -> dict:
     store = body.store or settings.openai_vector_store_id or "default"
-    marker = {
-        "store": store,
-        "requested_by": str(current_user.id),
-        "requested_at": datetime.now(UTC).isoformat(),
-    }
-    (_admin_storage_dir() / "vector_store_refresh.json").write_text(
-        json.dumps(marker, indent=2), encoding="utf-8"
+    event = AdminEvent(
+        actor_id=current_user.id,
+        action="vector_store_refresh_requested",
+        payload={"store": store},
     )
+    db.add(event)
+    await db.flush()
     return {
         "message": "Vector store refresh request recorded",
         "store": store,
@@ -126,15 +123,29 @@ async def manage_user_action(
 )
 async def set_cost_config(
     body: CostConfigRequest,
+    db: DBSession,
     current_user: User = require_role(UserRole.admin),
 ) -> dict:
     config = body.model_dump(exclude_none=True)
-    config["updated_by"] = str(current_user.id)
-    config["updated_at"] = datetime.now(UTC).isoformat()
 
-    (_admin_storage_dir() / "cost_config.json").write_text(
-        json.dumps(config, indent=2), encoding="utf-8"
+    stmt = (
+        pg_insert(SystemConfig)
+        .values(
+            key=_COST_CONFIG_KEY,
+            value=config,
+            updated_by=current_user.id,
+        )
+        .on_conflict_do_update(
+            index_elements=["key"],
+            set_={
+                "value": config,
+                "updated_by": current_user.id,
+                "updated_at": datetime.now(UTC),
+            },
+        )
     )
+    await db.execute(stmt)
+    await db.flush()
 
     return {
         "message": "Cost configuration updated",
