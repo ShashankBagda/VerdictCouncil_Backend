@@ -8,7 +8,7 @@ apps:
       <<: *broker_connection
     app_config:
       namespace: ${NAMESPACE}
-      agent_name: governance-verdict
+      agent_name: governance_verdict
       display_name: "Governance & Verdict Agent"
       supports_streaming: true
       model:
