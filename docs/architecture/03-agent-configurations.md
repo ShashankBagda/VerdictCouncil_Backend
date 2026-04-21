@@ -235,22 +235,22 @@ class Layer2Aggregator:
 
 models:
   gpt54: &gpt54_model
-    model: gpt-5.4
+    model: ${OPENAI_MODEL_FRONTIER_REASONING}
     api_key: ${OPENAI_API_KEY}
     api_base: https://api.openai.com/v1
 
   gpt5: &gpt5_model
-    model: gpt-5
+    model: ${OPENAI_MODEL_STRONG_REASONING}
     api_key: ${OPENAI_API_KEY}
     api_base: https://api.openai.com/v1
 
   gpt5_mini: &gpt5_mini_model
-    model: gpt-5-mini
+    model: ${OPENAI_MODEL_EFFICIENT_REASONING}
     api_key: ${OPENAI_API_KEY}
     api_base: https://api.openai.com/v1
 
   gpt54_nano: &gpt54_nano_model
-    model: gpt-5.4-nano
+    model: ${OPENAI_MODEL_LIGHTWEIGHT}
     api_key: ${OPENAI_API_KEY}
     api_base: https://api.openai.com/v1
 
@@ -269,8 +269,8 @@ broker: &broker_connection
 # ──────────────────────────────────────────────
 
 session_service: &default_session_service
-  type: sql
-  database_url: ${DATABASE_URL}
+  type: database
+  db_url: ${DATABASE_URL}
 
 # ──────────────────────────────────────────────
 # Artifact Service (Filesystem)

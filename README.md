@@ -1,15 +1,54 @@
 # VerdictCouncil — Backend
 
-Multi-agent AI judicial decision-support system. FastAPI backend with 9 specialised agents, async PostgreSQL, Redis, and Solace Agent Mesh.
+FastAPI + 9-agent Solace Agent Mesh (SAM) backend for VerdictCouncil, a judicial AI decision-support system for Singapore lower courts (Small Claims Tribunal and Traffic Violations cases). Judges upload case materials, run multi-agent AI analysis, and review structured verdict recommendations.
 
 ## Table of Contents
 
-1. [Prerequisites](#prerequisites)
-2. [Local Development](#local-development)
-3. [Architecture](#architecture)
-4. [AI Agentic Workflow with Linear](#ai-agentic-workflow-with-linear)
-5. [Branch Naming](#branch-naming)
-6. [PR Template](#pr-template)
+1. [Architecture at a Glance](#architecture-at-a-glance)
+2. [The 9 Agents](#the-9-agents)
+3. [Prerequisites](#prerequisites)
+4. [Local Development](#local-development)
+5. [Environment Variables](#environment-variables)
+6. [API Surface](#api-surface)
+7. [Database & Migrations](#database--migrations)
+8. [Testing](#testing)
+9. [Contract Checks](#contract-checks)
+10. [Deployment](#deployment)
+11. [Further Reading](#further-reading)
+12. [Contributing](#contributing)
+
+---
+
+## Architecture at a Glance
+
+Four cooperating processes form the runtime (see `Procfile.dev`):
+
+| Process | What it does | Port |
+|---------|-------------|------|
+| **FastAPI app** (`src/api/app.py`) | HTTP/JSON API for the frontend; also hosts the what-if controller in-process | 8001 |
+| **SAM web-gateway** (`configs/gateway/web-gateway.yaml`) | HTTP/SSE bridge into the Solace Agent Mesh A2A bus | 8002 |
+| **9 SAM agents** (`configs/agents/*.yaml`) | Specialist AI agents running as separate SAM processes over the Solace broker | — |
+| **layer2-aggregator** (`src/services/layer2_aggregator/`) | Custom SAM app that collects per-agent responses and writes final case state to Redis/PostgreSQL | — |
+
+From the orchestration root, `./dev.sh` starts all four layers. For deeper architecture see [`docs/architecture/02-system-architecture.md`](docs/architecture/02-system-architecture.md) and the full [`docs/architecture/README.md`](docs/architecture/README.md).
+
+---
+
+## The 9 Agents
+
+| Agent | Description |
+|-------|-------------|
+| **case-processing** | Intake router. Parses incoming submissions, normalises the case schema, classifies domain (SCT or traffic), and validates jurisdiction before the pipeline proceeds. |
+| **complexity-routing** | Classifies case complexity (low/medium/high) and routes to automated processing, judicial review, or human escalation. First halt point for high-complexity cases. |
+| **evidence-analysis** | Impartial evidence examiner. Classifies, scores, and cross-references all submitted evidence; surfaces contradictions, admissibility risks, and evidentiary gaps. |
+| **fact-reconstruction** | Builds a sourced chronological timeline from evidence and witness material; marks disputed facts and their dependency on unresolved testimony. |
+| **witness-analysis** | Assesses witness credibility, anticipates testimony for traffic cases, and flags material inconsistencies for the Judge to resolve at hearing. |
+| **legal-knowledge** | Retrieves applicable statutes and precedents via the curated knowledge base and PAIR Search API; supplies verbatim statutory text and binding higher-court authority. |
+| **argument-construction** | Constructs balanced prosecution/defence (traffic) or claimant/respondent (SCT) arguments for judicial evaluation, noting weaknesses on both sides. |
+| **deliberation** | Judicial reasoning core. Produces a step-by-step chain from evidence to conclusion, citing every source and flagging low-confidence steps for the presiding Judge. |
+| **governance-verdict** | Final governance gate. Audits pipeline output for bias and logical gaps, then produces a structured verdict recommendation with confidence score and alternatives. |
+
+Full YAML configurations in `configs/agents/`. See [`docs/architecture/03-agent-configurations.md`](docs/architecture/03-agent-configurations.md) for detailed configuration and tool lists.
 
 ---
 
@@ -21,255 +60,149 @@ Multi-agent AI judicial decision-support system. FastAPI backend with 9 speciali
 | PostgreSQL | 15+ | `brew install postgresql@15` |
 | Redis | 7+ | `brew install redis` |
 | Docker | latest | [docker.com](https://docker.com) |
-| Node.js | latest | `brew install node` (required for Linear MCP server) |
-| GitHub CLI | latest | `brew install gh` |
-| Claude Code | latest | [claude.ai/code](https://claude.ai/code) |
-| linear-sdlc | latest | [linear-sdlc](https://github.com/douglasswm/linear-sdlc) |
+| `make` | — | pre-installed on macOS |
 
 ---
 
 ## Local Development
 
 ```bash
-cp .env.example .env          # fill in your values
-docker compose -f docker-compose.infra.yml up -d   # start postgres + redis
-make dev                      # run web-gateway + 9 agents + layer2-aggregator + API
+cp .env.example .env          # fill in your secrets (see Environment Variables below)
+make install                  # create .venv, install dependencies
+make infra-up                 # start Postgres, Redis, and Solace broker via Docker
+make solace-bootstrap         # provision VPN + vc-agent user (first run only)
+make migrate                  # run Alembic migrations
+make dev                      # start all processes via honcho (Procfile.dev)
 ```
 
-`make dev` starts the full runnable local backend topology. The what-if controller
-logic runs inside the FastAPI process; it is not a separate local service.
+`make dev` starts the full local stack: web-gateway, 9 agents, layer2-aggregator, and the FastAPI API on port 8001. From the orchestration root, `./dev.sh` wraps all of the above.
 
-See `docs/architecture/README.md` for the full architecture documentation.
-
----
-
-## Architecture
-
-See [`docs/architecture/README.md`](docs/architecture/README.md) for the complete architecture documentation including:
-- System architecture and agent configurations
-- Tech stack and infrastructure
-- CI/CD pipeline
-- Local development guide
-
----
-
-## AI Agentic Workflow with Linear
-
-VerdictCouncil uses **linear-sdlc** — a Claude Code skill suite that wraps the Linear MCP server with a complete SDLC workflow. All Linear issue management goes through skills, never the `linear` CLI directly.
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                    LINEAR WORKSPACE                       │
-│  Issues ← dependencies → Issues                          │
-│  Parent issues ← sub-issues (for cross-repo work)        │
-│    ↕ native GitHub integration (auto PR linking)         │
-│    ↕ status auto-updates on PR merge                     │
-└───────────────────────┬─────────────────────────────────┘
-                        │ Linear MCP server
-            ┌───────────┴───────────┐
-            │     CLAUDE CODE       │
-            │   (linear-sdlc skills)│
-            │                       │
-            │  /brainstorm          │
-            │  /create-tickets      │
-            │  /next                │
-            │  /implement VER-XX    │
-            │  /checkpoint          │
-            │  /health              │
-            └───────────┬───────────┘
-                        │
-            ┌───────────┴───────────┐
-            │       GITHUB          │
-            │  PRs ← auto-linked   │
-            │  Branches ← created  │
-            │  Reviews ← human     │
-            └───────────────────────┘
-```
-
-**Native layer (always-on):** Linear's GitHub integration auto-links PRs when the branch name contains the issue ID, and auto-updates issue status when PRs merge.
-
-**linear-sdlc skills:** Handle brainstorming, ticket creation, ticket selection, full implementation lifecycle (with parallel specialist code reviews), checkpoints, and health monitoring.
-
----
-
-### One-time Setup
-
-#### 1. Install tools
+To stop: `Ctrl+C` in the `dev.sh` terminal, or from the orchestration root:
 
 ```bash
-brew install node      # required for Linear MCP server
-brew install gh
-gh auth login
+./stop.sh          # stop backend + frontend; infra keeps running
+./stop.sh --infra  # also tear down Docker infra
 ```
 
-#### 2. Install linear-sdlc
-
-Paste this one-liner into Claude Code:
-
-```
-Install linear-sdlc: run git clone --single-branch --depth 1 https://github.com/douglasswm/linear-sdlc.git ~/.claude/skills/linear-sdlc && cd ~/.claude/skills/linear-sdlc && ./setup
-```
-
-The setup script will prompt for your Linear API key (Linear Settings → API → Personal API keys) and configure the MCP server in `~/.claude/settings.json`. Restart Claude Code afterward so the MCP server loads.
-
-#### 3. Connect Linear to GitHub (one-time per workspace)
-
-1. Linear Settings → Integrations → GitHub → Connect
-2. Link the `VerdictCouncil_Backend` repo to your team
-3. Enable: auto-link PRs via branch name, auto-close issues on PR merge
-
-**Verify:** Create a test branch named `feat/ver-1-test`, open a PR, and confirm it appears linked on the Linear issue.
-
-#### 4. Verify linear-sdlc
-
-In Claude Code, after restart:
-
-- Ask **"List my Linear teams"** — should return your team(s) via the MCP server
-- Run `/next` — should query Linear and present unblocked tickets
-- Run `/health` — should detect project tools (pytest, ruff, mypy) and show a quality score
+Full local dev guide: [`docs/architecture/09-local-development.md`](docs/architecture/09-local-development.md).
 
 ---
 
-### Phase 1: Planning a Feature
+## Environment Variables
 
-Use `/brainstorm` to explore an idea and write a spec, then `/create-tickets` to convert it into Linear issues.
+Copy `.env.example` and fill in the required values. The table below covers required variables; see `.env.example` for optional ones (PAIR circuit-breaker tuning, SMTP for password-reset email, KB upload cap).
 
-```
-/brainstorm rate limiting
-```
+| Variable | Description |
+|----------|-------------|
+| `OPENAI_API_KEY` | OpenAI API key — required for all agents |
+| `SOLACE_BROKER_URL` | Broker SMF URL, e.g. `tcp://localhost:55556` |
+| `SOLACE_BROKER_VPN` | VPN name, e.g. `verdictcouncil` |
+| `SOLACE_BROKER_USERNAME` | Agent credentials user, e.g. `vc-agent` |
+| `SOLACE_BROKER_PASSWORD` | Agent credentials password |
+| `DATABASE_URL` | PostgreSQL DSN, e.g. `postgresql://vc_dev:pwd@localhost:5432/verdictcouncil` |
+| `REDIS_URL` | Redis DSN, e.g. `redis://localhost:6379/0` |
+| `JWT_SECRET` | Secret for signing `vc_token` cookies — use a long random string in production |
+| `COOKIE_SECURE` | `true` in production (HTTPS); `false` for local HTTP |
+| `FRONTEND_ORIGINS` | CORS allow-list, e.g. `http://localhost:5173` |
+| `NAMESPACE` | SAM namespace, e.g. `verdictcouncil` |
+| `FASTAPI_PORT` | API port (default `8001`) |
+| `WEB_GATEWAY_PORT` | Gateway port (default `8002`) — **must differ from** `FASTAPI_PORT` |
+| `OPENAI_VECTOR_STORE_ID` | ID of the curated judicial knowledge base vector store |
 
-Walks you through a structured discussion (problem, impact, solution shape, scope, technical approach) and writes a spec to `specs/rate-limiting.md`. For complex features (multi-system, architecture decisions), it can escalate to `superpowers:brainstorming` for a full design spec.
-
-```
-/create-tickets specs/rate-limiting.md
-```
-
-Creates a parent issue and sub-issues in Linear with proper dependencies, priorities, and labels. You confirm the breakdown before anything is created.
-
-#### Cross-repo issues
-
-When a feature needs both backend and frontend changes, create a parent issue with sub-issues per repo:
-
-```
-Parent: VER-100  "Add user search"
-  ├── VER-101  "Backend: search API endpoint"   → this repo, one branch, one PR
-  └── VER-102  "Frontend: search UI component"  → Frontend repo, one branch, one PR
-```
-
-The parent auto-closes when all sub-issues close. `/create-tickets` handles parent/sub-issue linking automatically.
+Optional model-tier overrides (`OPENAI_MODEL_LIGHTWEIGHT`, `OPENAI_MODEL_EFFICIENT_REASONING`, `OPENAI_MODEL_STRONG_REASONING`, `OPENAI_MODEL_FRONTIER_REASONING`) default to the values in `.env.example`.
 
 ---
 
-### Phase 2: Implementing a Ticket
+## API Surface
 
-```
-/next
-```
+All application routes live under `/api/v1/*`. Auth uses cookie-based JWT — the `vc_token` httpOnly cookie is set on login and required for all protected endpoints.
 
-Queries your assigned Linear tickets, filters out blocked ones, ranks by priority and cycle deadline, and presents the top 3. When you pick one, it hands off to `/implement`.
+| Route group | Notes |
+|-------------|-------|
+| `auth` | Login, logout, session, password-reset |
+| `cases` | CRUD, status, pipeline trigger |
+| `case_data` | Documents, hearing notes |
+| `decisions` | Verdict recommendations |
+| `what_if` | Contestable Judgment Mode — scenario perturbation |
+| `judge` | Judge-specific tools |
+| `hearing_notes` / `hearing_pack` | Hearing preparation |
+| `reopen_requests` | Request to reopen a closed case |
+| `audit` | Immutable audit log |
+| `dashboard` | Aggregated case stats |
+| `health` | Readiness + liveness |
+| `precedents` | PAIR Search API proxy |
+| `knowledge-base` | Vector store upload/search (admin + senior_judge) |
+| `escalated-cases` | Cases flagged for human review |
+| `senior-inbox` | Senior judge review queue |
+| `admin` | System configuration |
+| `/metrics` | Prometheus scrape endpoint |
 
-```
-/implement VER-42
-```
-
-Full lifecycle for a single ticket:
-
-1. **Loads the ticket** from Linear (title, description, parent, spec)
-2. **Pre-flight checks** — verifies the ticket isn't blocked, checks for existing branches, ensures clean working tree
-3. **Sets status** to "In Progress" in Linear
-4. **Creates a branch** (`feat/ver-42-short-description`) from `development`
-5. **Plans** the implementation if the ticket is complex (>3 acceptance criteria)
-6. **You code** with Claude's help
-7. **Specialist self-review** — dispatches parallel sub-agents that review the diff:
-   - **Testing specialist** — missing tests, weak assertions, untested paths
-   - **Security specialist** — injection, hardcoded secrets, auth gaps (when relevant code changed)
-   - **Performance specialist** — N+1 queries, missing indexes, unbounded results (when backend code changed)
-   - **Code quality specialist** — dead code, DRY violations, naming issues
-8. **Creates a PR** via `gh` targeting `development`, with the ticket linked
-9. **Sets status** to "In Review" in Linear
-10. **Logs learnings and timeline** for future sessions
-
-Critical findings from specialists must be fixed before the PR is created. Warnings are presented for your decision.
-
-#### Rules
-
-1. **One issue = one branch = one PR.** Shared branches are not permitted.
-2. Never start an issue with unresolved `blocked_by` relations — `/implement` blocks this automatically.
-3. Always branch from `development` — `/implement` enforces this.
-4. Commits must **not** include co-author lines or AI attribution (see CLAUDE.md).
+Full contract: [`docs/openapi.md`](docs/openapi.md) and [`docs/openapi.json`](docs/openapi.json) (regenerated via `make openapi-snapshot`).
 
 ---
 
-### Phase 3: Saving Progress and Resuming
+## Database & Migrations
 
+PostgreSQL 16 via SQLAlchemy. Alembic at `alembic/` with 10 versioned migrations (`alembic/versions/`).
+
+```bash
+make migrate          # alembic upgrade head
+make infra-up         # start Postgres if not running
 ```
-/checkpoint
-```
-
-Captures git state, current ticket context, what you've done, and what's remaining. Writes a checkpoint file to `~/.linear-sdlc/projects/{slug}/checkpoints/`.
-
-In a new session, resume:
-
-```
-/checkpoint resume
-```
-
-Loads the latest checkpoint, shows where you left off, offers to switch to the right branch and continue.
 
 ---
 
-### Phase 4: Code Health Monitoring
+## Testing
 
+```bash
+make test             # pytest — unit + integration
+make test-cov         # with coverage report
 ```
-/health
-```
 
-Auto-detects your project's quality tools (pytest, ruff, mypy, etc.), runs each one, and computes a weighted composite score:
+Test layout:
 
-- **Tests** (30%) — pass rate and coverage
-- **Lint** (25%) — errors and warnings
-- **Type checking** (25%) — type errors
-- **Dead code** (20%) — unused code findings
-
-Displays a dashboard with per-tool scores, composite score, trend vs previous run, and top 3 actionable recommendations.
+| Directory | Contents |
+|-----------|----------|
+| `tests/unit/` | Routes, services, tools, pipeline runner, guardrails, rate-limit, sanitization, diff engine, watchdog |
+| `tests/integration/` | SAM mesh smoke, halt conditions, PG-backed watchdog |
+| `tests/eval/` | Eval harness (`eval_runner.py`, fixture cases) |
 
 ---
 
-### Troubleshooting
+## Contract Checks
 
-| Symptom | Likely cause | Fix |
-|---------|-------------|-----|
-| Skills not appearing in Claude Code | linear-sdlc not installed or not symlinked | Re-run `cd ~/.claude/skills/linear-sdlc && ./setup` |
-| "List my Linear teams" returns nothing | MCP server not loaded or wrong API key | Restart Claude Code; check `~/.claude/settings.json` for `mcpServers.linear` |
-| `/implement` fails to create branch | Working tree dirty or wrong base branch | Stash/commit changes; checkout `development` first |
-| PR not auto-linked in Linear | Branch name missing issue ID | `/implement` creates the right format; if you branched manually, ensure `feat/ver-XX-*` |
-| Issue auto-closed before frontend PR merges | Cross-repo issue not using sub-issues | Use `/create-tickets` which creates parent + sub-issue per repo |
-| Specialist review hangs | Sub-agent timeout | Re-run `/implement` and skip specialist review temporarily |
+The backend commits `docs/openapi.json` as the canonical API contract. The frontend lints its API client against this snapshot.
+
+```bash
+make openapi-snapshot   # regenerate docs/openapi.json from the FastAPI app
+make openapi-check      # fail CI if docs/openapi.json is out of sync
+make smoke-contract     # hit every frontend-used endpoint against a running API
+```
 
 ---
 
-## Branch Naming
+## Deployment
 
-All feature branches include the Linear issue ID:
+| Artifact | Location |
+|----------|----------|
+| Container image | `Dockerfile` (multi-stage Python 3.12 slim; WeasyPrint libs included) |
+| Local infra | `docker-compose.infra.yml` (Postgres 16, Redis 7, Solace PubSub+) |
+| Kubernetes | `k8s/base/` — one Deployment per agent, plus gateway, aggregator, and API; HPA, ingress, Solace HA, bootstrap Job, stuck-case CronJob |
+| Overlays | `k8s/overlays/staging/` and `k8s/overlays/production/` (kustomize) |
 
-```
-feat/<issue-id>-<short-description>
-
-Examples:
-  feat/ver-123-add-user-search
-  feat/ver-456-fix-auth-token-expiry
-  feat/ver-789-refactor-agent-pipeline
-```
-
-The `/implement` skill creates this automatically when you start a ticket. The issue ID enables Linear's GitHub integration to auto-link PRs.
+Infrastructure setup: [`docs/architecture/08-infrastructure-setup.md`](docs/architecture/08-infrastructure-setup.md).
+Solace HA runbook: [`docs/operations/solace-ha-runbook.md`](docs/operations/solace-ha-runbook.md).
 
 ---
 
-## PR Template
+## Further Reading
 
-All PRs follow the template defined in `CLAUDE.md`. Key points:
+- [`docs/architecture/README.md`](docs/architecture/README.md) — index of all 9 architecture docs (user stories, system architecture, agent configs, tech stack, diagrams, CI/CD, contestable judgment mode, infra setup, local dev)
+- [`docs/operations/uat-runbook.md`](docs/operations/uat-runbook.md) — manual UAT procedure
+- [`CLAUDE.md`](CLAUDE.md) — gitflow, branching rules, PR template, versioning, and commit conventions
 
-- Title: `<type>(<scope>): <short description>` under 70 characters
-- Target branch: `development` for feature branches
-- No co-author lines or AI attribution in commits or PR bodies
-- Run tests before opening a PR
+---
+
+## Contributing
+
+Feature branches from `development`, PR back into `development`. Rules, PR template, and versioning conventions are in `CLAUDE.md`. This repo uses the [`linear-sdlc`](https://github.com/douglasswm/linear-sdlc) Claude Code skill suite for ticket-driven work — see `CLAUDE.md` for setup.

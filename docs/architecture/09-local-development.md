@@ -44,7 +44,7 @@ Copy this to `.env` and fill in real values:
 # ──────────────────────────────────────────────
 # Solace Event Broker (local Docker container)
 # ──────────────────────────────────────────────
-SOLACE_BROKER_URL=tcp://localhost:55555
+SOLACE_BROKER_URL=tcp://localhost:55556
 SOLACE_BROKER_VPN=default
 SOLACE_BROKER_USERNAME=admin
 SOLACE_BROKER_PASSWORD=admin
@@ -82,7 +82,7 @@ OPENAI_MODEL_FRONTIER_REASONING=gpt-5.4
 # ──────────────────────────────────────────────
 NAMESPACE=verdictcouncil
 FASTAPI_HOST=0.0.0.0
-FASTAPI_PORT=8000
+FASTAPI_PORT=8001
 LOG_LEVEL=DEBUG
 JWT_SECRET=dev-secret-do-not-use-in-production
 PRECEDENT_CACHE_TTL_SECONDS=86400
@@ -148,7 +148,7 @@ services:
     image: solace/solace-pubsub-standard:latest
     container_name: vc-solace
     ports:
-      - "55555:55555"   # SMF (Solace Message Format)
+      - "55556:55555"   # SMF (Solace Message Format)
       - "8080:8080"     # SEMP Management API
       - "1883:1883"     # MQTT
       - "5672:5672"     # AMQP
@@ -338,7 +338,7 @@ services:
     image: solace/solace-pubsub-standard:latest
     container_name: vc-solace
     ports:
-      - "55555:55555"
+      - "55556:55555"
       - "8080:8080"
       - "1883:1883"
       - "5672:5672"
@@ -380,7 +380,7 @@ services:
     container_name: vc-web-gateway
     command: ["--config", "/app/configs/gateway/web-gateway.yaml"]
     ports:
-      - "8000:8000"
+      - "8002:8002"
     env_file: .env
     environment:
       SOLACE_BROKER_URL: tcp://solace:55555
@@ -913,9 +913,9 @@ docker compose -f docker-compose.infra.yml ps
 # Check what's using a port
 lsof -i :5432   # PostgreSQL
 lsof -i :6379   # Redis
-lsof -i :55555  # Solace SMF
+lsof -i :55556  # Solace SMF
 lsof -i :8080   # Solace SEMP (also used by many dev tools)
-lsof -i :8000   # Web Gateway
+lsof -i :8002   # Web Gateway
 
 # If 8080 is taken by another service, remap Solace SEMP:
 # In docker-compose: "8081:8080" instead of "8080:8080"
@@ -928,7 +928,7 @@ lsof -i :8000   # Web Gateway
 curl -s http://localhost:5550/health-check/guaranteed-active
 
 # Check that .env has correct SOLACE_BROKER_URL
-# For hybrid mode (agents on host): tcp://localhost:55555
+# For hybrid mode (agents on host): tcp://localhost:55556
 # For Docker mode (agents in containers): tcp://solace:55555
 ```
 
@@ -979,15 +979,15 @@ cp .env.example .env
 make infra-up
 
 # 4. Set up Python
-make venv
+make install
 source .venv/bin/activate
 make migrate
 
 # 5. Start all agents
-make agents
+make dev
 
 # 6. Open the web gateway
-open http://localhost:8000/health
+open http://localhost:8002/health
 # → {"status": "ok"}
 
 # 7. Open Solace management console

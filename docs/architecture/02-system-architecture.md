@@ -439,7 +439,7 @@ The Layer2Aggregator runs as an additional pod in the DOKS cluster (or container
 |---|---|---|---|
 | Layer2Aggregator | vc-layer2-aggregator | 8090 (health) | registry.digitalocean.com/verdictcouncil/layer2-aggregator |
 
-This brings the total DOKS deployment to: **9 agent pods + 1 gateway + 1 What-If Controller + 1 Layer2Aggregator + 1 Solace broker = 13 pods**. PostgreSQL and Redis run as DigitalOcean Managed Services outside the cluster, accessed via private VPC networking.
+This brings the total DOKS deployment to: **9 agent pods + 1 gateway + 1 API service (what-if controller runs in-process) + 1 Layer2Aggregator + 1 Solace broker = 13 pods**. PostgreSQL and Redis run as DigitalOcean Managed Services outside the cluster, accessed via private VPC networking.
 
 ---
 
