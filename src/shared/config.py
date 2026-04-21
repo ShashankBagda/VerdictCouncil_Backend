@@ -30,9 +30,9 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     smtp_from_address: str = "no-reply@verdictcouncil.local"
 
-    # Local persistence for KB/admin runtime data.
-    knowledge_base_storage_dir: str = "data/knowledge_base"
-    admin_storage_dir: str = "data/admin"
+    # Per-judge knowledge base upload limits (bytes). 25MB default keeps us
+    # under the 50MB ingress limit in k8s/base/ingress.yaml.
+    kb_max_upload_bytes: int = 26214400
 
     def model_post_init(self, __context: object) -> None:
         import warnings

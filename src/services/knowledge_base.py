@@ -1,10 +1,12 @@
 """Per-judge knowledge base service using OpenAI Vector Stores."""
 
-import contextlib
 import logging
 
 from openai import AsyncOpenAI
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.models.user import User
 from src.shared.config import settings
 
 logger = logging.getLogger(__name__)
@@ -28,6 +30,34 @@ async def create_judge_vector_store(judge_id: str) -> str:
     )
     logger.info("Created vector store %s for judge %s", store.id, judge_id)
     return store.id
+
+
+async def ensure_judge_vector_store(db: AsyncSession, user: User) -> tuple[str, bool]:
+    """Return ``(store_id, created)`` for the judge, provisioning one if missing.
+
+    Takes a row-level lock on the user and re-reads state from the DB
+    (``populate_existing=True``) so a second concurrent request sees the store
+    created by the first — otherwise SQLAlchemy's identity map returns the
+    stale in-memory ``User`` and the race window stays open.
+    """
+    locked = (
+        await db.execute(
+            select(User)
+            .where(User.id == user.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
+    if locked is None:
+        raise LookupError(f"User {user.id} not found while locking for KB init")
+
+    if locked.knowledge_base_vector_store_id:
+        return locked.knowledge_base_vector_store_id, False
+
+    store_id = await create_judge_vector_store(str(locked.id))
+    locked.knowledge_base_vector_store_id = store_id
+    await db.flush()
+    return store_id, True
 
 
 async def upload_document_to_kb(vector_store_id: str, file_bytes: bytes, filename: str) -> dict:
@@ -79,43 +109,40 @@ async def search_kb(vector_store_id: str, query: str, max_results: int = 5) -> l
 
 
 async def list_kb_files(vector_store_id: str) -> list[dict]:
-    """List all files in a judge's vector store."""
+    """List all files in a judge's vector store.
+
+    Iterates every page from the OpenAI paginator — a naked ``await`` only
+    returns the first page (default 20), which would silently truncate larger
+    KBs. Propagates any OpenAI failure so the route layer can surface a 503
+    rather than returning degraded rows with fabricated filenames.
+    """
     client = _get_client()
 
-    vs_files = await client.vector_stores.files.list(vector_store_id=vector_store_id)
-
-    result = []
-    for vs_file in vs_files.data:
-        # Get file metadata
-        try:
-            file_obj = await client.files.retrieve(vs_file.id)
-            result.append(
-                {
-                    "file_id": vs_file.id,
-                    "filename": file_obj.filename,
-                    "status": vs_file.status,
-                    "bytes": file_obj.bytes,
-                    "created_at": file_obj.created_at,
-                }
-            )
-        except Exception:
-            result.append(
-                {
-                    "file_id": vs_file.id,
-                    "filename": "unknown",
-                    "status": vs_file.status,
-                }
-            )
-
+    result: list[dict] = []
+    async for vs_file in await client.vector_stores.files.list(vector_store_id=vector_store_id):
+        file_obj = await client.files.retrieve(vs_file.id)
+        result.append(
+            {
+                "file_id": vs_file.id,
+                "filename": file_obj.filename,
+                "status": vs_file.status,
+                "bytes": file_obj.bytes,
+                "created_at": file_obj.created_at,
+            }
+        )
     return result
 
 
 async def delete_kb_file(vector_store_id: str, file_id: str) -> bool:
-    """Delete a file from a judge's vector store."""
+    """Delete a file from a judge's vector store.
+
+    Both the vector-store association and the raw file are removed. Any
+    failure in either step propagates so the caller can retry — silently
+    swallowing a ``files.delete`` error would leave an orphan file consuming
+    OpenAI quota while the API reports success.
+    """
     client = _get_client()
     await client.vector_stores.files.delete(vector_store_id=vector_store_id, file_id=file_id)
-    # File may already be deleted — ignore failures here
-    with contextlib.suppress(Exception):
-        await client.files.delete(file_id)
+    await client.files.delete(file_id)
     logger.info("Deleted file %s from vector store %s", file_id, vector_store_id)
     return True

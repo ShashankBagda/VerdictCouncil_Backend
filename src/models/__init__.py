@@ -1,3 +1,4 @@
+from src.models.admin_event import AdminEvent
 from src.models.audit import AuditLog
 from src.models.base import Base
 from src.models.case import (
@@ -15,6 +16,7 @@ from src.models.case import (
     Verdict,
     Witness,
 )
+from src.models.system_config import SystemConfig
 from src.models.user import PasswordResetToken, Session, User
 
 __all__ = [
@@ -36,4 +38,6 @@ __all__ = [
     "Verdict",
     "ReopenRequest",
     "AuditLog",
+    "AdminEvent",
+    "SystemConfig",
 ]
