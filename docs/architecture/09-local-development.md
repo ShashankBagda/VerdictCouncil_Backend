@@ -213,35 +213,35 @@ source .venv/bin/activate
 set -a && source .env && set +a
 
 # Terminal 1: Web Gateway
-python -m solace_agent_mesh.main --config configs/agents/web-gateway.yaml
+solace-agent-mesh run configs/gateway/web-gateway.yaml
 
 # Terminal 2: Case Processing
-python -m solace_agent_mesh.main --config configs/agents/case-processing.yaml
+solace-agent-mesh run configs/agents/case-processing.yaml
 
 # Terminal 3: Complexity Routing
-python -m solace_agent_mesh.main --config configs/agents/complexity-routing.yaml
+solace-agent-mesh run configs/agents/complexity-routing.yaml
 
-# ... and so on for all 9 agents + layer2-aggregator + whatif-controller
+# ... and so on for all 9 agents + layer2-aggregator + FastAPI API
 ```
 
 ### 9.3.5 Process Manager (Recommended)
 
-Running 12 agents in separate terminals is unwieldy. Use a `Procfile` with a process manager like [honcho](https://github.com/nickstenning/honcho) or [overmind](https://github.com/DarthSim/overmind):
+Running 12 backend processes in separate terminals is unwieldy. Use a `Procfile` with a process manager like [honcho](https://github.com/nickstenning/honcho) or [overmind](https://github.com/DarthSim/overmind):
 
 ```procfile
 # Procfile.dev
-web-gateway:          python -m solace_agent_mesh.main --config configs/agents/web-gateway.yaml
-case-processing:      python -m solace_agent_mesh.main --config configs/agents/case-processing.yaml
-complexity-routing:   python -m solace_agent_mesh.main --config configs/agents/complexity-routing.yaml
-evidence-analysis:    python -m solace_agent_mesh.main --config configs/agents/evidence-analysis.yaml
-fact-reconstruction:  python -m solace_agent_mesh.main --config configs/agents/fact-reconstruction.yaml
-witness-analysis:     python -m solace_agent_mesh.main --config configs/agents/witness-analysis.yaml
-legal-knowledge:      python -m solace_agent_mesh.main --config configs/agents/legal-knowledge.yaml
-argument-construction: python -m solace_agent_mesh.main --config configs/agents/argument-construction.yaml
-deliberation:         python -m solace_agent_mesh.main --config configs/agents/deliberation.yaml
-governance-verdict:   python -m solace_agent_mesh.main --config configs/agents/governance-verdict.yaml
-layer2-aggregator:    python -m solace_agent_mesh.main --config configs/services/layer2-aggregator.yaml
-whatif-controller:    python -m solace_agent_mesh.main --config configs/services/whatif-controller.yaml
+web-gateway:          .venv/bin/solace-agent-mesh run configs/gateway/web-gateway.yaml
+case-processing:      .venv/bin/solace-agent-mesh run configs/agents/case-processing.yaml
+complexity-routing:   .venv/bin/solace-agent-mesh run configs/agents/complexity-routing.yaml
+evidence-analysis:    .venv/bin/solace-agent-mesh run configs/agents/evidence-analysis.yaml
+fact-reconstruction:  .venv/bin/solace-agent-mesh run configs/agents/fact-reconstruction.yaml
+witness-analysis:     .venv/bin/solace-agent-mesh run configs/agents/witness-analysis.yaml
+legal-knowledge:      .venv/bin/solace-agent-mesh run configs/agents/legal-knowledge.yaml
+argument-construction: .venv/bin/solace-agent-mesh run configs/agents/argument-construction.yaml
+deliberation:         .venv/bin/solace-agent-mesh run configs/agents/deliberation.yaml
+governance-verdict:   .venv/bin/solace-agent-mesh run configs/agents/governance-verdict.yaml
+layer2-aggregator:    .venv/bin/solace-agent-mesh run configs/services/layer2-aggregator.yaml
+api:                  .venv/bin/uvicorn src.api.app:app --host 0.0.0.0 --port 8001 --reload
 ```
 
 ```bash
@@ -257,6 +257,10 @@ overmind start -f Procfile.dev
 overmind restart case-processing
 ```
 
+The what-if controller remains an API-internal capability implemented under
+`src.services.whatif_controller.controller`; local development does not start it
+as a separate process.
+
 ### 9.3.6 Developing a Single Agent
 
 When working on a specific agent, you only need that agent and its upstream dependencies running:
@@ -271,7 +275,7 @@ docker compose -f docker-compose.infra.yml up -d
 
 # Start only the agent you're developing
 source .venv/bin/activate && set -a && source .env && set +a
-python -m solace_agent_mesh.main --config configs/agents/legal-knowledge.yaml
+solace-agent-mesh run configs/agents/legal-knowledge.yaml
 ```
 
 To test in isolation, publish a mock CaseState directly to the agent's input topic using the Solace SEMP API or a test script:
@@ -485,18 +489,6 @@ services:
       redis:
         condition: service_healthy
 
-  whatif-controller:
-    build: .
-    container_name: vc-whatif-controller
-    command: ["--config", "/app/configs/services/whatif-controller.yaml"]
-    env_file: .env
-    environment: *agent-env
-    depends_on:
-      solace:
-        condition: service_healthy
-      migrations:
-        condition: service_completed_successfully
-
 volumes:
   postgres_data:
   redis_data:
@@ -589,7 +581,7 @@ AGENTS=(
   web-gateway case-processing complexity-routing
   evidence-analysis fact-reconstruction witness-analysis
   legal-knowledge argument-construction deliberation
-  governance-verdict layer2-aggregator whatif-controller
+  governance-verdict layer2-aggregator
 )
 
 for agent in "${AGENTS[@]}"; do
@@ -800,7 +792,7 @@ kind-up: ## Create kind cluster and load images
 	@for agent in web-gateway case-processing complexity-routing \
 		evidence-analysis fact-reconstruction witness-analysis \
 		legal-knowledge argument-construction deliberation \
-		governance-verdict layer2-aggregator whatif-controller; do \
+		governance-verdict layer2-aggregator; do \
 		docker build -t verdictcouncil/$${agent}:local -f docker/$${agent}/Dockerfile . && \
 		kind load docker-image verdictcouncil/$${agent}:local --name vc-local; \
 	done
@@ -962,7 +954,7 @@ docker compose -f docker-compose.infra.yml up -d postgres
 docker stats --no-stream
 
 # If running out of memory, stop non-essential agents:
-docker compose stop witness-analysis whatif-controller
+docker compose stop witness-analysis
 
 # Or reduce Solace memory in compose file:
 # environment:

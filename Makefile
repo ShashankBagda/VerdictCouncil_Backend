@@ -1,4 +1,4 @@
-.PHONY: install lint typecheck test migrate infra-up infra-down dev clean openapi-snapshot openapi-check smoke-contract
+.PHONY: install lint typecheck test migrate infra-up infra-down solace-bootstrap dev clean openapi-snapshot openapi-check smoke-contract
 
 install: ## Install dependencies
 	python3.12 -m venv .venv
@@ -30,6 +30,10 @@ infra-up: ## Start local infrastructure (PostgreSQL, Redis, Solace)
 
 infra-down: ## Stop local infrastructure
 	docker compose -f docker-compose.infra.yml down
+
+solace-bootstrap: ## Provision the verdictcouncil VPN + vc-agent user on the local broker
+	@set -a; [ -f .env ] && . ./.env; set +a; \
+	./scripts/solace-bootstrap.sh
 
 dev: ## Start all agents via honcho (hybrid mode)
 	.venv/bin/honcho -f Procfile.dev start

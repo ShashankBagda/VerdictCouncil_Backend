@@ -1,13 +1,12 @@
-web-gateway:          python -m solace_agent_mesh.cli.main --config configs/gateway/web-gateway.yaml
-case-processing:      python -m solace_agent_mesh.cli.main --config configs/agents/case-processing.yaml
-complexity-routing:   python -m solace_agent_mesh.cli.main --config configs/agents/complexity-routing.yaml
-evidence-analysis:    python -m solace_agent_mesh.cli.main --config configs/agents/evidence-analysis.yaml
-fact-reconstruction:  python -m solace_agent_mesh.cli.main --config configs/agents/fact-reconstruction.yaml
-witness-analysis:     python -m solace_agent_mesh.cli.main --config configs/agents/witness-analysis.yaml
-legal-knowledge:      python -m solace_agent_mesh.cli.main --config configs/agents/legal-knowledge.yaml
-argument-construction: python -m solace_agent_mesh.cli.main --config configs/agents/argument-construction.yaml
-deliberation:         python -m solace_agent_mesh.cli.main --config configs/agents/deliberation.yaml
-governance-verdict:   python -m solace_agent_mesh.cli.main --config configs/agents/governance-verdict.yaml
-# EPIC-6-BLOCKED: solace_agent_mesh.services.aggregator.app does not exist in v1.4.7; not built yet
-# layer2-aggregator:    python -m solace_agent_mesh.cli.main --config configs/services/layer2-aggregator.yaml
-api:                  uvicorn src.api.app:app --host 0.0.0.0 --port 8001 --reload
+web-gateway:          .venv/bin/solace-agent-mesh run configs/gateway/web-gateway.yaml
+case-processing:      .venv/bin/solace-agent-mesh run configs/agents/case-processing.yaml
+complexity-routing:   .venv/bin/solace-agent-mesh run configs/agents/complexity-routing.yaml
+evidence-analysis:    .venv/bin/solace-agent-mesh run configs/agents/evidence-analysis.yaml
+fact-reconstruction:  .venv/bin/solace-agent-mesh run configs/agents/fact-reconstruction.yaml
+witness-analysis:     .venv/bin/solace-agent-mesh run configs/agents/witness-analysis.yaml
+legal-knowledge:      .venv/bin/solace-agent-mesh run configs/agents/legal-knowledge.yaml
+argument-construction: .venv/bin/solace-agent-mesh run configs/agents/argument-construction.yaml
+deliberation:         .venv/bin/solace-agent-mesh run configs/agents/deliberation.yaml
+governance-verdict:   .venv/bin/solace-agent-mesh run configs/agents/governance-verdict.yaml
+layer2-aggregator:    .venv/bin/solace-agent-mesh run configs/services/layer2-aggregator.yaml
+api:                  .venv/bin/uvicorn src.api.app:app --host 0.0.0.0 --port 8001 --reload
