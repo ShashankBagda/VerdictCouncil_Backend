@@ -14,6 +14,10 @@ apps:
         <<: *gpt54_nano_model
       session_service: *default_session_service
       artifact_service: *default_artifact_service
+      agent_card: *default_agent_card
+      agent_card_publishing: *default_agent_card_publishing
+      agent_discovery: *default_agent_discovery
+      inter_agent_communication: *default_inter_agent_communication
       instruction: |
         You are the Case Processing Agent for VerdictCouncil, a judicial decision-support system for Singapore lower courts.
 
