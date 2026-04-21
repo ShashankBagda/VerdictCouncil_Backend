@@ -12,6 +12,8 @@ apps:
       display_name: "Argument Construction Agent"
       model:
         <<: *gpt54_model
+      session_service: *default_session_service
+      artifact_service: *default_artifact_service
       instruction: |
         You are the Argument Construction Agent for VerdictCouncil. You serve the JUDGE, not either party. All output is INTERNAL.
 
