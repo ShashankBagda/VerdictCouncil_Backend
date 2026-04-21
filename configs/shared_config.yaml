@@ -52,3 +52,22 @@ session_service: &default_session_service
 artifact_service: &default_artifact_service
   type: filesystem
   base_path: /tmp/verdictcouncil
+
+# ──────────────────────────────────────────────
+# Agent Discovery & Card Defaults
+# ──────────────────────────────────────────────
+
+agent_card: &default_agent_card
+  defaultInputModes: ["text"]
+  defaultOutputModes: ["text"]
+  skills: []
+
+agent_card_publishing: &default_agent_card_publishing
+  interval_seconds: 10
+
+agent_discovery: &default_agent_discovery
+  enabled: false
+
+inter_agent_communication: &default_inter_agent_communication
+  allow_list: ["*"]
+  request_timeout_seconds: 30
