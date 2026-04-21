@@ -602,42 +602,46 @@ VerdictCouncil uses a multi-model strategy, assigning each agent to the OpenAI m
 
 ### 5.2 Model Tiers
 
-| Model | Type | Best For | API Pricing (per 1M tokens in/out) | Context |
-|---|---|---|---|---|
-| **o3** | Reasoning | Deep multi-step reasoning, complex legal analysis, argument synthesis, judicial deliberation. Thinks before responding. | $10 / $40 | 200K |
-| **o4-mini** | Reasoning | Fast, cost-efficient reasoning. Strong on structured analysis, evidence assessment, credibility scoring. | $1.10 / $4.40 | 200K |
-| **gpt-4.1** | Execution | Long-context execution, document parsing, tool orchestration, structured extraction. Excellent instruction following. | $2 / $8 | 1M |
-| **gpt-4.1-mini** | Execution | Fast, cheap structured extraction and classification. Minimal reasoning needed. | $0.40 / $1.60 | 1M |
+VerdictCouncil resolves model names at runtime through environment variables; the canonical binding lives in `configs/shared_config.yaml` (YAML anchors `gpt54_nano_model`, `gpt5_mini_model`, `gpt5_model`, `gpt54_model`) and the matching defaults in `src/shared/config.py` (`openai_model_lightweight`, `openai_model_efficient_reasoning`, `openai_model_strong_reasoning`, `openai_model_frontier_reasoning`). See **[Part 4: Tech Stack §4.3](./architecture/04-tech-stack.md)** for the authoritative tier table.
 
-> **KEY PRINCIPLE:** Use o-series models (o3, o4-mini) for agents that need to **THINK** (deliberation, argument construction, fairness audit). Use GPT-4.1 series for agents that need to **EXECUTE** (document parsing, extraction, tool calling, structured output).
+| Tier alias (anchor) | Default model | Best For |
+|---|---|---|
+| `gpt54_nano_model` | `gpt-5.4-nano` | Structured extraction, jurisdiction checks, low-complexity routing |
+| `gpt5_mini_model` | `gpt-5-mini` | Moderate reasoning with tool calls (e.g. witness credibility scoring) |
+| `gpt5_model` | `gpt-5` | Long-context analysis over evidence, facts, and precedent retrieval |
+| `gpt54_model` | `gpt-5.4` | Adversarial argument construction, judicial deliberation, fairness audit |
+
+> **KEY PRINCIPLE:** reserve the frontier `gpt-5.4` tier for agents that must reason deeply (deliberation, argument construction, fairness audit). Use `gpt-5.4-nano` / `gpt-5-mini` for agents whose job is primarily extraction or structured decision-making.
 
 ### 5.3 Agent-to-Model Assignment
 
-| Agent | Model | Mode | Rationale | Est. Cost ($) |
-|---|---|---|---|---|
-| **1. Case Processing** | `gpt-4.1-mini` | Execution | Structured extraction + deterministic rules. No deep reasoning needed. Cheapest model. | 0.10 |
-| **2. Complexity & Routing** | `o4-mini` | Reasoning | Must assess legal novelty and decide routing. Requires judgment. Low token volume. | 0.10 |
-| **3. Evidence Analysis** | `gpt-4.1` | Execution + Tools | Heavy tool usage. Needs long context for large evidence bundles. 1M context + strong tool calling. | 0.30 |
-| **4. Fact Reconstruction** | `gpt-4.1` | Execution + Tools | Document parsing + timeline construction. Benefits from long context for cross-referencing. | 0.20 |
-| **5. Witness Analysis** | `o4-mini` | Reasoning + Tools | Credibility assessment requires genuine reasoning. o4-mini balances quality with cost. | 0.20 |
-| **6. Legal Knowledge** | `gpt-4.1` | Execution + Tools | Primarily tool-driven: file_search against vector stores. Strong instruction following for structured output. | 0.30 |
-| **7. Argument Construction** | `o3` | Deep Reasoning | Most reasoning-intensive after Deliberation. Must construct adversarial arguments and identify weaknesses. | 0.50 |
-| **8. Deliberation** | `o3` | Deep Reasoning | The judicial reasoning brain. Highest-stakes reasoning task. o3 is essential here. | 0.50 |
-| **9. Governance & Verdict** | `o3` | Deep Reasoning | Fairness audit requires detecting subtle biases and logical fallacies. Critical final checkpoint. | 0.40 |
+The agent-to-tier mapping below mirrors the assignments configured in `configs/agents/*.yaml` via the shared-config anchors.
 
-**Estimated cost per case:** ~$2.10–$2.60 USD (assuming 10–15 documents, standard complexity). The o3 usage on Agents 7, 8, and 9 accounts for ~65% of total cost — appropriate since these are the highest-value reasoning tasks.
+| Agent | Tier alias | Default model | Mode | Rationale |
+|---|---|---|---|---|
+| **1. Case Processing** | `gpt54_nano_model` | `gpt-5.4-nano` | Execution | Structured extraction + deterministic rules. Minimal reasoning. |
+| **2. Complexity & Routing** | `gpt54_nano_model` | `gpt-5.4-nano` | Execution | Low-token triage decision over structured case metadata. |
+| **3. Evidence Analysis** | `gpt5_model` | `gpt-5` | Execution + Tools | Long-context pass over evidence bundles; tool-heavy. |
+| **4. Fact Reconstruction** | `gpt5_model` | `gpt-5` | Execution + Tools | Cross-document timeline construction; benefits from long context. |
+| **5. Witness Analysis** | `gpt5_mini_model` | `gpt-5-mini` | Reasoning + Tools | Credibility assessment needs genuine reasoning at moderate cost. |
+| **6. Legal Knowledge** | `gpt5_model` | `gpt-5` | Execution + Tools | Primarily tool-driven: `file_search` + PAIR precedent API. |
+| **7. Argument Construction** | `gpt54_model` | `gpt-5.4` | Deep Reasoning | Constructs adversarial arguments and identifies weaknesses. |
+| **8. Deliberation** | `gpt54_model` | `gpt-5.4` | Deep Reasoning | The judicial reasoning chain — highest-stakes step. |
+| **9. Governance & Verdict** | `gpt54_model` | `gpt-5.4` | Deep Reasoning | Fairness audit must detect subtle biases and logical fallacies. |
+
+**Cost note:** actual $-per-case is a function of volumetrics (documents, precedents, fairness-audit passes) and current OpenAI pricing. See `tests/eval/` for the cost-tracking harness rather than relying on estimates embedded here.
 
 ### 5.4 Reasoning Effort Configuration
 
-OpenAI's o-series models support a `reasoning_effort` parameter (`low`, `medium`, `high`) that controls thinking time.
+Where the selected model supports a `reasoning_effort` parameter, we bias as follows:
 
-| Agent | Model | Effort | Rationale |
+| Agent | Tier | Effort | Rationale |
 |---|---|---|---|
-| 2. Complexity & Routing | o4-mini | `low` | Simple triage decision. |
-| 5. Witness Analysis | o4-mini | `medium` | Credibility assessment benefits from moderate thinking. |
-| 7. Argument Construction | o3 | `high` | Must thoroughly explore both sides' strongest arguments. |
-| 8. Deliberation | o3 | `high` | Core reasoning chain. Maximum thinking time for thorough analysis. |
-| 9. Governance & Verdict | o3 | `medium` | Fairness audit needs solid reasoning; verdict follows structured format. |
+| 2. Complexity & Routing | `gpt-5.4-nano` | `low` | Simple triage decision. |
+| 5. Witness Analysis | `gpt-5-mini` | `medium` | Credibility assessment benefits from moderate thinking. |
+| 7. Argument Construction | `gpt-5.4` | `high` | Must thoroughly explore both sides' strongest arguments. |
+| 8. Deliberation | `gpt-5.4` | `high` | Core reasoning chain; maximum thinking time for thorough analysis. |
+| 9. Governance & Verdict | `gpt-5.4` | `medium` | Fairness audit needs solid reasoning; verdict follows a structured format. |
 
 ---
 
@@ -736,7 +740,7 @@ client.vector_stores.files.create(
 ```python
 # Legal Knowledge Agent's RAG call via Responses API
 response = client.responses.create(
-    model='gpt-4.1',
+    model='gpt-5',
     input=[{
         'role': 'user',
         'content': f'Find relevant statutes and precedents for: {query}'
@@ -997,7 +1001,7 @@ Each SAM agent wraps an OpenAI Responses API call:
 ```python
 def handle_message(self, case_state: dict) -> dict:
     response = openai_client.responses.create(
-        model=self.config['model'],              # e.g., 'o3'
+        model=self.config['model'],              # e.g., 'gpt-5.4'
         instructions=self.config['system_prompt'],
         input=[{
             'role': 'user',
@@ -1020,15 +1024,15 @@ def handle_message(self, case_state: dict) -> dict:
 
 | Agent | Model | Custom Tools | Built-in Tools | Effort | Event Topic Flow |
 |---|---|---|---|---|---|
-| **1. Case Processing** | gpt-4.1-mini | parse_document | — | N/A | intake → complexity |
-| **2. Complexity & Routing** | o4-mini | — | — | low | complexity → evidence |
-| **3. Evidence Analysis** | gpt-4.1 | parse_document, cross_reference | — | N/A | evidence → facts |
-| **4. Fact Reconstruction** | gpt-4.1 | timeline_construct, cross_reference | — | N/A | facts → witnesses |
-| **5. Witness Analysis** | o4-mini | cross_reference, generate_questions | — | medium | witnesses → legal |
-| **6. Legal Knowledge** | gpt-4.1 | — | file_search (vs_sct / vs_traffic) | N/A | legal → arguments |
-| **7. Argument Construction** | o3 | generate_questions | — | high | arguments → deliberation |
-| **8. Deliberation** | o3 | — | — | high | deliberation → governance |
-| **9. Governance & Verdict** | o3 | confidence_calc | — | medium | verdict → judge_ui |
+| **1. Case Processing** | gpt-5.4-nano | parse_document | — | N/A | intake → complexity |
+| **2. Complexity & Routing** | gpt-5.4-nano | — | — | low | complexity → evidence |
+| **3. Evidence Analysis** | gpt-5 | parse_document, cross_reference | — | N/A | evidence → facts |
+| **4. Fact Reconstruction** | gpt-5 | timeline_construct, cross_reference | — | N/A | facts → witnesses |
+| **5. Witness Analysis** | gpt-5-mini | cross_reference, generate_questions | — | medium | witnesses → legal |
+| **6. Legal Knowledge** | gpt-5 | — | file_search (vs_sct / vs_traffic) | N/A | legal → arguments |
+| **7. Argument Construction** | gpt-5.4 | generate_questions | — | high | arguments → deliberation |
+| **8. Deliberation** | gpt-5.4 | — | — | high | deliberation → governance |
+| **9. Governance & Verdict** | gpt-5.4 | confidence_calc | — | medium | verdict → judge_ui |
 
 ### 8.3 SAM Topic Hierarchy
 
@@ -1052,8 +1056,8 @@ verdictcouncil/
 
 ### 8.4 Cost Optimization Notes
 
-- **Prompt caching:** OpenAI caches repeated input tokens. Since system prompts are identical across calls for each agent, subsequent cases benefit from 75% discount on cached input tokens for o3/o4-mini.
+- **Prompt caching:** OpenAI caches repeated input tokens. System prompts are identical across calls for a given agent, so repeat cases benefit from the cached-input discount on the `gpt-5` / `gpt-5.4` tiers.
 - **Structured outputs:** Agents 1, 3, 4, and 6 use `response_format: { type: 'json_schema', ... }` to enforce structured output, reducing retry costs from malformed responses.
 - **Context window management:** Only relevant CaseState fields are passed to each agent (not the entire state), minimizing input token consumption.
 - **Vector Store costs:** At ~300 legal documents totaling ~50MB, storage costs are approximately $0.005/day. Search calls at $2.50/1000 are negligible at project scale.
-- **Model fallback:** If o3 quota is exhausted, Agents 7 and 9 can fall back to `o4-mini` with `reasoning_effort: 'high'` at ~75% cost reduction with acceptable quality for low-complexity cases.
+- **Model fallback:** If the `gpt-5.4` tier is unavailable, Agents 7, 8, and 9 fall back to `gpt-5` with `reasoning_effort: 'high'` — acceptable for low-complexity cases at reduced cost. The fallback is controlled by `OPENAI_MODEL_FRONTIER_REASONING` / `OPENAI_MODEL_STRONG_REASONING` env vars resolved in `configs/shared_config.yaml`.
