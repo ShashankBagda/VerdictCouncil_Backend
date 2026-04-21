@@ -67,7 +67,7 @@ class Settings(BaseSettings):
     openai_model_strong_reasoning: str = "gpt-5"
     openai_model_frontier_reasoning: str = "gpt-5.4"
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
 
 settings = Settings()
