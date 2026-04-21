@@ -10,11 +10,14 @@ apps:
       namespace: ${NAMESPACE}
       agent_name: fact-reconstruction
       display_name: "Fact Reconstruction Agent"
+      supports_streaming: true
       model:
         <<: *gpt5_model
       session_service: *default_session_service
       artifact_service: *default_artifact_service
-      agent_card: *default_agent_card
+      agent_card:
+        <<: *default_agent_card
+        description: "Builds a sourced chronological timeline from evidence and witness material; marks disputed facts and their dependency on unresolved testimony."
       agent_card_publishing: *default_agent_card_publishing
       agent_discovery: *default_agent_discovery
       inter_agent_communication: *default_inter_agent_communication

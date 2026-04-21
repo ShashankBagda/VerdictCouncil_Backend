@@ -10,11 +10,14 @@ apps:
       namespace: ${NAMESPACE}
       agent_name: governance-verdict
       display_name: "Governance & Verdict Agent"
+      supports_streaming: true
       model:
         <<: *gpt54_model
       session_service: *default_session_service
       artifact_service: *default_artifact_service
-      agent_card: *default_agent_card
+      agent_card:
+        <<: *default_agent_card
+        description: "Final governance gate. Audits pipeline output for bias and logical gaps, then produces a structured verdict recommendation with confidence score and alternatives."
       agent_card_publishing: *default_agent_card_publishing
       agent_discovery: *default_agent_discovery
       inter_agent_communication: *default_inter_agent_communication
