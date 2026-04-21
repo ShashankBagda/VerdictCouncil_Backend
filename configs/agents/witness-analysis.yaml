@@ -10,11 +10,14 @@ apps:
       namespace: ${NAMESPACE}
       agent_name: witness-analysis
       display_name: "Witness Analysis Agent"
+      supports_streaming: true
       model:
         <<: *gpt5_mini_model
       session_service: *default_session_service
       artifact_service: *default_artifact_service
-      agent_card: *default_agent_card
+      agent_card:
+        <<: *default_agent_card
+        description: "Assesses witness credibility, anticipates testimony for traffic cases, and flags material inconsistencies for the Judge to resolve at hearing."
       agent_card_publishing: *default_agent_card_publishing
       agent_discovery: *default_agent_discovery
       inter_agent_communication: *default_inter_agent_communication
