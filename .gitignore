@@ -27,6 +27,9 @@ htmlcov/
 .pytest_cache/
 .mypy_cache/
 
+# Runtime logs
+*.log
+
 # OS
 .DS_Store
 Thumbs.db

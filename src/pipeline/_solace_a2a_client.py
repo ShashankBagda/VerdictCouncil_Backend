@@ -18,6 +18,7 @@ correlates inbound envelopes to pending requests by the JSON-RPC
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 from typing import Any
@@ -159,7 +160,11 @@ class SolaceA2AClient:
         topic: str,
         envelope: dict,
         reply_to: str | None = None,
-    ) -> None:
+    ) -> str:
+        """Publish envelope to topic. Returns the SHA-256 hex digest of the
+        serialized body — callers should record it in CaseState.audit_log
+        so broker traffic can be tied back to a specific outbound message.
+        """
         if self._publisher is None or self._service is None:
             raise RuntimeError("SolaceA2AClient.publish called before connect()")
         # NOTE: `message_builder().build()` fails on bytes in the
@@ -167,12 +172,21 @@ class SolaceA2AClient:
         # confusing surface error). Pass str so the SDK takes the
         # string-attachment branch. json.dumps defaults to ASCII-safe
         # output, so the JSON envelope survives the encode round-trip.
-        body = json.dumps(envelope)
+        body = json.dumps(envelope, sort_keys=True)
+        payload_hash = hashlib.sha256(body.encode("utf-8")).hexdigest()
         builder = self._service.message_builder()
         if reply_to:
             builder = builder.with_property(REPLY_TO_PROPERTY, reply_to)
         outbound = builder.build(body)
         await asyncio.to_thread(self._publisher.publish, outbound, Topic.of(topic))
+        logger.info(
+            "A2A publish topic=%s task_id=%s payload_sha256=%s bytes=%d",
+            topic,
+            envelope.get("id"),
+            payload_hash,
+            len(body),
+        )
+        return payload_hash
 
     async def await_response(self, task_id: str, timeout: float) -> dict:
         if self._pending_lock is None:
