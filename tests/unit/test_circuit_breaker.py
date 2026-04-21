@@ -1,7 +1,7 @@
 """Unit tests for src.shared.circuit_breaker."""
 
 import time
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import redis.asyncio as aioredis
@@ -20,9 +20,12 @@ def mock_redis():
     r.aclose = AsyncMock()
     r.script_load = AsyncMock(return_value="fake_sha")
     r.evalsha = AsyncMock(return_value="closed")
-    pipe = AsyncMock()
-    pipe.set = AsyncMock()
-    pipe.delete = AsyncMock()
+    # redis.asyncio pipelines queue commands synchronously and only await
+    # on execute(); use MagicMock for the sync queueing methods so they
+    # don't emit unawaited-coroutine warnings.
+    pipe = MagicMock()
+    pipe.set = MagicMock(return_value=pipe)
+    pipe.delete = MagicMock(return_value=pipe)
     pipe.execute = AsyncMock()
     r.pipeline = lambda: pipe
     r._pipe = pipe  # expose for assertions
