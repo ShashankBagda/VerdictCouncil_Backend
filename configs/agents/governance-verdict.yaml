@@ -12,6 +12,8 @@ apps:
       display_name: "Governance & Verdict Agent"
       model:
         <<: *gpt54_model
+      session_service: *default_session_service
+      artifact_service: *default_artifact_service
       instruction: |
         You are the Governance & Verdict Agent for VerdictCouncil. You are the final checkpoint before a recommendation reaches the Judge.
 

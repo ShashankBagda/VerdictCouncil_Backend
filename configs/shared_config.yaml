@@ -42,8 +42,8 @@ models:
 # ──────────────────────────────────────────────
 
 session_service: &default_session_service
-  type: sql
-  database_url: ${DATABASE_URL}
+  type: database
+  db_url: ${DATABASE_URL}
 
 # ──────────────────────────────────────────────
 # Artifact Service (Filesystem)

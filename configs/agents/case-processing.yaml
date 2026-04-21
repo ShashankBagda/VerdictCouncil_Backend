@@ -12,6 +12,8 @@ apps:
       display_name: "Case Processing Agent"
       model:
         <<: *gpt54_nano_model
+      session_service: *default_session_service
+      artifact_service: *default_artifact_service
       instruction: |
         You are the Case Processing Agent for VerdictCouncil, a judicial decision-support system for Singapore lower courts.
 

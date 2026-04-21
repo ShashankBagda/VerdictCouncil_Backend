@@ -12,6 +12,8 @@ apps:
       display_name: "Witness Analysis Agent"
       model:
         <<: *gpt5_mini_model
+      session_service: *default_session_service
+      artifact_service: *default_artifact_service
       instruction: |
         You are the Witness Analysis Agent for VerdictCouncil.
 
