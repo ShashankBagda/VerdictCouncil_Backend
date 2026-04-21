@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Agent 9: governance-verdict (strict mode — fully specified)
+# Agent 9: governance_verdict (strict mode — fully specified)
 # ---------------------------------------------------------------------------
 
 
@@ -124,22 +124,22 @@ class DeliberationOutput(BaseModel):
 # Agent → Schema mappings
 # ---------------------------------------------------------------------------
 
-# Strict mode: only governance-verdict (fully specified, no dict[str, Any])
+# Strict mode: only governance_verdict (fully specified, no dict[str, Any])
 _STRICT_MODE_SCHEMAS: dict[str, type[BaseModel]] = {
-    "governance-verdict": GovernanceVerdictOutput,
+    "governance_verdict": GovernanceVerdictOutput,
 }
 
 # Post-parse validation: all agents (allows dict[str, Any] fields)
 AGENT_VALIDATION_SCHEMAS: dict[str, type[BaseModel]] = {
-    "case-processing": CaseProcessingOutput,
-    "complexity-routing": ComplexityRoutingOutput,
-    "evidence-analysis": EvidenceAnalysisOutput,
-    "fact-reconstruction": FactReconstructionOutput,
-    "witness-analysis": WitnessAnalysisOutput,
-    "legal-knowledge": LegalKnowledgeOutput,
-    "argument-construction": ArgumentConstructionOutput,
+    "case_processing": CaseProcessingOutput,
+    "complexity_routing": ComplexityRoutingOutput,
+    "evidence_analysis": EvidenceAnalysisOutput,
+    "fact_reconstruction": FactReconstructionOutput,
+    "witness_analysis": WitnessAnalysisOutput,
+    "legal_knowledge": LegalKnowledgeOutput,
+    "argument_construction": ArgumentConstructionOutput,
     "deliberation": DeliberationOutput,
-    "governance-verdict": GovernanceVerdictOutput,
+    "governance_verdict": GovernanceVerdictOutput,
 }
 
 

@@ -46,7 +46,7 @@ def _make_audit_log(case_id: uuid.UUID, output_payload=None) -> MagicMock:
     log = MagicMock(spec=AuditLog)
     log.id = uuid.uuid4()
     log.case_id = case_id
-    log.agent_name = "governance-verdict"
+    log.agent_name = "governance_verdict"
     log.action = "governance_check"
     log.output_payload = output_payload
     log.created_at = datetime.now(UTC)

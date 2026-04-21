@@ -50,27 +50,27 @@ router = APIRouter()
 
 # 9-agent pipeline topology used for status derivation
 PIPELINE_AGENTS = [
-    "case-processing",
-    "fact-reconstruction",
-    "evidence-analysis",
-    "witness-analysis",
-    "legal-knowledge",
-    "argument-construction",
-    "complexity-routing",
+    "case_processing",
+    "fact_reconstruction",
+    "evidence_analysis",
+    "witness_analysis",
+    "legal_knowledge",
+    "argument_construction",
+    "complexity_routing",
     "deliberation",
-    "governance-verdict",
+    "governance_verdict",
 ]
 
 AGENT_LABELS = {
-    "case-processing": "Case Processing",
-    "fact-reconstruction": "Fact Reconstruction",
-    "evidence-analysis": "Evidence Analysis",
-    "witness-analysis": "Witness Analysis",
-    "legal-knowledge": "Legal Knowledge",
-    "argument-construction": "Argument Construction",
-    "complexity-routing": "Complexity Routing",
+    "case_processing": "Case Processing",
+    "fact_reconstruction": "Fact Reconstruction",
+    "evidence_analysis": "Evidence Analysis",
+    "witness_analysis": "Witness Analysis",
+    "legal_knowledge": "Legal Knowledge",
+    "argument_construction": "Argument Construction",
+    "complexity_routing": "Complexity Routing",
     "deliberation": "Deliberation",
-    "governance-verdict": "Governance & Verdict",
+    "governance_verdict": "Governance & Verdict",
 }
 
 

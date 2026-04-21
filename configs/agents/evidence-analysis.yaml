@@ -8,7 +8,7 @@ apps:
       <<: *broker_connection
     app_config:
       namespace: ${NAMESPACE}
-      agent_name: evidence-analysis
+      agent_name: evidence_analysis
       display_name: "Evidence Analysis Agent"
       model:
         <<: *gpt5_model

@@ -8,7 +8,7 @@ apps:
       <<: *broker_connection
     app_config:
       namespace: ${NAMESPACE}
-      agent_name: fact-reconstruction
+      agent_name: fact_reconstruction
       display_name: "Fact Reconstruction Agent"
       model:
         <<: *gpt5_model

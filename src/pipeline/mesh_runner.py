@@ -56,25 +56,25 @@ logger = logging.getLogger(__name__)
 
 
 # Logical grouping — drives serial vs. parallel dispatch.
-L1_AGENTS: tuple[str, ...] = ("case-processing", "complexity-routing")
+L1_AGENTS: tuple[str, ...] = ("case_processing", "complexity_routing")
 L2_AGENTS: tuple[str, ...] = (
-    "evidence-analysis",
-    "fact-reconstruction",
-    "witness-analysis",
+    "evidence_analysis",
+    "fact_reconstruction",
+    "witness_analysis",
 )
 L3_AGENTS: tuple[str, ...] = (
-    "legal-knowledge",
-    "argument-construction",
+    "legal_knowledge",
+    "argument_construction",
     "deliberation",
-    "governance-verdict",
+    "governance_verdict",
 )
 
 # Maps each L2 agent's config name → the CaseState field it owns. Mirrors
 # Layer2Aggregator.REQUIRED_AGENTS — aggregator and runner must agree.
 L2_AGENT_KEY: dict[str, str] = {
-    "evidence-analysis": "evidence_analysis",
-    "fact-reconstruction": "extracted_facts",
-    "witness-analysis": "witnesses",
+    "evidence_analysis": "evidence_analysis",
+    "fact_reconstruction": "extracted_facts",
+    "witness_analysis": "witnesses",
 }
 
 DEFAULT_AGENT_TIMEOUT_SECONDS = 60.0
@@ -140,9 +140,9 @@ class MeshPipelineRunner:
         for agent_name in L1_AGENTS:
             state = await self._invoke_agent_sequential(agent_name, state, run_id)
             await self._checkpoint(db, state, run_id, agent_name)
-            if agent_name == "complexity-routing" and state.status == CaseStatusEnum.escalated:
+            if agent_name == "complexity_routing" and state.status == CaseStatusEnum.escalated:
                 logger.warning(
-                    "Mesh pipeline halted at complexity-routing: escalated (case_id=%s)",
+                    "Mesh pipeline halted at complexity_routing: escalated (case_id=%s)",
                     state.case_id,
                 )
                 return state
@@ -157,10 +157,10 @@ class MeshPipelineRunner:
             state = await self._invoke_agent_sequential(agent_name, state, run_id)
             await self._checkpoint(db, state, run_id, agent_name)
 
-            if agent_name == "legal-knowledge" and judge_vector_store_id:
+            if agent_name == "legal_knowledge" and judge_vector_store_id:
                 state = await self._apply_judge_kb_hook(state, judge_vector_store_id)
 
-            if agent_name == "governance-verdict":
+            if agent_name == "governance_verdict":
                 maybe_halted = self._apply_governance_halts(state)
                 if maybe_halted is not None:
                     return maybe_halted
@@ -202,7 +202,7 @@ class MeshPipelineRunner:
             for agent_name in L1_AGENTS[l1_start:]:
                 state = await self._invoke_agent_sequential(agent_name, state, run_id)
                 await self._checkpoint(db, state, run_id, agent_name)
-                if agent_name == "complexity-routing" and state.status == CaseStatusEnum.escalated:
+                if agent_name == "complexity_routing" and state.status == CaseStatusEnum.escalated:
                     return state
             state = await self._invoke_l2_fanout(state, run_id)
             await self._checkpoint(db, state, run_id, AGGREGATOR_NAME)
@@ -223,10 +223,10 @@ class MeshPipelineRunner:
             state = await self._invoke_agent_sequential(agent_name, state, run_id)
             await self._checkpoint(db, state, run_id, agent_name)
 
-            if agent_name == "legal-knowledge" and judge_vector_store_id:
+            if agent_name == "legal_knowledge" and judge_vector_store_id:
                 state = await self._apply_judge_kb_hook(state, judge_vector_store_id)
 
-            if agent_name == "governance-verdict":
+            if agent_name == "governance_verdict":
                 maybe_halted = self._apply_governance_halts(state)
                 if maybe_halted is not None:
                     return maybe_halted

@@ -115,7 +115,7 @@ def test_build_send_task_request_shape():
         task_id="t-1",
         session_id="r-1",
         payload={"case_id": "c-1"},
-        metadata={"agent_name": "case-processing"},
+        metadata={"agent_name": "case_processing"},
     )
     assert env["jsonrpc"] == "2.0"
     assert env["id"] == "t-1"
@@ -123,7 +123,7 @@ def test_build_send_task_request_shape():
     params = env["params"]
     assert params["id"] == "t-1"
     assert params["sessionId"] == "r-1"
-    assert params["metadata"]["agent_name"] == "case-processing"
+    assert params["metadata"]["agent_name"] == "case_processing"
     parts = params["message"]["parts"]
     assert parts == [{"type": "data", "data": {"case_id": "c-1"}}]
 
@@ -145,14 +145,14 @@ async def test_l1_agent_invocation_publishes_with_correct_topic_and_reply_to():
     a2a.auto_resolver = resolver
 
     runner = _make_runner(a2a, redis)
-    result = await runner._invoke_agent_sequential("case-processing", state, run_id="r1")
+    result = await runner._invoke_agent_sequential("case_processing", state, run_id="r1")
 
     assert result.case_id == state.case_id
     assert len(a2a.publishes) == 1
     topic, envelope, reply_to = a2a.publishes[0]
-    assert topic == f"{NAMESPACE}/a2a/v1/agent/request/case-processing"
+    assert topic == f"{NAMESPACE}/a2a/v1/agent/request/case_processing"
     assert reply_to.startswith(f"{NAMESPACE}/a2a/v1/agent/response/{MESH_RUNNER_NAME}/")
-    assert envelope["params"]["metadata"]["agent_name"] == "case-processing"
+    assert envelope["params"]["metadata"]["agent_name"] == "case_processing"
 
 
 @pytest.mark.asyncio
@@ -164,7 +164,7 @@ async def test_l1_agent_invocation_propagates_response_failure():
     runner._agent_timeout = 0.05  # force timeout quickly
 
     with pytest.raises(asyncio.TimeoutError):
-        await runner._invoke_agent_sequential("case-processing", _case_state(), run_id="r1")
+        await runner._invoke_agent_sequential("case_processing", _case_state(), run_id="r1")
 
 
 # ---------------------------------------------------------------------------
@@ -294,13 +294,13 @@ async def test_full_pipeline_runs_all_nine_agents_via_mesh():
     request_topics = [p[0] for p in a2a.publishes]
     agents_published = [t.rsplit("/", 1)[-1] for t in request_topics]
     expected = [
-        "case-processing",
-        "complexity-routing",
+        "case_processing",
+        "complexity_routing",
         *L2_AGENTS,
-        "legal-knowledge",
-        "argument-construction",
+        "legal_knowledge",
+        "argument_construction",
         "deliberation",
-        "governance-verdict",
+        "governance_verdict",
     ]
     # Order matters for L1/L3, not within L2 (parallel)
     assert agents_published[:2] == expected[:2]
@@ -317,7 +317,7 @@ async def test_run_halts_after_complexity_routing_when_escalated():
     def resolver(topic, envelope, reply_to):
         agent = topic.rsplit("/", 1)[-1]
         dumped = state.model_dump(mode="json")
-        if agent == "complexity-routing":
+        if agent == "complexity_routing":
             dumped["status"] = CaseStatusEnum.escalated.value
         return _send_task_response(envelope["id"], dumped)
 
@@ -329,4 +329,4 @@ async def test_run_halts_after_complexity_routing_when_escalated():
     assert result.status == CaseStatusEnum.escalated
     # Only L1 agents were published — pipeline halted before L2.
     published_agents = [p[0].rsplit("/", 1)[-1] for p in a2a.publishes]
-    assert published_agents == ["case-processing", "complexity-routing"]
+    assert published_agents == ["case_processing", "complexity_routing"]

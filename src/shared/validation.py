@@ -2,7 +2,7 @@ from typing import Any
 
 # Maps each agent to the CaseState fields it is allowed to write
 FIELD_OWNERSHIP: dict[str, set[str]] = {
-    "case-processing": {
+    "case_processing": {
         "case_id",
         "run_id",
         "domain",
@@ -11,14 +11,14 @@ FIELD_OWNERSHIP: dict[str, set[str]] = {
         "case_metadata",
         "raw_documents",
     },
-    "complexity-routing": {"status", "case_metadata"},
-    "evidence-analysis": {"evidence_analysis"},
-    "fact-reconstruction": {"extracted_facts"},
-    "witness-analysis": {"witnesses"},
-    "legal-knowledge": {"legal_rules", "precedents", "precedent_source_metadata"},
-    "argument-construction": {"arguments"},
+    "complexity_routing": {"status", "case_metadata"},
+    "evidence_analysis": {"evidence_analysis"},
+    "fact_reconstruction": {"extracted_facts"},
+    "witness_analysis": {"witnesses"},
+    "legal_knowledge": {"legal_rules", "precedents", "precedent_source_metadata"},
+    "argument_construction": {"arguments"},
     "deliberation": {"deliberation"},
-    "governance-verdict": {"fairness_check", "verdict_recommendation", "status"},
+    "governance_verdict": {"fairness_check", "verdict_recommendation", "status"},
 }
 
 # Fields that all agents can append to

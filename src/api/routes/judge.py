@@ -217,7 +217,7 @@ async def get_fairness_audit(
         select(AuditLog)
         .where(
             AuditLog.case_id == case_id,
-            AuditLog.agent_name == "governance-verdict",
+            AuditLog.agent_name == "governance_verdict",
         )
         .limit(50)
     )
@@ -326,7 +326,7 @@ async def get_evidence_dashboard(
 
 
 def _extract_jurisdiction_issues(payload: dict | None) -> list[str]:
-    """Pull the issues list out of a case-processing audit payload."""
+    """Pull the issues list out of a case_processing audit payload."""
     if not payload:
         return []
     if isinstance(payload.get("jurisdiction_issues"), list):
@@ -342,7 +342,7 @@ def _extract_jurisdiction_issues(payload: dict | None) -> list[str]:
     operation_id="get_jurisdiction_validation",
     summary="Show jurisdiction validation for a case",
     description="Combine the case-level jurisdiction_valid flag with the most recent "
-    "case-processing audit payload so the judge can see both the verdict and the reasoning. "
+    "case_processing audit payload so the judge can see both the verdict and the reasoning. "
     "Requires judge role.",
     responses={
         403: {"model": ErrorResponse, "description": "Insufficient permissions"},
@@ -363,7 +363,7 @@ async def get_jurisdiction_validation(
         select(AuditLog)
         .where(
             AuditLog.case_id == case_id,
-            AuditLog.agent_name == "case-processing",
+            AuditLog.agent_name == "case_processing",
             AuditLog.action == "agent_response",
         )
         .order_by(AuditLog.created_at.desc())

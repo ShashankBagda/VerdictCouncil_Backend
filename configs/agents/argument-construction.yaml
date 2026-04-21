@@ -8,7 +8,7 @@ apps:
       <<: *broker_connection
     app_config:
       namespace: ${NAMESPACE}
-      agent_name: argument-construction
+      agent_name: argument_construction
       display_name: "Argument Construction Agent"
       model:
         <<: *gpt54_model

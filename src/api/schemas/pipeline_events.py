@@ -14,10 +14,10 @@ class PipelineProgressEvent(BaseModel):
     agent: str = Field(
         ...,
         description=(
-            "One of the 9 agent names: case-processing, complexity-routing, "
-            "evidence-analysis, fact-reconstruction, witness-analysis, "
-            "legal-knowledge, argument-construction, deliberation, "
-            "governance-verdict"
+            "One of the 9 agent names: case_processing, complexity_routing, "
+            "evidence_analysis, fact_reconstruction, witness_analysis, "
+            "legal_knowledge, argument_construction, deliberation, "
+            "governance_verdict"
         ),
     )
     phase: Literal["started", "completed", "failed"]

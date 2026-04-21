@@ -42,7 +42,7 @@ def _make_case(case_id: uuid.UUID, jurisdiction_valid: bool | None = None) -> Ma
 
 
 def _make_audit(
-    case_id: uuid.UUID, payload: dict, agent_name: str = "case-processing"
+    case_id: uuid.UUID, payload: dict, agent_name: str = "case_processing"
 ) -> MagicMock:
     entry = MagicMock(spec=AuditLog)
     entry.id = uuid.uuid4()
@@ -143,7 +143,7 @@ async def test_jurisdiction_extracts_issues_from_case_metadata():
 
 
 async def test_jurisdiction_no_audit_falls_back_to_case_flag():
-    """Endpoint still works before any case-processing audit row is written."""
+    """Endpoint still works before any case_processing audit row is written."""
     case_id = uuid.uuid4()
     user = _make_user()
     case = _make_case(case_id, jurisdiction_valid=True)

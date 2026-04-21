@@ -8,7 +8,7 @@ apps:
       <<: *broker_connection
     app_config:
       namespace: ${NAMESPACE}
-      agent_name: complexity-routing
+      agent_name: complexity_routing
       display_name: "Complexity & Routing Agent"
       model:
         <<: *gpt54_nano_model

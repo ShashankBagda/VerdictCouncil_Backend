@@ -235,17 +235,17 @@ class TestSingleAgentRoundTrip:
             # broker a beat so the receiver is bound before we publish.
             await asyncio.sleep(0.5)
 
-            task_id = new_task_id("case-processing-smoke")
+            task_id = new_task_id("case_processing-smoke")
             session_id = "session-smoke-1"
             payload = {
                 "case_id": "00000000-0000-0000-0000-000000000001",
                 "smoke_marker": "tier-i-roundtrip",
-                "agent_name": "case-processing",
+                "agent_name": "case_processing",
             }
             envelope = build_send_task_request(task_id, session_id, payload)
             reply_to = f"{NAMESPACE}/a2a/v1/agent/response/mesh-runner/{task_id}"
 
-            request_topic = f"{NAMESPACE}/a2a/v1/agent/request/case-processing"
+            request_topic = f"{NAMESPACE}/a2a/v1/agent/request/case_processing"
             await client.publish(request_topic, envelope, reply_to=reply_to)
 
             response = await client.await_response(task_id, timeout=5.0)
@@ -257,7 +257,7 @@ class TestSingleAgentRoundTrip:
         assert echoed == payload, "DataPart payload must round-trip unchanged"
         assert stats["received"] >= 1
         assert stats["published"] >= 1
-        assert any(t.endswith("/agent/request/case-processing") for t in stats["topics"])
+        assert any(t.endswith("/agent/request/case_processing") for t in stats["topics"])
 
     @pytest.mark.asyncio
     async def test_parallel_publishes_correlate_by_task_id(self) -> None:
@@ -278,9 +278,9 @@ class TestSingleAgentRoundTrip:
                 return parse_send_task_response(resp)
 
             results = await asyncio.gather(
-                one_roundtrip("evidence-analysis", "marker-ev"),
-                one_roundtrip("fact-reconstruction", "marker-fact"),
-                one_roundtrip("witness-analysis", "marker-wit"),
+                one_roundtrip("evidence_analysis", "marker-ev"),
+                one_roundtrip("fact_reconstruction", "marker-fact"),
+                one_roundtrip("witness_analysis", "marker-wit"),
             )
 
         markers = {r.get("marker") for r in results}

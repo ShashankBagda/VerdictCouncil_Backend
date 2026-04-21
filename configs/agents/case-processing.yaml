@@ -8,7 +8,7 @@ apps:
       <<: *broker_connection
     app_config:
       namespace: ${NAMESPACE}
-      agent_name: case-processing
+      agent_name: case_processing
       display_name: "Case Processing Agent"
       model:
         <<: *gpt54_nano_model

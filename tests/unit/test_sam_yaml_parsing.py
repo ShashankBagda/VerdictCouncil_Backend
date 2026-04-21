@@ -9,28 +9,28 @@ from src.pipeline.runner import PipelineRunner, _load_yaml_with_includes
 CONFIGS_DIR = Path(__file__).resolve().parent.parent.parent / "configs" / "agents"
 
 AGENT_NAMES = [
-    "case-processing",
-    "complexity-routing",
-    "evidence-analysis",
-    "fact-reconstruction",
-    "witness-analysis",
-    "legal-knowledge",
-    "argument-construction",
+    "case_processing",
+    "complexity_routing",
+    "evidence_analysis",
+    "fact_reconstruction",
+    "witness_analysis",
+    "legal_knowledge",
+    "argument_construction",
     "deliberation",
-    "governance-verdict",
+    "governance_verdict",
 ]
 
 # Expected model anchors per agent (based on model_tier mapping)
 EXPECTED_MODELS = {
-    "case-processing": "gpt54_nano_model",  # lightweight
-    "complexity-routing": "gpt54_nano_model",  # lightweight
-    "evidence-analysis": "gpt5_model",  # strong
-    "fact-reconstruction": "gpt5_model",  # strong
-    "witness-analysis": "gpt5_mini_model",  # efficient
-    "legal-knowledge": "gpt5_model",  # strong
-    "argument-construction": "gpt54_model",  # frontier
+    "case_processing": "gpt54_nano_model",  # lightweight
+    "complexity_routing": "gpt54_nano_model",  # lightweight
+    "evidence_analysis": "gpt5_model",  # strong
+    "fact_reconstruction": "gpt5_model",  # strong
+    "witness_analysis": "gpt5_mini_model",  # efficient
+    "legal_knowledge": "gpt5_model",  # strong
+    "argument_construction": "gpt54_model",  # frontier
     "deliberation": "gpt54_model",  # frontier
-    "governance-verdict": "gpt54_model",  # frontier
+    "governance_verdict": "gpt54_model",  # frontier
 }
 
 

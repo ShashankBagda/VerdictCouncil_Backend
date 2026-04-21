@@ -26,28 +26,28 @@ logger = logging.getLogger(__name__)
 
 # Pipeline order: all 9 agents in sequence
 AGENT_ORDER: list[str] = [
-    "case-processing",
-    "complexity-routing",
-    "evidence-analysis",
-    "fact-reconstruction",
-    "witness-analysis",
-    "legal-knowledge",
-    "argument-construction",
+    "case_processing",
+    "complexity_routing",
+    "evidence_analysis",
+    "fact_reconstruction",
+    "witness_analysis",
+    "legal_knowledge",
+    "argument_construction",
     "deliberation",
-    "governance-verdict",
+    "governance_verdict",
 ]
 
 # Maps each agent to the tool function names it can invoke
 AGENT_TOOLS: dict[str, list[str]] = {
-    "case-processing": ["parse_document"],
-    "complexity-routing": [],
-    "evidence-analysis": ["parse_document", "cross_reference"],
-    "fact-reconstruction": ["timeline_construct"],
-    "witness-analysis": ["generate_questions"],
-    "legal-knowledge": ["search_precedents"],
-    "argument-construction": ["confidence_calc"],
+    "case_processing": ["parse_document"],
+    "complexity_routing": [],
+    "evidence_analysis": ["parse_document", "cross_reference"],
+    "fact_reconstruction": ["timeline_construct"],
+    "witness_analysis": ["generate_questions"],
+    "legal_knowledge": ["search_precedents"],
+    "argument_construction": ["confidence_calc"],
     "deliberation": [],
-    "governance-verdict": ["confidence_calc"],
+    "governance_verdict": ["confidence_calc"],
 }
 
 # Maps model tier names to settings attribute names
@@ -324,7 +324,7 @@ def _load_yaml_with_includes(config_path: Path) -> dict:
 
 # Required keys for critical agent output fields
 _REQUIRED_KEYS: dict[str, dict[str, list[str]]] = {
-    "governance-verdict": {
+    "governance_verdict": {
         "fairness_check": ["critical_issues_found", "audit_passed"],
         "verdict_recommendation": ["confidence_score"],
     },
@@ -605,7 +605,7 @@ class PipelineRunner:
                     merged_dict[key] = agent_output[key]
 
         # Inject precedent source metadata from tool execution (overrides any LLM output)
-        if agent_name == "legal-knowledge" and self._pending_precedent_meta is not None:
+        if agent_name == "legal_knowledge" and self._pending_precedent_meta is not None:
             merged_dict["precedent_source_metadata"] = self._pending_precedent_meta
         self._pending_precedent_meta = None
 
@@ -636,8 +636,8 @@ class PipelineRunner:
         the final CaseState with all agent outputs merged in.
 
         Halt conditions:
-        - After Agent 2 (complexity-routing): if status == "escalated"
-        - After Agent 9 (governance-verdict) phase 1: if fairness_check
+        - After Agent 2 (complexity_routing): if status == "escalated"
+        - After Agent 9 (governance_verdict) phase 1: if fairness_check
           has critical_issues_found == True
         """
         state = case_state
@@ -647,9 +647,9 @@ class PipelineRunner:
             state = await self._run_agent(agent_name, state)
 
             # Halt after Agent 2 if case is escalated
-            if agent_name == "complexity-routing" and state.status == CaseStatusEnum.escalated:
+            if agent_name == "complexity_routing" and state.status == CaseStatusEnum.escalated:
                 logger.warning(
-                    "Pipeline halted at complexity-routing: "
+                    "Pipeline halted at complexity_routing: "
                     "case escalated to human review (case_id=%s)",
                     state.case_id,
                 )
@@ -657,12 +657,12 @@ class PipelineRunner:
 
             # Halt after Agent 9 if fairness check found critical issues
             if (
-                agent_name == "governance-verdict"
+                agent_name == "governance_verdict"
                 and state.fairness_check
                 and state.fairness_check.get("critical_issues_found")
             ):
                 logger.warning(
-                    "Pipeline halted at governance-verdict: "
+                    "Pipeline halted at governance_verdict: "
                     "critical fairness issues detected (case_id=%s)",
                     state.case_id,
                 )

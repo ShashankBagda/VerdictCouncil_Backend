@@ -25,10 +25,10 @@ class WhatIfController:
 
     # Maps modification types to the earliest agent that must re-run
     CHANGE_IMPACT_MAP: dict[str, str] = {
-        "fact_toggle": "argument-construction",  # Agent 7
-        "evidence_exclusion": "evidence-analysis",  # Agent 3
-        "witness_credibility": "argument-construction",  # Agent 7
-        "legal_interpretation": "legal-knowledge",  # Agent 6
+        "fact_toggle": "argument_construction",  # Agent 7
+        "evidence_exclusion": "evidence_analysis",  # Agent 3
+        "witness_credibility": "argument_construction",  # Agent 7
+        "legal_interpretation": "legal_knowledge",  # Agent 6
     }
 
     def __init__(self, pipeline_runner: PipelineRunner) -> None:

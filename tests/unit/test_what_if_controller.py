@@ -98,7 +98,7 @@ class TestChangeImpactMapping:
 
     @pytest.mark.asyncio
     async def test_fact_toggle_starts_at_agent_7(self):
-        """fact_toggle should start pipeline at argument-construction (agent 7)."""
+        """fact_toggle should start pipeline at argument_construction (agent 7)."""
         from src.services.whatif_controller.controller import WhatIfController
 
         runner = _mock_pipeline_runner()
@@ -112,17 +112,17 @@ class TestChangeImpactMapping:
         )
 
         # Verify the mapped start agent
-        assert WhatIfController.CHANGE_IMPACT_MAP["fact_toggle"] == "argument-construction"
+        assert WhatIfController.CHANGE_IMPACT_MAP["fact_toggle"] == "argument_construction"
 
         # Verify _run_agent was called with the correct agent sequence
         called_agents = [call.args[0] for call in runner._run_agent.call_args_list]
-        start_index = AGENT_ORDER.index("argument-construction")
+        start_index = AGENT_ORDER.index("argument_construction")
         expected_agents = AGENT_ORDER[start_index:]
         assert called_agents == expected_agents
 
     @pytest.mark.asyncio
     async def test_evidence_exclusion_starts_at_agent_3(self):
-        """evidence_exclusion should start pipeline at evidence-analysis (agent 3)."""
+        """evidence_exclusion should start pipeline at evidence_analysis (agent 3)."""
         from src.services.whatif_controller.controller import WhatIfController
 
         runner = _mock_pipeline_runner()
@@ -135,19 +135,19 @@ class TestChangeImpactMapping:
             modification_payload={"evidence_id": "ev-2", "exclude": True},
         )
 
-        assert WhatIfController.CHANGE_IMPACT_MAP["evidence_exclusion"] == "evidence-analysis"
+        assert WhatIfController.CHANGE_IMPACT_MAP["evidence_exclusion"] == "evidence_analysis"
 
         called_agents = [call.args[0] for call in runner._run_agent.call_args_list]
-        start_index = AGENT_ORDER.index("evidence-analysis")
+        start_index = AGENT_ORDER.index("evidence_analysis")
         expected_agents = AGENT_ORDER[start_index:]
         assert called_agents == expected_agents
 
     @pytest.mark.asyncio
     async def test_legal_interpretation_starts_at_agent_6(self):
-        """legal_interpretation should start at legal-knowledge (agent 6).
+        """legal_interpretation should start at legal_knowledge (agent 6).
 
         This was the bug fixed in Phase -1: it previously routed to
-        argument-construction instead of legal-knowledge.
+        argument_construction instead of legal_knowledge.
         """
         from src.services.whatif_controller.controller import WhatIfController
 
@@ -161,16 +161,16 @@ class TestChangeImpactMapping:
             modification_payload={"rule_index": 0, "new_application": "narrow"},
         )
 
-        assert WhatIfController.CHANGE_IMPACT_MAP["legal_interpretation"] == "legal-knowledge"
+        assert WhatIfController.CHANGE_IMPACT_MAP["legal_interpretation"] == "legal_knowledge"
 
         called_agents = [call.args[0] for call in runner._run_agent.call_args_list]
-        start_index = AGENT_ORDER.index("legal-knowledge")
+        start_index = AGENT_ORDER.index("legal_knowledge")
         expected_agents = AGENT_ORDER[start_index:]
         assert called_agents == expected_agents
 
     @pytest.mark.asyncio
     async def test_witness_credibility_starts_at_agent_7(self):
-        """witness_credibility should start at argument-construction (agent 7)."""
+        """witness_credibility should start at argument_construction (agent 7)."""
         from src.services.whatif_controller.controller import WhatIfController
 
         runner = _mock_pipeline_runner()
@@ -183,10 +183,10 @@ class TestChangeImpactMapping:
             modification_payload={"witness_id": "w-1", "new_credibility_score": 30},
         )
 
-        assert WhatIfController.CHANGE_IMPACT_MAP["witness_credibility"] == "argument-construction"
+        assert WhatIfController.CHANGE_IMPACT_MAP["witness_credibility"] == "argument_construction"
 
         called_agents = [call.args[0] for call in runner._run_agent.call_args_list]
-        start_index = AGENT_ORDER.index("argument-construction")
+        start_index = AGENT_ORDER.index("argument_construction")
         expected_agents = AGENT_ORDER[start_index:]
         assert called_agents == expected_agents
 

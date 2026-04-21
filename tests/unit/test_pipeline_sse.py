@@ -84,21 +84,21 @@ class TestStreamPipelineStatus:
         events = [
             PipelineProgressEvent(
                 case_id=case_id,
-                agent="case-processing",
+                agent="case_processing",
                 phase="started",
                 step=1,
                 ts=datetime.now(UTC),
             ).model_dump_json(),
             PipelineProgressEvent(
                 case_id=case_id,
-                agent="case-processing",
+                agent="case_processing",
                 phase="completed",
                 step=1,
                 ts=datetime.now(UTC),
             ).model_dump_json(),
             PipelineProgressEvent(
                 case_id=case_id,
-                agent="governance-verdict",
+                agent="governance_verdict",
                 phase="completed",
                 step=9,
                 ts=datetime.now(UTC),
@@ -129,11 +129,11 @@ class TestStreamPipelineStatus:
         assert len(data_lines) == 3
 
         first_payload = json.loads(data_lines[0][len("data: ") :])
-        assert first_payload["agent"] == "case-processing"
+        assert first_payload["agent"] == "case_processing"
         assert first_payload["phase"] == "started"
 
         last_payload = json.loads(data_lines[-1][len("data: ") :])
-        assert last_payload["agent"] == "governance-verdict"
+        assert last_payload["agent"] == "governance_verdict"
         assert last_payload["phase"] == "completed"
 
     async def test_returns_404_when_case_missing(self, monkeypatch):
@@ -184,7 +184,7 @@ class TestStreamPipelineStatus:
 
 
 class TestPipelineEventsHelper:
-    """Verify the pub/sub generator closes once governance-verdict reaches terminal phase."""
+    """Verify the pub/sub generator closes once governance_verdict reaches terminal phase."""
 
     async def test_subscribe_closes_on_governance_verdict_completed(self, monkeypatch):
         from src.services import pipeline_events as pe
@@ -192,10 +192,10 @@ class TestPipelineEventsHelper:
         case_id = "case-123"
 
         events = [
-            json.dumps({"agent": "case-processing", "phase": "started"}),
-            json.dumps({"agent": "governance-verdict", "phase": "completed"}),
+            json.dumps({"agent": "case_processing", "phase": "started"}),
+            json.dumps({"agent": "governance_verdict", "phase": "completed"}),
             # Anything after the terminal event must NOT be yielded
-            json.dumps({"agent": "case-processing", "phase": "started"}),
+            json.dumps({"agent": "case_processing", "phase": "started"}),
         ]
 
         # Build a fake pubsub.listen() async iterator
@@ -235,7 +235,7 @@ def test_pipeline_progress_event_validates_phase(phase):
     """The Pydantic model accepts the 3 documented phases."""
     PipelineProgressEvent(
         case_id=uuid.uuid4(),
-        agent="case-processing",
+        agent="case_processing",
         phase=phase,
         step=1,
         ts=datetime.now(UTC),

@@ -299,19 +299,19 @@ async def test_audit_entries_persist_one_row_each():
         case_id=str(case_id),
         audit_log=[
             AuditEntry(
-                agent="case-processing",
+                agent="case_processing",
                 action="parse_documents",
                 model="gpt-5.4-nano",
                 token_usage={"prompt": 500, "completion": 200},
             ),
-            AuditEntry(agent="governance-verdict", action="emit_verdict"),
+            AuditEntry(agent="governance_verdict", action="emit_verdict"),
         ],
     )
     session = _RecordingSession(case=_case(case_id))
     await persist_case_results(session, case_id, state)  # type: ignore[arg-type]
 
     logs = _added_of(session, AuditLog)
-    assert [a.agent_name for a in logs] == ["case-processing", "governance-verdict"]
+    assert [a.agent_name for a in logs] == ["case_processing", "governance_verdict"]
     assert logs[0].token_usage == {"prompt": 500, "completion": 200}
 
 

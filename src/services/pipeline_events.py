@@ -3,7 +3,7 @@
 Reuses the Redis singleton from ``src.tools.search_precedents`` to avoid
 opening a second connection pool. Subscribers get an async generator
 that yields events until the case reaches a terminal status (the
-``governance-verdict`` agent completing or failing closes the stream).
+``governance_verdict`` agent completing or failing closes the stream).
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ async def publish_progress(event: PipelineProgressEvent) -> None:
 
 
 async def subscribe(case_id: str | object) -> AsyncGenerator[str, None]:
-    """Yield JSON-serialized events for a case until governance-verdict closes."""
+    """Yield JSON-serialized events for a case until governance_verdict closes."""
     r = await _get_redis_client()
     pubsub = r.pubsub()
     try:
@@ -53,7 +53,7 @@ async def subscribe(case_id: str | object) -> AsyncGenerator[str, None]:
             except json.JSONDecodeError:
                 continue
             if (
-                parsed.get("agent") == "governance-verdict"
+                parsed.get("agent") == "governance_verdict"
                 and parsed.get("phase") in _TERMINAL_PHASES
             ):
                 return

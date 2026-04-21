@@ -98,11 +98,11 @@ async def test_full_pipeline_runs_all_agents():
 
 
 # ------------------------------------------------------------------ #
-# Pipeline halts when complexity-routing sets escalated status
+# Pipeline halts when complexity_routing sets escalated status
 # ------------------------------------------------------------------ #
 @pytest.mark.asyncio
 async def test_pipeline_halts_on_escalation():
-    """Pipeline stops after complexity-routing if status is escalated."""
+    """Pipeline stops after complexity_routing if status is escalated."""
     client = AsyncMock()
 
     call_count = 0
@@ -110,10 +110,10 @@ async def test_pipeline_halts_on_escalation():
     async def mock_create(**kwargs):
         nonlocal call_count
         call_count += 1
-        # Agent 1 (case-processing) returns normal
+        # Agent 1 (case_processing) returns normal
         if call_count == 1:
             return _make_chat_response({})
-        # Agent 2 (complexity-routing) sets escalated status
+        # Agent 2 (complexity_routing) sets escalated status
         if call_count == 2:
             return _make_chat_response({"status": "escalated"})
         # Should not be reached
@@ -136,7 +136,7 @@ async def test_pipeline_halts_on_escalation():
 # ------------------------------------------------------------------ #
 @pytest.mark.asyncio
 async def test_pipeline_halts_on_fairness_issues():
-    """Pipeline stops at governance-verdict if critical_issues_found is True."""
+    """Pipeline stops at governance_verdict if critical_issues_found is True."""
     client = AsyncMock()
 
     call_count = 0
@@ -144,7 +144,7 @@ async def test_pipeline_halts_on_fairness_issues():
     async def mock_create(**kwargs):
         nonlocal call_count
         call_count += 1
-        # Last agent (governance-verdict) returns fairness issue
+        # Last agent (governance_verdict) returns fairness issue
         if call_count == len(AGENT_ORDER):
             return _make_chat_response(
                 {
@@ -195,9 +195,9 @@ async def test_tool_call_loop():
 
     runner = PipelineRunner(client=client)
 
-    # Only run the fact-reconstruction agent (which has timeline_construct)
+    # Only run the fact_reconstruction agent (which has timeline_construct)
     with patch.object(runner, "_load_agent_config", return_value=_agent_config()):
-        await runner._run_agent("fact-reconstruction", _minimal_state())
+        await runner._run_agent("fact_reconstruction", _minimal_state())
 
     # Two LLM calls: first returned tool_call, second returned final response
     assert call_count == 2
@@ -209,7 +209,7 @@ async def test_tool_call_loop():
 def test_build_tools_returns_schemas_for_agent():
     runner = PipelineRunner(client=AsyncMock())
 
-    tools = runner._build_tools("evidence-analysis")
+    tools = runner._build_tools("evidence_analysis")
     tool_names = [t["function"]["name"] for t in tools]
 
     assert "parse_document" in tool_names
@@ -219,7 +219,7 @@ def test_build_tools_returns_schemas_for_agent():
 def test_build_tools_returns_empty_for_no_tool_agent():
     runner = PipelineRunner(client=AsyncMock())
 
-    tools = runner._build_tools("complexity-routing")
+    tools = runner._build_tools("complexity_routing")
     assert tools == []
 
 
@@ -237,7 +237,7 @@ def test_build_tools_returns_empty_for_unknown_agent():
 async def test_field_ownership_violation_strips_unauthorized_fields():
     """Agent trying to write unauthorized fields gets them stripped."""
     client = AsyncMock()
-    # complexity-routing tries to write evidence_analysis (not allowed)
+    # complexity_routing tries to write evidence_analysis (not allowed)
     client.chat.completions.create = AsyncMock(
         return_value=_make_chat_response(
             {
@@ -250,11 +250,11 @@ async def test_field_ownership_violation_strips_unauthorized_fields():
     runner = PipelineRunner(client=client)
 
     with patch.object(runner, "_load_agent_config", return_value=_agent_config()):
-        result = await runner._run_agent("complexity-routing", _minimal_state())
+        result = await runner._run_agent("complexity_routing", _minimal_state())
 
-    # status should be updated (allowed for complexity-routing)
+    # status should be updated (allowed for complexity_routing)
     assert result.status == CaseStatusEnum.processing
-    # evidence_analysis should remain None (not allowed for complexity-routing)
+    # evidence_analysis should remain None (not allowed for complexity_routing)
     assert result.evidence_analysis is None
 
 
@@ -277,7 +277,7 @@ async def test_non_json_response_handled_gracefully():
 
     with patch.object(runner, "_load_agent_config", return_value=_agent_config()):
         state = _minimal_state()
-        result = await runner._run_agent("case-processing", state)
+        result = await runner._run_agent("case_processing", state)
 
     # Should still return a valid CaseState (unchanged aside from audit)
     assert isinstance(result, CaseState)
