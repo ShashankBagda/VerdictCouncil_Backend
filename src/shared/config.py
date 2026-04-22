@@ -52,7 +52,7 @@ class Settings(BaseSettings):
 
     # Application
     namespace: str = "verdictcouncil"
-    fastapi_host: str = "0.0.0.0"
+    fastapi_host: str = "0.0.0.0"  # nosec B104 — intentional: container needs all-interface binding
     fastapi_port: int = 8000
     log_level: str = "INFO"
     # Feature flag — when True, the live POST /process route runs the case
@@ -64,6 +64,11 @@ class Settings(BaseSettings):
     pair_api_url: str = "https://search.pair.gov.sg/api/v1/search"
     pair_circuit_breaker_threshold: int = 3
     pair_circuit_breaker_timeout: int = 60
+
+    # MLflow tracing (LLMSecOps observability)
+    mlflow_enabled: bool = False
+    mlflow_tracking_uri: str = "http://localhost:5000"
+    mlflow_experiment: str = "verdictcouncil-pipeline"
 
     # OpenAI Models
     openai_vector_store_id: str = ""

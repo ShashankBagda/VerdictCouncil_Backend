@@ -24,6 +24,7 @@ dependencies = [
     "passlib[bcrypt]>=1.7.4",
     "python-multipart>=0.0.18",
     "arq~=0.26.3",
+    "mlflow>=2.18,<3",
 ]
 
 [project.optional-dependencies]
