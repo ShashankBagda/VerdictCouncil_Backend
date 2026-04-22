@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.pipeline.runner import AGENT_ORDER
 from src.shared.case_state import CaseDomainEnum, CaseState, CaseStatusEnum
 
 # ------------------------------------------------------------------ #
@@ -81,10 +80,10 @@ def _populated_case_state() -> CaseState:
     )
 
 
-def _mock_pipeline_runner():
-    """Return a mock PipelineRunner with _run_agent as an AsyncMock."""
+def _mock_mesh_runner():
+    """Return a mock MeshPipelineRunner whose run_from echoes the cloned state."""
     runner = MagicMock()
-    runner._run_agent = AsyncMock(side_effect=lambda agent_name, state: state)
+    runner.run_from = AsyncMock(side_effect=lambda state, start_agent, run_id=None: state)
     return runner
 
 
@@ -94,14 +93,13 @@ def _mock_pipeline_runner():
 
 
 class TestChangeImpactMapping:
-    """Verify each modification type routes to the correct start agent."""
+    """Verify each modification type dispatches run_from at the correct start agent."""
 
     @pytest.mark.asyncio
-    async def test_fact_toggle_starts_at_agent_7(self):
-        """fact_toggle should start pipeline at argument-construction (agent 7)."""
+    async def test_fact_toggle_starts_at_argument_construction(self):
         from src.services.whatif_controller.controller import WhatIfController
 
-        runner = _mock_pipeline_runner()
+        runner = _mock_mesh_runner()
         controller = WhatIfController(runner)
         state = _populated_case_state()
 
@@ -111,21 +109,15 @@ class TestChangeImpactMapping:
             modification_payload={"fact_id": "f-2", "new_status": "agreed"},
         )
 
-        # Verify the mapped start agent
         assert WhatIfController.CHANGE_IMPACT_MAP["fact_toggle"] == "argument-construction"
-
-        # Verify _run_agent was called with the correct agent sequence
-        called_agents = [call.args[0] for call in runner._run_agent.call_args_list]
-        start_index = AGENT_ORDER.index("argument-construction")
-        expected_agents = AGENT_ORDER[start_index:]
-        assert called_agents == expected_agents
+        runner.run_from.assert_awaited_once()
+        assert runner.run_from.await_args.kwargs["start_agent"] == "argument-construction"
 
     @pytest.mark.asyncio
-    async def test_evidence_exclusion_starts_at_agent_3(self):
-        """evidence_exclusion should start pipeline at evidence-analysis (agent 3)."""
+    async def test_evidence_exclusion_starts_at_evidence_analysis(self):
         from src.services.whatif_controller.controller import WhatIfController
 
-        runner = _mock_pipeline_runner()
+        runner = _mock_mesh_runner()
         controller = WhatIfController(runner)
         state = _populated_case_state()
 
@@ -136,22 +128,16 @@ class TestChangeImpactMapping:
         )
 
         assert WhatIfController.CHANGE_IMPACT_MAP["evidence_exclusion"] == "evidence-analysis"
-
-        called_agents = [call.args[0] for call in runner._run_agent.call_args_list]
-        start_index = AGENT_ORDER.index("evidence-analysis")
-        expected_agents = AGENT_ORDER[start_index:]
-        assert called_agents == expected_agents
+        assert runner.run_from.await_args.kwargs["start_agent"] == "evidence-analysis"
 
     @pytest.mark.asyncio
-    async def test_legal_interpretation_starts_at_agent_6(self):
-        """legal_interpretation should start at legal-knowledge (agent 6).
-
-        This was the bug fixed in Phase -1: it previously routed to
-        argument-construction instead of legal-knowledge.
+    async def test_legal_interpretation_starts_at_legal_knowledge(self):
+        """legal_interpretation mutates legal rules owned by legal-knowledge;
+        re-entering at argument-construction would skip the owner.
         """
         from src.services.whatif_controller.controller import WhatIfController
 
-        runner = _mock_pipeline_runner()
+        runner = _mock_mesh_runner()
         controller = WhatIfController(runner)
         state = _populated_case_state()
 
@@ -162,22 +148,17 @@ class TestChangeImpactMapping:
         )
 
         assert WhatIfController.CHANGE_IMPACT_MAP["legal_interpretation"] == "legal-knowledge"
-
-        called_agents = [call.args[0] for call in runner._run_agent.call_args_list]
-        start_index = AGENT_ORDER.index("legal-knowledge")
-        expected_agents = AGENT_ORDER[start_index:]
-        assert called_agents == expected_agents
+        assert runner.run_from.await_args.kwargs["start_agent"] == "legal-knowledge"
 
     @pytest.mark.asyncio
-    async def test_witness_credibility_starts_at_agent_5(self):
-        """witness_credibility mutates state.witnesses (owned by witness-analysis,
-        agent 5), so re-entry must start at witness-analysis — not argument-
-        construction (agent 7), which would skip the owner and leave the
-        credibility change unprocessed.
+    async def test_witness_credibility_starts_at_witness_analysis(self):
+        """witness_credibility mutates state.witnesses (owned by witness-analysis);
+        re-entering at argument-construction would skip the owner and leave
+        the credibility change unprocessed.
         """
         from src.services.whatif_controller.controller import WhatIfController
 
-        runner = _mock_pipeline_runner()
+        runner = _mock_mesh_runner()
         controller = WhatIfController(runner)
         state = _populated_case_state()
 
@@ -188,11 +169,7 @@ class TestChangeImpactMapping:
         )
 
         assert WhatIfController.CHANGE_IMPACT_MAP["witness_credibility"] == "witness-analysis"
-
-        called_agents = [call.args[0] for call in runner._run_agent.call_args_list]
-        start_index = AGENT_ORDER.index("witness-analysis")
-        expected_agents = AGENT_ORDER[start_index:]
-        assert called_agents == expected_agents
+        assert runner.run_from.await_args.kwargs["start_agent"] == "witness-analysis"
 
 
 # ------------------------------------------------------------------ #
@@ -208,7 +185,7 @@ class TestScenarioIsolation:
         """Creating a scenario must not mutate the original CaseState."""
         from src.services.whatif_controller.controller import WhatIfController
 
-        runner = _mock_pipeline_runner()
+        runner = _mock_mesh_runner()
         controller = WhatIfController(runner)
         original = _populated_case_state()
         original_dict = original.model_dump()
@@ -219,7 +196,6 @@ class TestScenarioIsolation:
             modification_payload={"fact_id": "f-2", "new_status": "agreed"},
         )
 
-        # Original must be identical to its snapshot before the call
         assert original.model_dump() == original_dict
 
     @pytest.mark.asyncio
@@ -227,15 +203,14 @@ class TestScenarioIsolation:
         """Scenario should get a new run_id; parent_run_id set to the original."""
         from src.services.whatif_controller.controller import WhatIfController
 
-        runner = _mock_pipeline_runner()
-        # Capture the state passed to _run_agent to inspect its IDs
+        runner = _mock_mesh_runner()
         passed_states: list[CaseState] = []
 
-        async def capture_run(agent_name, state):
+        async def capture(state, start_agent, run_id=None):
             passed_states.append(copy.deepcopy(state))
             return state
 
-        runner._run_agent = AsyncMock(side_effect=capture_run)
+        runner.run_from = AsyncMock(side_effect=capture)
 
         controller = WhatIfController(runner)
         original = _populated_case_state()
@@ -247,12 +222,12 @@ class TestScenarioIsolation:
             modification_payload={"fact_id": "f-2", "new_status": "agreed"},
         )
 
-        assert len(passed_states) > 0
+        assert len(passed_states) == 1
         scenario_state = passed_states[0]
-        # New run_id must differ from original
         assert scenario_state.run_id != original_run_id
-        # parent_run_id must reference the original
         assert scenario_state.parent_run_id == original_run_id
+        # run_from invariant: the run_id kwarg must match the state's run_id.
+        assert runner.run_from.await_args.kwargs["run_id"] == scenario_state.run_id
 
 
 # ------------------------------------------------------------------ #
@@ -263,10 +238,9 @@ class TestScenarioIsolation:
 class TestInvalidModificationType:
     @pytest.mark.asyncio
     async def test_unknown_modification_type_raises(self):
-        """Passing an unknown modification_type should raise ValueError."""
         from src.services.whatif_controller.controller import WhatIfController
 
-        runner = _mock_pipeline_runner()
+        runner = _mock_mesh_runner()
         controller = WhatIfController(runner)
         state = _populated_case_state()
 
