@@ -213,8 +213,11 @@ def _get_facts_map(state: CaseState) -> dict[str, dict]:
 
 def _get_evidence_map(state: CaseState) -> dict[str, dict]:
     """Build an evidence_id -> evidence dict from CaseState."""
-    if not state.evidence_analysis or not isinstance(state.evidence_analysis, dict):
+    if not state.evidence_analysis:
         return {}
 
-    items = state.evidence_analysis.get("evidence_items", [])
-    return {item.get("id", str(i)): item for i, item in enumerate(items) if isinstance(item, dict)}
+    return {
+        item.get("id", str(i)): item
+        for i, item in enumerate(state.evidence_analysis.evidence_items)
+        if isinstance(item, dict)
+    }

@@ -243,7 +243,10 @@ class TestLayer2Aggregator:
 
         # Merge should have been triggered on the third call
         assert result is not None
-        assert result.evidence_analysis == _evidence_output()
+        _expected_e = _evidence_output()
+        assert result.evidence_analysis is not None
+        assert result.evidence_analysis.exhibits == _expected_e["exhibits"]
+        assert result.evidence_analysis.credibility_scores == _expected_e["credibility_scores"]
         _expected_f = _facts_output()
         assert result.extracted_facts is not None
         assert result.extracted_facts.timeline == _expected_f["timeline"]
@@ -274,7 +277,10 @@ class TestLayer2Aggregator:
             )
 
         assert result is not None
-        assert result.evidence_analysis == _evidence_output()
+        _expected_e2 = _evidence_output()
+        assert result.evidence_analysis is not None
+        assert result.evidence_analysis.exhibits == _expected_e2["exhibits"]
+        assert result.evidence_analysis.credibility_scores == _expected_e2["credibility_scores"]
         _expected_f2 = _facts_output()
         assert result.extracted_facts is not None
         assert result.extracted_facts.timeline == _expected_f2["timeline"]
@@ -310,7 +316,10 @@ class TestLayer2Aggregator:
 
         assert result is not None
         # The merged evidence should reflect the *latest* (overwritten) value
-        assert result.evidence_analysis == modified_evidence
+        assert result.evidence_analysis is not None
+        assert result.evidence_analysis.exhibits == modified_evidence["exhibits"]
+        # The extra field confirms the duplicate write was stored (not the original)
+        assert getattr(result.evidence_analysis, "extra", None) == "duplicate_data"
         # Only one publish event
         assert len(publisher.messages) == 1
 

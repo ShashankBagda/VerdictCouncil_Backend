@@ -59,6 +59,15 @@ class Deliberation(BaseModel):
     uncertainty_flags: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class EvidenceAnalysis(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    # Pipeline agent uses "evidence_items"; SAM layer2 uses "exhibits"
+    evidence_items: list[Any] = Field(default_factory=list)
+    exhibits: list[Any] = Field(default_factory=list)
+    credibility_scores: dict[str, Any] = Field(default_factory=dict)
+
+
 class ExtractedFacts(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -109,7 +118,7 @@ class CaseState(BaseModel):
     raw_documents: list[dict[str, Any]] = Field(default_factory=list)
 
     # Evidence (written by Evidence Analysis)
-    evidence_analysis: dict[str, Any] | None = None
+    evidence_analysis: EvidenceAnalysis | None = None
 
     # Facts (written by Fact Reconstruction)
     extracted_facts: ExtractedFacts | None = None

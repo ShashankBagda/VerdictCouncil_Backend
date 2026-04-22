@@ -169,7 +169,7 @@ class TestEvidenceChanges:
         modified = copy.deepcopy(original)
 
         # Mark evidence ev-2 as excluded
-        for item in modified.evidence_analysis["evidence_items"]:
+        for item in modified.evidence_analysis.evidence_items:
             if item["id"] == "ev-2":
                 item["excluded"] = True
 
