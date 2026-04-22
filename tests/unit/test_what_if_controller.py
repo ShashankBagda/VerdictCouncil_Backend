@@ -169,8 +169,12 @@ class TestChangeImpactMapping:
         assert called_agents == expected_agents
 
     @pytest.mark.asyncio
-    async def test_witness_credibility_starts_at_agent_7(self):
-        """witness_credibility should start at argument-construction (agent 7)."""
+    async def test_witness_credibility_starts_at_agent_5(self):
+        """witness_credibility mutates state.witnesses (owned by witness-analysis,
+        agent 5), so re-entry must start at witness-analysis — not argument-
+        construction (agent 7), which would skip the owner and leave the
+        credibility change unprocessed.
+        """
         from src.services.whatif_controller.controller import WhatIfController
 
         runner = _mock_pipeline_runner()
@@ -183,10 +187,10 @@ class TestChangeImpactMapping:
             modification_payload={"witness_id": "w-1", "new_credibility_score": 30},
         )
 
-        assert WhatIfController.CHANGE_IMPACT_MAP["witness_credibility"] == "argument-construction"
+        assert WhatIfController.CHANGE_IMPACT_MAP["witness_credibility"] == "witness-analysis"
 
         called_agents = [call.args[0] for call in runner._run_agent.call_args_list]
-        start_index = AGENT_ORDER.index("argument-construction")
+        start_index = AGENT_ORDER.index("witness-analysis")
         expected_agents = AGENT_ORDER[start_index:]
         assert called_agents == expected_agents
 

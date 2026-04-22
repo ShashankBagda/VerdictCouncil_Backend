@@ -23,11 +23,14 @@ logger = logging.getLogger(__name__)
 class WhatIfController:
     """Manages what-if scenario execution and stability scoring."""
 
-    # Maps modification types to the earliest agent that must re-run
+    # Maps modification types to the earliest agent that must re-run.
+    # witness_credibility mutates state.witnesses, which is owned by
+    # witness-analysis (agent 5); re-entering at argument-construction
+    # (agent 7) would skip the owner and leave the mutation unprocessed.
     CHANGE_IMPACT_MAP: dict[str, str] = {
         "fact_toggle": "argument-construction",  # Agent 7
         "evidence_exclusion": "evidence-analysis",  # Agent 3
-        "witness_credibility": "argument-construction",  # Agent 7
+        "witness_credibility": "witness-analysis",  # Agent 5
         "legal_interpretation": "legal-knowledge",  # Agent 6
     }
 
