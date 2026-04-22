@@ -18,6 +18,7 @@ it against a re-run, which is garbage.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import logging
@@ -26,6 +27,7 @@ from uuid import UUID
 
 from pydantic import ValidationError
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError, IntegrityError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.shared.case_state import CaseState
@@ -69,6 +71,17 @@ _SELECT_SQL = text(
 )
 
 
+# Transient failures (connection reset, deadlock, timeout) deserve a
+# bounded retry because the checkpoint write is idempotent upsert.
+# Permanent failures (IntegrityError — schema drift, constraint
+# violation) must raise: silently dropping them hides the bug while
+# the pipeline continues with stale state. Truly unknown exceptions
+# still log+swallow to preserve the original non-fatal contract for
+# the mesh runner's per-step checkpoints.
+_CHECKPOINT_MAX_RETRIES = 3
+_CHECKPOINT_RETRY_BASE_DELAY_SECONDS = 0.2
+
+
 async def persist_case_state(
     db: AsyncSession,
     *,
@@ -79,33 +92,74 @@ async def persist_case_state(
 ) -> None:
     """Upsert a checkpoint row for `(case_id, run_id)` carrying the latest CaseState.
 
-    Non-fatal: logs and swallows SQLAlchemy errors so a DB hiccup
-    doesn't tear down an otherwise-healthy pipeline run. Callers that
-    care about durability should monitor the `pipeline_checkpoints`
-    table separately.
+    Retries transient connectivity/deadlock errors up to 3x with
+    exponential backoff. Raises `IntegrityError` on constraint
+    violations (caller's outer `except Exception` in the mesh runner
+    will route these through `_emit_terminal(reason="exception")`).
+    Unknown exceptions log + swallow so a single freak DB hiccup
+    cannot tear down an otherwise-healthy run.
     """
-    try:
-        payload = _serialize(state)
-        await db.execute(
-            _UPSERT_SQL,
-            {
-                "case_id": str(case_id),
-                "run_id": run_id,
-                "agent_name": agent_name,
-                "state": payload,
-            },
-        )
-        await db.commit()
-    except Exception as exc:
-        logger.error(
-            "pipeline_checkpoint upsert failed (case_id=%s run_id=%s agent=%s): %s",
-            case_id,
-            run_id,
-            agent_name,
-            exc,
-        )
-        with contextlib.suppress(Exception):
-            await db.rollback()
+    payload = _serialize(state)
+    params = {
+        "case_id": str(case_id),
+        "run_id": run_id,
+        "agent_name": agent_name,
+        "state": payload,
+    }
+
+    last_transient_exc: BaseException | None = None
+    for attempt in range(1, _CHECKPOINT_MAX_RETRIES + 1):
+        try:
+            await db.execute(_UPSERT_SQL, params)
+            await db.commit()
+            return
+        except IntegrityError:
+            # Schema drift or FK violation — fail loud so the outer
+            # runner treats this run as terminal/exception.
+            with contextlib.suppress(Exception):
+                await db.rollback()
+            raise
+        except (OperationalError, DBAPIError) as exc:
+            last_transient_exc = exc
+            with contextlib.suppress(Exception):
+                await db.rollback()
+            if attempt < _CHECKPOINT_MAX_RETRIES:
+                delay = _CHECKPOINT_RETRY_BASE_DELAY_SECONDS * (2 ** (attempt - 1))
+                logger.warning(
+                    "pipeline_checkpoint upsert transient failure "
+                    "(case_id=%s run_id=%s agent=%s attempt=%d/%d): %s",
+                    case_id,
+                    run_id,
+                    agent_name,
+                    attempt,
+                    _CHECKPOINT_MAX_RETRIES,
+                    exc,
+                )
+                await asyncio.sleep(delay)
+                continue
+            # Exhausted retries: log at error and swallow (non-fatal
+            # contract — run continues without this checkpoint).
+            logger.error(
+                "pipeline_checkpoint upsert exhausted retries "
+                "(case_id=%s run_id=%s agent=%s): %s",
+                case_id,
+                run_id,
+                agent_name,
+                exc,
+            )
+            return
+        except Exception as exc:
+            logger.error(
+                "pipeline_checkpoint upsert unknown failure "
+                "(case_id=%s run_id=%s agent=%s): %s",
+                case_id,
+                run_id,
+                agent_name,
+                exc,
+            )
+            with contextlib.suppress(Exception):
+                await db.rollback()
+            return
 
 
 async def load_case_state(
