@@ -43,6 +43,12 @@ class CaseStatus(str, enum.Enum):
     # past its threshold — typically because the broker dropped its in-flight
     # message. The frontend surfaces this as "Pipeline interrupted, retry?"
     failed_retryable = "failed_retryable"
+    # Gate pause statuses — set after each gate group completes; judge must
+    # approve or re-run before the pipeline advances to the next gate.
+    awaiting_review_gate1 = "awaiting_review_gate1"
+    awaiting_review_gate2 = "awaiting_review_gate2"
+    awaiting_review_gate3 = "awaiting_review_gate3"
+    awaiting_review_gate4 = "awaiting_review_gate4"
 
 
 class CaseComplexity(str, enum.Enum):
@@ -136,6 +142,8 @@ class Case(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # of a successful run; read by what_if/stability to load the real
     # CaseState from pipeline_checkpoints rather than synthesizing an empty one.
     latest_run_id: Mapped[str | None] = mapped_column(String(36))
+    gate_state: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    judicial_decision: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_by: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
     )
@@ -199,6 +207,7 @@ class Document(UUIDPrimaryKeyMixin, Base):
     openai_file_id: Mapped[str | None] = mapped_column(String(255))
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
     file_type: Mapped[str | None] = mapped_column(String(100))
+    pages: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     uploaded_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id")
     )

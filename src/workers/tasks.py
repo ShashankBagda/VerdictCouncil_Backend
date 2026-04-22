@@ -104,8 +104,116 @@ async def run_stability_computation_job(ctx: dict[str, Any], job_id: str) -> Non
     )
 
 
+async def run_gate_job(ctx: dict[str, Any], job_id: str) -> None:  # noqa: ARG001
+    async def _runner(job: PipelineJob) -> None:
+        from datetime import UTC, datetime
+
+        from src.api.schemas.pipeline_events import PipelineProgressEvent
+        from src.db.persist_case_results import persist_case_results
+        from src.db.pipeline_state import (
+            CheckpointCorruptError,
+            CheckpointSchemaMismatchError,
+            load_case_state,
+            persist_case_state,
+        )
+        from src.models.case import Case
+        from src.pipeline.runner import PipelineRunner
+        from src.services.database import async_session
+        from src.services.pipeline_events import publish_progress
+        from src.shared.case_state import CaseState, CaseStatusEnum
+
+        payload = job.payload or {}
+        gate_name = payload.get("gate_name")
+        start_agent = payload.get("start_agent")
+        instructions = payload.get("instructions")
+
+        if not gate_name:
+            raise ValueError(f"gate_run job {job.id} missing gate_name in payload")
+
+        case_id = job.case_id
+        gate_num = int(gate_name[-1])
+        prev_gate_num = gate_num - 1
+
+        # Load previous gate checkpoint; fall back to minimal state on any failure
+        state: CaseState | None = None
+        if prev_gate_num >= 1:
+            prev_run_id = f"{case_id}-gate{prev_gate_num}"
+            try:
+                async with async_session() as db:
+                    state = await load_case_state(db, case_id=case_id, run_id=prev_run_id)
+            except (CheckpointSchemaMismatchError, CheckpointCorruptError):
+                logger.warning(
+                    "gate checkpoint for case_id=%s gate%s unreadable; reinitialising from DB",
+                    case_id,
+                    prev_gate_num,
+                )
+
+        if state is None:
+            async with async_session() as db:
+                case = await db.get(Case, case_id)
+                if case is None:
+                    raise ValueError(f"Case {case_id} not found for gate_run job {job.id}")
+                state = CaseState(
+                    case_id=str(case_id),
+                    domain=case.domain.value if case.domain else None,
+                    status=CaseStatusEnum.processing,
+                )
+
+        # Force status to processing before handing to run_gate
+        state = state.model_copy(update={"status": CaseStatusEnum.processing})
+
+        runner = PipelineRunner()
+        final_state = await runner.run_gate(state, gate_name, start_agent, instructions)
+
+        gate_state_payload = {
+            "current_gate": gate_num,
+            "awaiting_review": True,
+            "rerun_agent": None,
+        }
+        gate_run_id = f"{case_id}-{gate_name}"
+
+        async with async_session() as db:
+            # Flush parsed document pages if any parse_document tool calls ran (US-008)
+            if runner._document_pages_buffer:
+                from sqlalchemy import update as sa_update
+
+                from src.models.case import Document
+
+                for file_id, pages in runner._document_pages_buffer.items():
+                    await db.execute(
+                        sa_update(Document)
+                        .where(Document.openai_file_id == file_id)
+                        .values(pages=pages)
+                    )
+
+            await persist_case_results(
+                db, case_id, final_state, gate_state_payload=gate_state_payload
+            )
+
+        async with async_session() as db:
+            await persist_case_state(
+                db,
+                case_id=case_id,
+                run_id=gate_run_id,
+                agent_name="gate_complete",
+                state=final_state,
+            )
+
+        event = PipelineProgressEvent(
+            case_id=case_id,
+            agent="pipeline",
+            phase="awaiting_review",
+            ts=datetime.now(UTC),
+            detail={"gate": gate_name},
+        )
+        await publish_progress(event)
+
+    await _run_with_outbox(job_id, PipelineJobType.gate_run, _runner)
+
+
 TASK_BY_JOB_TYPE: dict[PipelineJobType, str] = {
     PipelineJobType.case_pipeline: run_case_pipeline_job.__name__,
     PipelineJobType.whatif_scenario: run_whatif_scenario_job.__name__,
     PipelineJobType.stability_computation: run_stability_computation_job.__name__,
+    PipelineJobType.gate_run: run_gate_job.__name__,
 }

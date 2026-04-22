@@ -42,9 +42,7 @@ def configure_mlflow() -> None:
 
 
 @contextmanager
-def pipeline_run(
-    *, case_id: str, run_id: str, mode: str
-) -> Generator[Any, None, None]:
+def pipeline_run(*, case_id: str, run_id: str, mode: str) -> Generator[Any, None, None]:
     """Wrap one pipeline execution as an MLflow run.
 
     No-op when MLflow is disabled. Nested-safe: uses nested=True when an
@@ -58,16 +56,12 @@ def pipeline_run(
     run_name = f"case_{case_id[:8]}_{run_id[:8]}"
     nested = mlflow.active_run() is not None
     with mlflow.start_run(run_name=run_name, nested=nested) as run:
-        mlflow.set_tags(
-            {"case_id": case_id, "run_id": run_id, "pipeline_mode": mode}
-        )
+        mlflow.set_tags({"case_id": case_id, "run_id": run_id, "pipeline_mode": mode})
         yield run
 
 
 @contextmanager
-def tool_span(
-    name: str, *, inputs: dict[str, Any] | None = None
-) -> Generator[Any, None, None]:
+def tool_span(name: str, *, inputs: dict[str, Any] | None = None) -> Generator[Any, None, None]:
     """Manual span for custom tool calls not captured by OpenAI autolog.
 
     autolog traces AsyncOpenAI.chat.completions.create() calls only.

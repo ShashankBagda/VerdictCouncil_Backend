@@ -96,17 +96,10 @@ class ComplexityEscalationHook:
     async def after_agent(self, agent_name: str, state: CaseState, ctx: HookContext) -> HookResult:
         if agent_name != "complexity-routing":
             return HookResult(state=state)
+        # Single-judge model: escalation target removed. If LLM set escalated,
+        # force back to processing — the gate runner handles the pause.
         if state.status == CaseStatusEnum.escalated:
-            logger.warning(
-                "Pipeline halted at complexity-routing: case escalated (case_id=%s)",
-                ctx.case_id,
-            )
-            return HookResult(
-                state=state,
-                halt=True,
-                reason="complexity_escalation",
-                stopped_at="complexity-routing",
-            )
+            state = state.model_copy(update={"status": CaseStatusEnum.processing})
         return HookResult(state=state)
 
     async def after_run(self, state: CaseState, ctx: HookContext) -> HookResult:
@@ -114,7 +107,7 @@ class ComplexityEscalationHook:
 
 
 class GovernanceHaltHook:
-    """Halts the pipeline on output integrity failure or critical fairness issues."""
+    """Logs fairness issues for judge review; no longer halts the pipeline."""
 
     async def before_run(self, state: CaseState, ctx: HookContext) -> HookResult:
         return HookResult(state=state)
@@ -124,8 +117,8 @@ class GovernanceHaltHook:
             return HookResult(state=state)
         integrity = validate_output_integrity(state.model_dump())
         if not integrity["passed"]:
-            logger.error(
-                "Output integrity check FAILED (case_id=%s): %s",
+            logger.warning(
+                "Output integrity check FAILED (case_id=%s): %s — surfaced to judge at gate 4",
                 ctx.case_id,
                 integrity["issues"],
             )
@@ -135,24 +128,10 @@ class GovernanceHaltHook:
                 action="output_integrity_failed",
                 output_payload=integrity,
             )
-            state.status = CaseStatusEnum.escalated
-            return HookResult(
-                state=state,
-                halt=True,
-                reason="governance_halt",
-                stopped_at="hearing-governance",
-            )
         if state.fairness_check and state.fairness_check.critical_issues_found:
             logger.warning(
-                "Pipeline halted: critical fairness issues (case_id=%s)",
+                "Critical fairness issues detected (case_id=%s) — surfaced to judge at gate 4",
                 ctx.case_id,
-            )
-            state = state.model_copy(update={"status": CaseStatusEnum.escalated})
-            return HookResult(
-                state=state,
-                halt=True,
-                reason="governance_halt",
-                stopped_at="hearing-governance",
             )
         return HookResult(state=state)
 

@@ -15,6 +15,11 @@ class CaseStatusEnum(str, Enum):
     escalated = "escalated"
     closed = "closed"
     failed = "failed"
+    failed_retryable = "failed_retryable"
+    awaiting_review_gate1 = "awaiting_review_gate1"
+    awaiting_review_gate2 = "awaiting_review_gate2"
+    awaiting_review_gate3 = "awaiting_review_gate3"
+    awaiting_review_gate4 = "awaiting_review_gate4"
 
 
 class CaseDomainEnum(str, Enum):

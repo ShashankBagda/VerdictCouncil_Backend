@@ -278,3 +278,43 @@ class CaseDetailResponse(CaseResponse):
     audit_logs: list[AuditLogSummary] = Field(
         default_factory=list, description="Audit trail entries"
     )
+
+
+class GateAdvanceRequest(BaseModel):
+    pass
+
+
+class GateRerunRequest(BaseModel):
+    agent_name: str | None = Field(
+        None, description="Agent to restart from; defaults to first agent in gate"
+    )
+    instructions: str | None = Field(
+        None, description="Additional instructions appended to the agent's system prompt"
+    )
+
+
+class AIEngagement(BaseModel):
+    conclusion_type: str = Field(
+        ..., description="Type of AI conclusion (verdict_recommendation, fairness_flag, etc.)"
+    )
+    conclusion_id: str | None = Field(None, description="ID of the specific conclusion item")
+    agreed: bool = Field(..., description="Whether the judge agrees with this AI conclusion")
+    reasoning: str | None = Field(
+        None, description="Required when agreed=False: judge's reasoning for disagreement"
+    )
+
+    @model_validator(mode="after")
+    def reasoning_required_on_disagree(self) -> AIEngagement:
+        if not self.agreed and not (self.reasoning or "").strip():
+            raise ValueError("reasoning is required when agreed is False")
+        return self
+
+
+class JudicialDecisionCreate(BaseModel):
+    verdict_text: str = Field(..., min_length=1)
+    ai_engagements: list[AIEngagement] = Field(default_factory=list)
+
+
+class SuggestedQuestionsUpdate(BaseModel):
+    side: str = Field(..., description="Argument side (prosecution/defense/claimant/respondent)")
+    questions: list[dict[str, Any]] = Field(..., description="Full replacement question list")

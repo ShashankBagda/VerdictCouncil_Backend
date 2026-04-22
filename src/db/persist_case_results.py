@@ -58,11 +58,15 @@ async def persist_case_results(
     db: AsyncSession,
     case_id: UUID,
     state: CaseState,
+    gate_state_payload: dict | None = None,
 ) -> None:
     """Persist a terminal CaseState to the relational tables.
 
     Rolls back on any failure. Safe to call repeatedly — child rows for
     ``case_id`` are replaced, not appended.
+
+    gate_state_payload, when provided, is written to Case.gate_state inside
+    the same transaction so gate state and pipeline results are always consistent.
     """
     try:
         await _clear_child_rows(db, case_id)
@@ -74,7 +78,7 @@ async def persist_case_results(
         _insert_arguments(db, case_id, state)
         _insert_hearing_analysis(db, case_id, state)
         _insert_audit_log(db, case_id, state)
-        await _update_case_row(db, case_id, state)
+        await _update_case_row(db, case_id, state, gate_state_payload)
         await db.commit()
     except Exception as exc:
         logger.error("persist_case_results failed for case_id=%s: %s", case_id, exc)
@@ -120,6 +124,7 @@ async def _update_case_row(
     db: AsyncSession,
     case_id: UUID,
     state: CaseState,
+    gate_state_payload: dict | None = None,
 ) -> None:
     """Sync selected Case columns (status, complexity, route) from CaseState."""
     case = await db.get(Case, case_id)
@@ -132,6 +137,8 @@ async def _update_case_row(
     # what-if / stability endpoints read that row back via load_case_state.
     if state.run_id:
         case.latest_run_id = state.run_id
+    if gate_state_payload is not None:
+        case.gate_state = gate_state_payload
     complexity = (state.case_metadata or {}).get("complexity")
     if complexity in {"low", "medium", "high"}:
         from src.models.case import CaseComplexity

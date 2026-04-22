@@ -36,7 +36,7 @@ class PipelineProgressEvent(BaseModel):
             "'pipeline'."
         ),
     )
-    phase: Literal["started", "completed", "failed", "terminal"]
+    phase: Literal["started", "completed", "failed", "terminal", "awaiting_review"]
     step: int | None = Field(
         None,
         ge=1,

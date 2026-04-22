@@ -37,6 +37,14 @@ AGENT_ORDER: list[str] = [
     "hearing-governance",
 ]
 
+# Gate groupings — agents are paused for judge review after each gate completes.
+GATE_AGENTS: dict[str, list[str]] = {
+    "gate1": ["case-processing", "complexity-routing"],
+    "gate2": ["evidence-analysis", "fact-reconstruction", "witness-analysis", "legal-knowledge"],
+    "gate3": ["argument-construction", "hearing-analysis"],
+    "gate4": ["hearing-governance"],
+}
+
 # Maps each agent to the tool function names it can invoke
 AGENT_TOOLS: dict[str, list[str]] = {
     "case-processing": ["parse_document"],
@@ -165,10 +173,10 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
                     "question_types": {
                         "type": "array",
                         "description": (
-                            "Types of questions: 'clarification' | 'challenge' | "
-                            "'exploration' | 'credibility'"
+                            "Types of questions: 'factual_clarification' | 'evidence_gap' | "
+                            "'credibility_probe' | 'legal_interpretation'"
                         ),
-                        "default": ["clarification", "challenge"],
+                        "default": ["factual_clarification", "evidence_gap"],
                     },
                     "max_questions": {
                         "type": "integer",
@@ -357,6 +365,7 @@ class PipelineRunner:
         self._client = client or AsyncOpenAI(api_key=settings.openai_api_key)
         self._config_cache: dict[str, dict[str, Any]] = {}
         self._pending_precedent_meta: dict[str, Any] | None = None
+        self._document_pages_buffer: dict[str, list[str]] = {}  # openai_file_id → page texts
 
     @staticmethod
     def _parse_sam_yaml(raw: dict[str, Any]) -> dict[str, Any]:
@@ -462,6 +471,12 @@ class PipelineRunner:
 
                 with tool_span("tool.parse_document", inputs={"args": list(arguments.keys())}):
                     result = await parse_document(**arguments)
+                # Capture page texts for later DB write (US-008 citation drill-down)
+                file_id = arguments.get("file_id", "")
+                if file_id and isinstance(result, dict) and result.get("pages"):
+                    self._document_pages_buffer[file_id] = [
+                        p.get("text", "") for p in result["pages"]
+                    ]
             elif tool_name == "cross_reference":
                 from src.tools import cross_reference
 
@@ -500,11 +515,20 @@ class PipelineRunner:
 
         return json.dumps(result, default=str)
 
-    async def _run_agent(self, agent_name: str, state: CaseState) -> CaseState:
+    async def _run_agent(
+        self,
+        agent_name: str,
+        state: CaseState,
+        extra_instructions: str | None = None,
+    ) -> CaseState:
         """Run a single agent step: call LLM, parse response, update state."""
         config = self._load_agent_config(agent_name)
         model = self._resolve_model(config)
         system_prompt = config.get("instruction", "")
+        if extra_instructions:
+            system_prompt = (
+                f"{system_prompt}\n\nAdditional instructions from judge:\n{extra_instructions}"
+            )
         tools = self._build_tools(agent_name)
 
         state_json = state.model_dump_json()
@@ -631,16 +655,53 @@ class PipelineRunner:
 
         return updated_state
 
+    async def run_gate(
+        self,
+        case_state: CaseState,
+        gate_name: str,
+        start_agent: str | None = None,
+        extra_instructions: str | None = None,
+    ) -> CaseState:
+        """Run one gate's agents and pause for judge review.
+
+        When start_agent is provided, the gate resumes from that agent (used
+        for per-agent reruns). extra_instructions are appended to that agent's
+        system prompt only. After all agents complete, status is set to
+        awaiting_review_<gate_name> regardless of LLM output.
+        """
+        agents = GATE_AGENTS[gate_name]
+        if start_agent is not None:
+            try:
+                agents = agents[agents.index(start_agent) :]
+            except ValueError:
+                logger.warning(
+                    "start_agent %r not in gate %r; running full gate", start_agent, gate_name
+                )
+
+        state = case_state
+        for agent_name in agents:
+            logger.info("Gate %s: running agent '%s'", gate_name, agent_name)
+            agent_extra = extra_instructions if agent_name == start_agent else None
+            state = await self._run_agent(agent_name, state, extra_instructions=agent_extra)
+            # Guardrail: LLM output for complexity-routing can set status=escalated.
+            # With the single-judge model there is no escalation target, so force
+            # status back to processing after every agent step.
+            if state.status == CaseStatusEnum.escalated:
+                state = state.model_copy(update={"status": CaseStatusEnum.processing})
+
+        gate_pause_status = CaseStatusEnum[f"awaiting_review_{gate_name}"]
+        state = state.model_copy(update={"status": gate_pause_status})
+        logger.info(
+            "Gate %s completed for case_id=%s, pausing for judge review", gate_name, state.case_id
+        )
+        return state
+
     async def run(self, case_state: CaseState) -> CaseState:
-        """Run the full 9-agent pipeline sequentially.
+        """Run gate 1 of the gated pipeline for a new case submission.
 
-        Accepts a CaseState with raw_documents populated and returns
-        the final CaseState with all agent outputs merged in.
-
-        Halt conditions:
-        - After Agent 2 (complexity-routing): if status == "escalated"
-        - After Agent 9 (hearing-governance) phase 1: if fairness_check
-          has critical_issues_found == True
+        Only gate 1 (case-processing + complexity-routing) is executed.
+        The judge reviews gate 1 output and uses the gate advance endpoint
+        to trigger subsequent gates.
         """
         from src.pipeline.observability import pipeline_run  # lazy: avoids linter removal
 
@@ -651,36 +712,6 @@ class PipelineRunner:
             run_id=state.run_id or "unknown",
             mode="in_process",
         ):
-            for agent_name in AGENT_ORDER:
-                logger.info("Pipeline step: %s", agent_name)
-                state = await self._run_agent(agent_name, state)
+            state = await self.run_gate(state, "gate1")
 
-                # Halt after Agent 2 if case is escalated
-                if agent_name == "complexity-routing" and state.status == CaseStatusEnum.escalated:
-                    logger.warning(
-                        "Pipeline halted at complexity-routing: "
-                        "case escalated to human review (case_id=%s)",
-                        state.case_id,
-                    )
-                    return state
-
-                # Halt after Agent 9 if fairness check found critical issues
-                if (
-                    agent_name == "hearing-governance"
-                    and state.fairness_check
-                    and state.fairness_check.critical_issues_found
-                ):
-                    logger.warning(
-                        "Pipeline halted at hearing-governance: "
-                        "critical fairness issues detected (case_id=%s)",
-                        state.case_id,
-                    )
-                    state = state.model_copy(update={"status": CaseStatusEnum.escalated})
-                    return state
-
-        logger.info(
-            "Pipeline completed for case_id=%s, status=%s",
-            state.case_id,
-            state.status,
-        )
         return state

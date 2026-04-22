@@ -15,6 +15,7 @@ class PipelineJobType(str, enum.Enum):
     case_pipeline = "case_pipeline"
     whatif_scenario = "whatif_scenario"
     stability_computation = "stability_computation"
+    gate_run = "gate_run"
 
 
 class PipelineJobStatus(str, enum.Enum):

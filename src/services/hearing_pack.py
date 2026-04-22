@@ -122,5 +122,8 @@ def assemble_pack(data: CaseReportData) -> bytes:
         zf.writestr("evidence.json", json.dumps(data.evidence, indent=2, default=str))
         zf.writestr("facts.json", json.dumps(data.facts, indent=2, default=str))
         zf.writestr("arguments.md", _arguments_md(data))
-        zf.writestr("fairness_governance.json", json.dumps(fairness_governance_payload, indent=2, default=str))
+        zf.writestr(
+            "fairness_governance.json",
+            json.dumps(fairness_governance_payload, indent=2, default=str),
+        )
     return buf.getvalue()

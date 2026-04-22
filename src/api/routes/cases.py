@@ -19,6 +19,10 @@ from src.api.schemas.cases import (
     CaseDetailResponse,
     CaseListResponse,
     CaseResponse,
+    GateAdvanceRequest,
+    GateRerunRequest,
+    JudicialDecisionCreate,
+    SuggestedQuestionsUpdate,
 )
 from src.api.schemas.common import ErrorResponse, MessageResponse, ValidationErrorResponse
 from src.models.audit import AuditLog
@@ -62,9 +66,19 @@ PIPELINE_AGENT_ORDER = [
 ]
 
 
+_GATE_PAUSE_STATUSES = {
+    CaseStatus.awaiting_review_gate1,
+    CaseStatus.awaiting_review_gate2,
+    CaseStatus.awaiting_review_gate3,
+    CaseStatus.awaiting_review_gate4,
+}
+
+
 def _status_group(status_value: CaseStatus) -> str:
     if status_value in {CaseStatus.pending, CaseStatus.processing, CaseStatus.failed_retryable}:
         return "processing"
+    if status_value in _GATE_PAUSE_STATUSES:
+        return "awaiting_review"
     if status_value == CaseStatus.ready_for_review:
         return "completed"
     if status_value == CaseStatus.escalated:
@@ -245,7 +259,6 @@ def _build_jurisdiction_summary(case: Case) -> dict[str, Any]:
     return {"status": status_value, "valid": valid, "reasons": reasons}
 
 
-
 def _build_pipeline_progress(case: Case) -> dict[str, Any]:
     completed_agents: set[str] = set()
     running_agent: str | None = None
@@ -386,7 +399,7 @@ async def _load_case_for_export(case_id: UUID, db, current_user: User) -> Case:
 async def create_case(
     body: CaseCreateRequest,
     db: DBSession,
-    current_user: User = require_role(UserRole.clerk, UserRole.judge, UserRole.senior_judge),
+    current_user: User = require_role(UserRole.clerk, UserRole.judge),
 ) -> dict[str, Any]:
     case = Case(
         id=uuid4(),
@@ -631,6 +644,24 @@ async def stream_pipeline_status(
     await _load_case_for_export(case_id, db, current_user)
 
     async def event_generator():
+        # Snapshot-on-connect: emit current case status so a client that
+        # re-subscribes after a gate advance sees the current state immediately,
+        # without waiting for the next Redis event. Uses the already-open
+        # dependency-injected session so tests can mock it cleanly.
+        _snap_case = await db.get(Case, case_id)
+        if _snap_case is not None:
+            snap_event = {
+                "case_id": str(case_id),
+                "agent": "pipeline",
+                "phase": "case.status",
+                "ts": datetime.now(UTC).isoformat(),
+                "detail": {
+                    "status": _snap_case.status.value if _snap_case.status else None,
+                    "gate_state": _snap_case.gate_state,
+                },
+            }
+            yield f"data: {json.dumps(snap_event)}\n\n"
+
         # Producer-consumer pattern: a background task owns the subscribe()
         # generator for its full lifetime and pushes payloads onto a queue.
         # The consumer wakes up every SSE_HEARTBEAT_SECONDS to emit keepalives
@@ -774,8 +805,32 @@ async def _run_case_pipeline(case_id: UUID) -> None:
                 await db.commit()
         return
 
+    gate_state_payload: dict | None = None
+    gate_run_id: str | None = None
+    status_val = final_state.status.value if final_state.status else ""
+    if status_val.startswith("awaiting_review_gate"):
+        gate_num = int(status_val[-1])
+        gate_state_payload = {
+            "current_gate": gate_num,
+            "awaiting_review": True,
+            "rerun_agent": None,
+        }
+        gate_run_id = f"{case_id}-gate{gate_num}"
+
     async with async_session() as db:
-        await persist_case_results(db, case_id, final_state)
+        await persist_case_results(db, case_id, final_state, gate_state_payload=gate_state_payload)
+
+    if gate_run_id and final_state.run_id:
+        from src.db.pipeline_state import persist_case_state
+
+        async with async_session() as db:
+            await persist_case_state(
+                db,
+                case_id=case_id,
+                run_id=gate_run_id,
+                agent_name="gate_complete",
+                state=final_state,
+            )
 
 
 @router.post(
@@ -839,3 +894,242 @@ async def process_case(
     await db.commit()
 
     return MessageResponse(message="Pipeline started")
+
+
+_VALID_GATE_NAMES = {"gate1", "gate2", "gate3", "gate4"}
+
+_NEXT_GATE: dict[str, str | None] = {
+    "gate1": "gate2",
+    "gate2": "gate3",
+    "gate3": "gate4",
+    "gate4": None,
+}
+
+
+@router.post(
+    "/{case_id}/gates/{gate_name}/advance",
+    response_model=MessageResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    operation_id="advance_gate",
+    summary="Advance to the next pipeline gate",
+)
+async def advance_gate(
+    case_id: UUID,
+    gate_name: str,
+    body: GateAdvanceRequest,  # noqa: ARG001
+    db: DBSession,
+    current_user: User = require_role(UserRole.judge),
+) -> MessageResponse:
+    from src.models.pipeline_job import PipelineJobType
+    from src.workers.outbox import enqueue_outbox_job
+
+    if gate_name not in _VALID_GATE_NAMES:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid gate")
+
+    case = (await db.execute(select(Case).where(Case.id == case_id))).scalar_one_or_none()
+    if not case:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
+    if case.created_by != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+
+    expected_pause = CaseStatus(f"awaiting_review_{gate_name}")
+    if case.status != expected_pause:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Case is not paused at {gate_name}",
+        )
+
+    next_gate = _NEXT_GATE[gate_name]
+    if next_gate is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Gate 4 is the final gate; record a decision instead",
+        )
+
+    db.add(
+        AuditLog(
+            case_id=case_id,
+            agent_name="judge",
+            action="gate_advanced",
+            input_payload={"gate_name": gate_name, "next_gate": next_gate},
+        )
+    )
+    case.status = CaseStatus.processing
+    await enqueue_outbox_job(
+        db,
+        case_id=case_id,
+        job_type=PipelineJobType.gate_run,
+        payload={"gate_name": next_gate},
+    )
+    await db.commit()
+
+    return MessageResponse(message=f"Advancing to {next_gate}")
+
+
+@router.post(
+    "/{case_id}/gates/{gate_name}/rerun",
+    response_model=MessageResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    operation_id="rerun_gate",
+    summary="Re-run agents in the current gate from a specific agent",
+)
+async def rerun_gate(
+    case_id: UUID,
+    gate_name: str,
+    body: GateRerunRequest,
+    db: DBSession,
+    current_user: User = require_role(UserRole.judge),
+) -> MessageResponse:
+    from src.models.pipeline_job import PipelineJobType
+    from src.pipeline.runner import GATE_AGENTS
+    from src.workers.outbox import enqueue_outbox_job
+
+    if gate_name not in _VALID_GATE_NAMES:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid gate")
+
+    case = (await db.execute(select(Case).where(Case.id == case_id))).scalar_one_or_none()
+    if not case:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
+    if case.created_by != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+
+    expected_pause = CaseStatus(f"awaiting_review_{gate_name}")
+    if case.status != expected_pause:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Case is not paused at {gate_name}",
+        )
+
+    if body.agent_name and body.agent_name not in GATE_AGENTS[gate_name]:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Agent {body.agent_name!r} is not in {gate_name}",
+        )
+
+    db.add(
+        AuditLog(
+            case_id=case_id,
+            agent_name="judge",
+            action="gate_rerun_requested",
+            input_payload={
+                "gate_name": gate_name,
+                "start_agent": body.agent_name,
+                "has_instructions": bool(body.instructions),
+            },
+        )
+    )
+    case.status = CaseStatus.processing
+    await enqueue_outbox_job(
+        db,
+        case_id=case_id,
+        job_type=PipelineJobType.gate_run,
+        payload={
+            "gate_name": gate_name,
+            "start_agent": body.agent_name,
+            "instructions": body.instructions,
+        },
+    )
+    await db.commit()
+
+    return MessageResponse(message=f"Re-running {gate_name}")
+
+
+@router.post(
+    "/{case_id}/decision",
+    response_model=MessageResponse,
+    status_code=status.HTTP_201_CREATED,
+    operation_id="record_decision",
+    summary="Record the judge's decision with AI engagement responses",
+)
+async def record_decision(
+    case_id: UUID,
+    body: JudicialDecisionCreate,
+    db: DBSession,
+    current_user: User = require_role(UserRole.judge),
+) -> MessageResponse:
+    from datetime import UTC, datetime
+
+    case = (
+        await db.execute(
+            select(Case)
+            .where(Case.id == case_id)
+            .options(selectinload(Case.facts), selectinload(Case.hearing_analyses))
+        )
+    ).scalar_one_or_none()
+    if not case:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
+    if case.created_by != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+
+    case.judicial_decision = {
+        "verdict_text": body.verdict_text,
+        "ai_engagements": [e.model_dump() for e in body.ai_engagements],
+        "recorded_at": datetime.now(UTC).isoformat(),
+        "judge_id": str(current_user.id),
+    }
+    db.add(
+        AuditLog(
+            case_id=case_id,
+            agent_name="judge",
+            action="judicial_decision_recorded",
+            input_payload={
+                "verdict_text": body.verdict_text[:200],
+                "engagements_count": len(body.ai_engagements),
+            },
+        )
+    )
+    await db.commit()
+
+    return MessageResponse(message="Decision recorded")
+
+
+@router.patch(
+    "/{case_id}/suggested-questions",
+    response_model=MessageResponse,
+    operation_id="update_suggested_questions",
+    summary="Update suggested questions for a case argument",
+)
+async def update_suggested_questions(
+    case_id: UUID,
+    body: SuggestedQuestionsUpdate,
+    db: DBSession,
+    current_user: User = require_role(UserRole.judge),
+) -> MessageResponse:
+    from src.models.case import Argument, ArgumentSide
+
+    case = (await db.execute(select(Case).where(Case.id == case_id))).scalar_one_or_none()
+    if not case:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
+    if case.created_by != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+
+    try:
+        side = ArgumentSide(body.side)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid side: {body.side}",
+        ) from None
+
+    result = await db.execute(
+        select(Argument).where(Argument.case_id == case_id, Argument.side == side)
+    )
+    argument = result.scalar_one_or_none()
+    if not argument:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No argument found for side {body.side}",
+        )
+
+    argument.suggested_questions = body.questions
+    db.add(
+        AuditLog(
+            case_id=case_id,
+            agent_name="judge",
+            action="suggested_questions_edit",
+            input_payload={"side": body.side, "questions_count": len(body.questions)},
+        )
+    )
+    await db.commit()
+
+    return MessageResponse(message="Suggested questions updated")
