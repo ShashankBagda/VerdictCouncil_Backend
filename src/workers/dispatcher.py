@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 # --- tunables ---------------------------------------------------------------
 DISPATCH_POLL_INTERVAL_SECONDS = 1.0
-DISPATCH_BATCH_SIZE = 50
+DISPATCH_BATCH_SIZE = 10
 # After 20 min in `dispatched`, we assume the worker crashed. Mesh
 # pipeline tops out ~5–7 min, so 20 min leaves generous headroom for
 # contention-induced slowdowns.
@@ -65,14 +65,16 @@ async def _dispatch_batch(db: AsyncSession, arq_redis: ArqRedis) -> int:
         for job_id, job_type_str, _case_id, _target_id in claimed:
             job_type = PipelineJobType(job_type_str)
             task_name = TASK_BY_JOB_TYPE[job_type]
-            await arq_redis.enqueue_job(task_name, str(job_id))
+            # _job_id pins the arq job key to our outbox UUID so arq
+            # deduplicates re-enqueues of the same row (e.g. on retry
+            # after a partial-batch rollback).
+            await arq_redis.enqueue_job(task_name, str(job_id), _job_id=str(job_id))
             enqueued_ids.append(job_id)
     except Exception:
         # Enqueue failed partway. Roll back the SELECT FOR UPDATE so
         # locks release and all claimed rows revert to `pending`. The
-        # rows we already enqueued will produce duplicate deliveries,
-        # but the task wrapper is idempotent — it no-ops on rows
-        # that are not `dispatched`/`pending`.
+        # rows we already enqueued have a fixed _job_id so arq
+        # deduplicates them on the next dispatch cycle.
         await db.rollback()
         logger.exception("arq enqueue failed; %d rows reverted", len(claimed))
         raise

@@ -105,7 +105,7 @@ async def run_stability_computation_job(ctx: dict[str, Any], job_id: str) -> Non
 
 
 TASK_BY_JOB_TYPE: dict[PipelineJobType, str] = {
-    PipelineJobType.case_pipeline: "run_case_pipeline_job",
-    PipelineJobType.whatif_scenario: "run_whatif_scenario_job",
-    PipelineJobType.stability_computation: "run_stability_computation_job",
+    PipelineJobType.case_pipeline: run_case_pipeline_job.__name__,
+    PipelineJobType.whatif_scenario: run_whatif_scenario_job.__name__,
+    PipelineJobType.stability_computation: run_stability_computation_job.__name__,
 }

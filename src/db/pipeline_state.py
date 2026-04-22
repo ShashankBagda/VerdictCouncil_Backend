@@ -161,17 +161,6 @@ async def persist_case_state(
                 await db.rollback()
             return
 
-    # Defensive: loop completed without return — treat as exhausted.
-    if last_transient_exc is not None:
-        logger.error(
-            "pipeline_checkpoint upsert exhausted retries with transient error "
-            "(case_id=%s run_id=%s agent=%s): %s",
-            case_id,
-            run_id,
-            agent_name,
-            last_transient_exc,
-        )
-
 
 async def load_case_state(
     db: AsyncSession,

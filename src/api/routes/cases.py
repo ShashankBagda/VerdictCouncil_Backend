@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-STARTABLE_STATUSES = (CaseStatus.pending, CaseStatus.ready_for_review)
+STARTABLE_STATUSES = (CaseStatus.pending, CaseStatus.ready_for_review, CaseStatus.failed_retryable)
 
 # SSE stream tuning — exposed at module scope so tests can override.
 # HEARTBEAT cadence must be short enough to defeat reverse-proxy idle timers
