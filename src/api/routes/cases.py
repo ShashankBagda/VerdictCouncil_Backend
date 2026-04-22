@@ -7,7 +7,7 @@ from datetime import UTC, date, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, HTTPException, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import selectinload
@@ -773,7 +773,6 @@ async def _run_case_pipeline(case_id: UUID) -> None:
 )
 async def process_case(
     case_id: UUID,
-    background_tasks: BackgroundTasks,
     db: DBSession,
     current_user: CurrentUser,
 ) -> MessageResponse:
@@ -807,8 +806,13 @@ async def process_case(
             status_code=status.HTTP_409_CONFLICT,
             detail="Case is not in a startable state",
         )
-    await db.commit()
 
-    background_tasks.add_task(_run_case_pipeline, case_id)
+    # Outbox INSERT shares the status-flip transaction so a post-commit
+    # crash cannot leave a case `processing` without a pending job.
+    from src.models.pipeline_job import PipelineJobType
+    from src.workers.outbox import enqueue_outbox_job
+
+    await enqueue_outbox_job(db, case_id=case_id, job_type=PipelineJobType.case_pipeline)
+    await db.commit()
 
     return MessageResponse(message="Pipeline started")

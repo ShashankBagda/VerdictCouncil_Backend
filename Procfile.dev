@@ -10,3 +10,4 @@ deliberation:         .venv/bin/solace-agent-mesh run configs/agents/deliberatio
 governance-verdict:   .venv/bin/solace-agent-mesh run configs/agents/governance-verdict.yaml
 layer2-aggregator:    .venv/bin/solace-agent-mesh run configs/services/layer2-aggregator.yaml
 api:                  .venv/bin/uvicorn src.api.app:app --host 0.0.0.0 --port 8001 --reload
+arq-worker:           .venv/bin/arq src.workers.worker_settings.WorkerSettings

@@ -6,7 +6,7 @@ import logging
 import uuid
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, status
+from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
@@ -250,7 +250,6 @@ async def _run_stability_computation(stability_id: uuid.UUID) -> None:
 async def submit_whatif_scenario(
     case_id: uuid.UUID,
     body: WhatIfRequest,
-    background_tasks: BackgroundTasks,
     db: DBSession,
     current_user: User = require_role(UserRole.judge),
 ) -> WhatIfResponse:
@@ -292,9 +291,20 @@ async def submit_whatif_scenario(
     )
     db.add(scenario)
     await db.flush()
-
     scenario_id = scenario.id
-    background_tasks.add_task(_run_whatif_scenario, scenario_id)
+
+    # Outbox INSERT shares the scenario-insert transaction so a post-commit
+    # crash cannot leave a `pending` scenario without a pending job.
+    from src.models.pipeline_job import PipelineJobType
+    from src.workers.outbox import enqueue_outbox_job
+
+    await enqueue_outbox_job(
+        db,
+        case_id=case_id,
+        job_type=PipelineJobType.whatif_scenario,
+        target_id=scenario_id,
+    )
+    await db.commit()
 
     return WhatIfResponse(
         scenario_id=scenario_id,
@@ -374,7 +384,6 @@ async def get_whatif_result(
 async def trigger_stability_score(
     case_id: uuid.UUID,
     body: StabilityRequest,
-    background_tasks: BackgroundTasks,
     db: DBSession,
     current_user: User = require_role(UserRole.judge),
 ) -> StabilityResponse:
@@ -397,9 +406,20 @@ async def trigger_stability_score(
     )
     db.add(stability)
     await db.flush()
-
     stability_id = stability.id
-    background_tasks.add_task(_run_stability_computation, stability_id)
+
+    # Outbox INSERT shares the stability-insert transaction so a post-commit
+    # crash cannot leave a `pending` stability row without a pending job.
+    from src.models.pipeline_job import PipelineJobType
+    from src.workers.outbox import enqueue_outbox_job
+
+    await enqueue_outbox_job(
+        db,
+        case_id=case_id,
+        job_type=PipelineJobType.stability_computation,
+        target_id=stability_id,
+    )
+    await db.commit()
 
     return StabilityResponse(
         stability_id=stability_id,

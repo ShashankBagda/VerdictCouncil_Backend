@@ -296,8 +296,13 @@ class TestProcessCase:
         doc.file_type = "application/pdf"
         return doc
 
-    async def test_process_case_accepted(self, monkeypatch):
-        """POST /api/v1/cases/{id}/process returns 202 when the atomic flip matches."""
+    async def test_process_case_accepted(self):
+        """POST /api/v1/cases/{id}/process returns 202 when the atomic flip matches.
+
+        Also asserts that a PipelineJob outbox row was staged on the same
+        session as the status flip — the crash-safety contract depends on
+        the INSERT sharing the commit, not being dispatched inline.
+        """
         user = _make_user()
         mock_db = _build_mock_session()
 
@@ -306,15 +311,6 @@ class TestProcessCase:
             _mock_scalar_result(case),
             _mock_scalar_result(case.id),
         ]
-
-        from src.api.routes import cases as cases_module
-
-        scheduled = []
-
-        async def _noop_runner(_case_id):
-            scheduled.append(_case_id)
-
-        monkeypatch.setattr(cases_module, "_run_case_pipeline", _noop_runner)
 
         app = _app_with_overrides(mock_db, user)
         transport = ASGITransport(app=app)
@@ -325,6 +321,16 @@ class TestProcessCase:
         assert resp.status_code == 202
         assert resp.json()["message"]
         mock_db.commit.assert_awaited()
+
+        # Outbox contract: one PipelineJob row for this case must be staged.
+        from src.models.pipeline_job import PipelineJob, PipelineJobType
+
+        mock_db.add.assert_called_once()
+        (staged,) = mock_db.add.call_args.args
+        assert isinstance(staged, PipelineJob)
+        assert staged.job_type == PipelineJobType.case_pipeline
+        assert staged.case_id == case.id
+        assert staged.target_id is None
 
     async def test_process_case_rejects_empty_documents(self):
         """POST /process returns 400 when the case has no documents."""
@@ -395,7 +401,7 @@ class TestProcessCase:
 
         assert resp.status_code == 409
 
-    async def test_process_case_accepts_ready_for_review(self, monkeypatch):
+    async def test_process_case_accepts_ready_for_review(self):
         """ready_for_review is explicitly startable per STARTABLE_STATUSES."""
         user = _make_user()
         mock_db = _build_mock_session()
@@ -406,13 +412,6 @@ class TestProcessCase:
             _mock_scalar_result(case.id),
         ]
 
-        from src.api.routes import cases as cases_module
-
-        async def _noop_runner(_case_id):
-            return None
-
-        monkeypatch.setattr(cases_module, "_run_case_pipeline", _noop_runner)
-
         app = _app_with_overrides(mock_db, user)
         transport = ASGITransport(app=app)
 
@@ -420,6 +419,7 @@ class TestProcessCase:
             resp = await client.post(f"/api/v1/cases/{case.id}/process")
 
         assert resp.status_code == 202
+        mock_db.add.assert_called_once()
 
 
 class TestCors:
