@@ -163,5 +163,24 @@
 </section>
 {% endif %}
 
+{% if case.decision_history %}
+<section class="section">
+  <h2>Decision History Appendix</h2>
+  <table>
+    <thead><tr><th>Recorded At</th><th>Type</th><th>Outcome</th><th>Amendment Reason</th></tr></thead>
+    <tbody>
+    {% for entry in case.decision_history %}
+      <tr>
+        <td>{{ entry.created_at or '—' }}</td>
+        <td>{{ entry.recommendation_type }}</td>
+        <td>{{ entry.recommended_outcome }}</td>
+        <td>{{ entry.amendment_reason or '—' }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
 </body>
 </html>

@@ -189,3 +189,81 @@ class TestDecisionWrongStatus:
             )
 
         assert resp.status_code == 400
+
+
+class TestDecisionAmendments:
+    async def test_recording_judge_can_apply_amendment_directly(self):
+        judge = _make_user()
+        prior_decision_log = MagicMock()
+        prior_decision_log.agent_name = "judge"
+        prior_decision_log.action = "decision_modify"
+        prior_decision_log.input_payload = {"judge_id": str(judge.id), "final_order": "Original order"}
+        prior_decision_log.created_at = datetime.now(UTC)
+        verdict = MagicMock()
+        verdict.id = uuid.uuid4()
+        verdict.created_at = datetime.now(UTC)
+        verdict.recommendation_type = "manual_decision"
+        verdict.recommended_outcome = "Original order"
+        verdict.sentence = None
+        verdict.confidence_score = None
+        verdict.alternative_outcomes = None
+        verdict.fairness_report = None
+        case = _make_case(
+            judge.id,
+            status=CaseStatus.decided,
+            audit_logs=[prior_decision_log],
+            verdicts=[verdict],
+        )
+
+        mock_db = _build_mock_session()
+        mock_db.execute.return_value = _mock_scalar_result(case)
+
+        app = _app_with_overrides(mock_db, judge)
+        transport = ASGITransport(app=app)
+
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(
+                f"/api/v1/cases/{case.id}/decision-amendments",
+                json={
+                    "amendment_type": "clerical_correction",
+                    "reason": "Correcting the damages amount.",
+                    "final_order": "Damages amended to $3,800.",
+                },
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "approved"
+
+    async def test_non_recording_judge_routes_amendment_to_senior_inbox(self):
+        recording_judge = _make_user()
+        requesting_judge = _make_user(email="other@example.com")
+        prior_decision_log = MagicMock()
+        prior_decision_log.agent_name = "judge"
+        prior_decision_log.action = "decision_modify"
+        prior_decision_log.input_payload = {"judge_id": str(recording_judge.id), "final_order": "Original order"}
+        prior_decision_log.created_at = datetime.now(UTC)
+        case = _make_case(
+            recording_judge.id,
+            status=CaseStatus.decided,
+            audit_logs=[prior_decision_log],
+            verdicts=[],
+        )
+
+        mock_db = _build_mock_session()
+        mock_db.execute.return_value = _mock_scalar_result(case)
+
+        app = _app_with_overrides(mock_db, requesting_judge)
+        transport = ASGITransport(app=app)
+
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(
+                f"/api/v1/cases/{case.id}/decision-amendments",
+                json={
+                    "amendment_type": "post_hearing_update",
+                    "reason": "Late document clarifies the quantum calculation.",
+                    "final_order": "Updated award to $4,100.",
+                },
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "pending_senior_review"

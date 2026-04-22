@@ -1003,6 +1003,113 @@
         }
       }
     },
+    "/api/v1/cases/{case_id}/rejection-review": {
+      "post": {
+        "tags": [
+          "cases"
+        ],
+        "summary": "Override or close a rejected case",
+        "operationId": "review_rejected_case",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Case Id"
+            }
+          },
+          {
+            "name": "vc_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Vc Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RejectionReviewRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RejectionReviewResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Case is not rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Case not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (60 requests/minute per client IP)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the rate limit resets",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/cases/{case_id}/report.pdf": {
       "get": {
         "tags": [
@@ -1568,6 +1675,113 @@
           },
           "403": {
             "description": "Not authorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (60 requests/minute per client IP)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the rate limit resets",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/cases/{case_id}/supplementary-documents": {
+      "post": {
+        "tags": [
+          "cases"
+        ],
+        "summary": "Upload supplementary documents and trigger selective re-processing",
+        "operationId": "upload_supplementary_documents",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Case Id"
+            }
+          },
+          {
+            "name": "vc_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Vc Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_supplementary_documents"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupplementaryUploadResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Closed cases cannot accept documents",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Case not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -2518,6 +2732,123 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ValidationErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (60 requests/minute per client IP)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the rate limit resets",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/cases/{case_id}/decision-amendments": {
+      "post": {
+        "tags": [
+          "decisions"
+        ],
+        "summary": "Amend or request amendment of a recorded decision",
+        "operationId": "submit_decision_amendment",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Case Id"
+            }
+          },
+          {
+            "name": "vc_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Vc Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecisionAmendmentRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecisionAmendmentResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Case has no recorded decision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient permissions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Case not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -5513,6 +5844,92 @@
         }
       }
     },
+    "/api/v1/senior-inbox/{item_id}/action": {
+      "post": {
+        "tags": [
+          "senior-inbox"
+        ],
+        "summary": "Take action on a senior inbox item",
+        "operationId": "take_senior_inbox_action",
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Item Id"
+            }
+          },
+          {
+            "name": "vc_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Vc Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SeniorInboxActionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeniorInboxActionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (60 requests/minute per client IP)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the rate limit resets",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/admin/vector-stores/refresh": {
       "post": {
         "tags": [
@@ -5818,6 +6235,15 @@
   },
   "components": {
     "schemas": {
+      "AmendmentType": {
+        "type": "string",
+        "enum": [
+          "clerical_correction",
+          "post_hearing_update",
+          "error_correction"
+        ],
+        "title": "AmendmentType"
+      },
       "ArgumentResponse": {
         "properties": {
           "id": {
@@ -6093,6 +6519,35 @@
           "file"
         ],
         "title": "Body_upload_knowledge_base_document"
+      },
+      "Body_upload_supplementary_documents": {
+        "properties": {
+          "files": {
+            "items": {
+              "type": "string",
+              "contentMediaType": "application/octet-stream"
+            },
+            "type": "array",
+            "title": "Files",
+            "description": "Supplementary files to upload"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "files"
+        ],
+        "title": "Body_upload_supplementary_documents"
       },
       "CaseCreateRequest": {
         "properties": {
@@ -7282,6 +7737,96 @@
           "reject"
         ],
         "title": "DecisionAction"
+      },
+      "DecisionAmendmentRequest": {
+        "properties": {
+          "amendment_type": {
+            "$ref": "#/components/schemas/AmendmentType"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 5000,
+            "minLength": 1,
+            "title": "Reason"
+          },
+          "final_order": {
+            "type": "string",
+            "maxLength": 10000,
+            "minLength": 1,
+            "title": "Final Order"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 5000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "amendment_type",
+          "reason",
+          "final_order"
+        ],
+        "title": "DecisionAmendmentRequest"
+      },
+      "DecisionAmendmentResponse": {
+        "properties": {
+          "case_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Case Id"
+          },
+          "amendment_request_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amendment Request Id"
+          },
+          "amendment_type": {
+            "$ref": "#/components/schemas/AmendmentType"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "amended_verdict_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amended Verdict Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "case_id",
+          "amendment_type",
+          "status",
+          "message"
+        ],
+        "title": "DecisionAmendmentResponse"
       },
       "DecisionRequest": {
         "properties": {
@@ -9483,6 +10028,82 @@
         "title": "RegisterRequest",
         "description": "User registration request."
       },
+      "RejectedCaseAction": {
+        "type": "string",
+        "enum": [
+          "override",
+          "close"
+        ],
+        "title": "RejectedCaseAction"
+      },
+      "RejectionReviewRequest": {
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/RejectedCaseAction"
+          },
+          "justification": {
+            "type": "string",
+            "maxLength": 5000,
+            "minLength": 1,
+            "title": "Justification"
+          }
+        },
+        "type": "object",
+        "required": [
+          "action",
+          "justification"
+        ],
+        "title": "RejectionReviewRequest"
+      },
+      "RejectionReviewResponse": {
+        "properties": {
+          "case_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Case Id"
+          },
+          "action": {
+            "$ref": "#/components/schemas/RejectedCaseAction"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CaseStatus"
+          },
+          "rejection_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rejection Reason"
+          },
+          "resumed_from_stage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resumed From Stage"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "case_id",
+          "action",
+          "status",
+          "message"
+        ],
+        "title": "RejectionReviewResponse"
+      },
       "ReopenRequestCreateRequest": {
         "properties": {
           "reason": {
@@ -9653,6 +10274,96 @@
         ],
         "title": "ScenarioStatus"
       },
+      "SeniorInboxAction": {
+        "type": "string",
+        "enum": [
+          "approve",
+          "reject",
+          "reassign",
+          "request_more_info"
+        ],
+        "title": "SeniorInboxAction"
+      },
+      "SeniorInboxActionRequest": {
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/SeniorInboxAction"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 5000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "assignee": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assignee"
+          }
+        },
+        "type": "object",
+        "required": [
+          "action"
+        ],
+        "title": "SeniorInboxActionRequest"
+      },
+      "SeniorInboxActionResponse": {
+        "properties": {
+          "item_id": {
+            "type": "string",
+            "title": "Item Id"
+          },
+          "action": {
+            "$ref": "#/components/schemas/SeniorInboxAction"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "assignee": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assignee"
+          },
+          "reviewed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Reviewed At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "item_id",
+          "action",
+          "status",
+          "message",
+          "reviewed_at"
+        ],
+        "title": "SeniorInboxActionResponse"
+      },
       "StabilityClassification": {
         "type": "string",
         "enum": [
@@ -9812,6 +10523,50 @@
           "failed"
         ],
         "title": "StabilityStatus"
+      },
+      "SupplementaryUploadResponse": {
+        "properties": {
+          "case_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Case Id"
+          },
+          "documents": {
+            "items": {
+              "$ref": "#/components/schemas/DocumentResponse"
+            },
+            "type": "array",
+            "title": "Documents"
+          },
+          "retriggered_stages": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Retriggered Stages"
+          },
+          "preserved_stages": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Preserved Stages"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CaseStatus"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "case_id",
+          "status",
+          "message"
+        ],
+        "title": "SupplementaryUploadResponse"
       },
       "UncorroboratedFact": {
         "properties": {

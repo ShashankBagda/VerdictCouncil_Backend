@@ -54,6 +54,23 @@ def _case_summary_md(data: CaseReportData) -> str:
                 "",
             ]
         )
+    if data.decision_history:
+        lines.extend(
+            [
+                "## Decision History",
+                "",
+                *[
+                    f"- **{entry.get('created_at') or 'unknown'}:** {entry.get('recommended_outcome') or 'No outcome'}"
+                    + (
+                        f" ({entry.get('amendment_reason')})"
+                        if entry.get("amendment_reason")
+                        else ""
+                    )
+                    for entry in data.decision_history
+                ],
+                "",
+            ]
+        )
     return "\n".join(lines)
 
 
@@ -94,6 +111,7 @@ def assemble_pack(data: CaseReportData) -> bytes:
     verdict_payload = {
         "verdict": data.verdict,
         "fairness_report": data.fairness_report,
+        "decision_history": data.decision_history,
     }
 
     buf = io.BytesIO()

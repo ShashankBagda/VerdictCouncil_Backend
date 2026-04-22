@@ -18,8 +18,10 @@ from src.api.schemas.cases import (
     CaseDetailResponse,
     CaseListResponse,
     CaseResponse,
+    KNOWN_TRAFFIC_OFFENCE_CODES,
 )
 from src.api.schemas.common import ErrorResponse, MessageResponse, ValidationErrorResponse
+from src.api.schemas.workflows import RejectionReviewRequest, RejectionReviewResponse
 from src.models.audit import AuditLog
 from src.models.case import (
     Case,
@@ -130,16 +132,19 @@ def _extract_decision_history(audit_logs: list[AuditLog]) -> list[dict[str, Any]
     ):
         if log.agent_name != "judge":
             continue
-        if not log.action.startswith("decision_"):
+        if not (log.action.startswith("decision_") or log.action == "decision_amendment_apply"):
             continue
         payload = log.input_payload or {}
+        decision_type = log.action.removeprefix("decision_")
+        if log.action == "decision_amendment_apply":
+            decision_type = payload.get("amendment_type") or "amendment"
         history.append(
             {
-                "decision_type": log.action.removeprefix("decision_"),
+                "decision_type": decision_type,
                 "reason": payload.get("notes"),
-                "final_order": payload.get("final_order"),
+                "final_order": payload.get("final_order") or payload.get("proposed_final_order"),
                 "recorded_at": log.created_at,
-                "recorded_by": payload.get("judge_id"),
+                "recorded_by": payload.get("judge_id") or payload.get("requested_by"),
             }
         )
     return history
@@ -174,33 +179,109 @@ def _extract_escalation_reason(case: Case) -> str | None:
 def _build_jurisdiction_summary(case: Case) -> dict[str, Any]:
     reasons: list[str] = []
     warning = False
+    failure = False
+    earliest_fact_date = min(
+        [fact.event_date for fact in (case.facts or []) if getattr(fact, "event_date", None)],
+        default=None,
+    )
 
     if case.domain == CaseDomain.small_claims and case.claim_amount is not None:
         limit = 30000 if case.consent_to_higher_claim_limit else 20000
-        reasons.append(f"Claim amount: ${case.claim_amount:,.2f} against ${limit:,.0f} limit.")
-        if case.claim_amount in {20000, 30000}:
+        if case.claim_amount > limit:
+            failure = True
+            reasons.append(
+                f"Claim amount ${case.claim_amount:,.0f} exceeds the ${limit:,.0f} SCT limit."
+            )
+        elif case.claim_amount == limit:
             warning = True
+            reasons.append(
+                f"Claim amount ${case.claim_amount:,.0f} is exactly at the ${limit:,.0f} SCT threshold and needs judge review."
+            )
+        else:
+            reasons.append(
+                f"Claim amount ${case.claim_amount:,.0f} is within the ${limit:,.0f} SCT limit."
+            )
+        if earliest_fact_date and case.filed_date:
+            limitation_days = (case.filed_date - earliest_fact_date).days
+            if limitation_days > 730:
+                failure = True
+                reasons.append(
+                    f"Filed {limitation_days} days after the earliest identified cause-of-action date {earliest_fact_date.isoformat()}, beyond the 2-year SCT limitation period."
+                )
+            elif limitation_days == 730:
+                warning = True
+                reasons.append(
+                    f"Filed exactly 730 days after the earliest identified cause-of-action date {earliest_fact_date.isoformat()}, so the limitation edge needs judge review."
+                )
+            else:
+                reasons.append(
+                    f"Filed {limitation_days} days after the earliest identified cause-of-action date {earliest_fact_date.isoformat()}, within the 2-year SCT limitation period."
+                )
 
-    if case.domain == CaseDomain.traffic_violation and case.offence_code:
-        reasons.append(f"Offence code: {case.offence_code}.")
+    if case.domain == CaseDomain.traffic_violation:
+        if case.offence_code:
+            if case.offence_code not in KNOWN_TRAFFIC_OFFENCE_CODES:
+                failure = True
+                reasons.append(f"Offence code {case.offence_code} is not recognised.")
+            else:
+                reasons.append(f"Offence code {case.offence_code} is recognised.")
+        if earliest_fact_date and case.filed_date:
+            limitation_days = (case.filed_date - earliest_fact_date).days
+            if limitation_days > 365:
+                failure = True
+                reasons.append(
+                    f"Offence date {earliest_fact_date.isoformat()} exceeds the 12-month limitation period for this offence category."
+                )
+            elif limitation_days == 365:
+                warning = True
+                reasons.append(
+                    f"Offence date {earliest_fact_date.isoformat()} is exactly at the 12-month limitation boundary and needs judge review."
+                )
+            else:
+                reasons.append(
+                    f"Filed {limitation_days} days after the earliest offence date {earliest_fact_date.isoformat()}, within the applicable limitation period."
+                )
 
     if case.filed_date:
         reasons.append(f"Filed date: {case.filed_date.isoformat()}.")
 
-    if case.jurisdiction_valid is True:
-        status_value = "warning" if warning else "pass"
-    elif case.jurisdiction_valid is False:
+    if case.jurisdiction_valid is False:
+        failure = True
+
+    if failure:
         status_value = "fail"
+        valid = False
     elif warning:
         status_value = "warning"
+        valid = None
+    elif case.jurisdiction_valid is True or reasons:
+        status_value = "pass"
+        valid = True
     else:
         status_value = "pending"
+        valid = case.jurisdiction_valid
 
-    return {
-        "status": status_value,
-        "valid": case.jurisdiction_valid,
-        "reasons": reasons,
-    }
+    return {"status": status_value, "valid": valid, "reasons": reasons}
+
+
+def _extract_rejection_reason(case: Case) -> str | None:
+    for log in sorted(
+        case.audit_logs or [],
+        key=lambda item: item.created_at.timestamp() if item.created_at else 0.0,
+        reverse=True,
+    ):
+        for payload in (log.output_payload or {}, log.input_payload or {}):
+            issues = payload.get("jurisdiction_issues")
+            if isinstance(issues, list) and issues:
+                first_issue = issues[0]
+                if isinstance(first_issue, str) and first_issue.strip():
+                    return first_issue
+            for key in ("reason", "detail", "message"):
+                value = payload.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value
+    summary = _build_jurisdiction_summary(case)
+    return summary["reasons"][0] if summary["reasons"] else None
 
 
 def _build_pipeline_progress(case: Case) -> dict[str, Any]:
@@ -461,6 +542,7 @@ async def list_cases(
     query = query.options(
         selectinload(Case.parties),
         selectinload(Case.documents),
+        selectinload(Case.facts),
         selectinload(Case.verdicts),
         selectinload(Case.reopen_requests),
         selectinload(Case.audit_logs),
@@ -523,6 +605,82 @@ async def get_case(
         )
 
     return _serialize_case_detail(case)
+
+
+@router.post(
+    "/{case_id}/rejection-review",
+    response_model=RejectionReviewResponse,
+    operation_id="review_rejected_case",
+    summary="Override or close a rejected case",
+    responses={
+        400: {"model": ErrorResponse, "description": "Case is not rejected"},
+        404: {"model": ErrorResponse, "description": "Case not found"},
+    },
+)
+async def review_rejected_case(
+    case_id: UUID,
+    body: RejectionReviewRequest,
+    db: DBSession,
+    current_user: User = require_role(UserRole.judge, UserRole.senior_judge),
+) -> RejectionReviewResponse:
+    result = await db.execute(
+        select(Case)
+        .where(Case.id == case_id)
+        .options(selectinload(Case.audit_logs))
+        .with_for_update()
+    )
+    case = result.scalar_one_or_none()
+    if not case:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
+    if case.status != CaseStatus.rejected:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only rejected cases can be reviewed through this endpoint",
+        )
+
+    rejection_reason = _extract_rejection_reason(case)
+    if body.action.value == "override":
+        case.status = CaseStatus.processing
+    else:
+        case.status = CaseStatus.closed
+
+    db.add(
+        AuditLog(
+            case_id=case_id,
+            agent_name="judge",
+            action=f"rejection_{body.action.value}",
+            input_payload={
+                "justification": body.justification,
+                "judge_id": str(current_user.id),
+                "rejection_reason": rejection_reason,
+            },
+            output_payload={"new_status": case.status.value},
+        )
+    )
+
+    if body.action.value == "override":
+        from src.models.pipeline_job import PipelineJobType
+        from src.workers.outbox import enqueue_outbox_job
+
+        await enqueue_outbox_job(
+            db,
+            case_id=case_id,
+            job_type=PipelineJobType.case_pipeline,
+            payload={"resume_from_stage": "case-processing", "resume_reason": "rejection_override"},
+        )
+
+    await db.commit()
+
+    return RejectionReviewResponse(
+        case_id=case_id,
+        action=body.action,
+        status=case.status,
+        rejection_reason=rejection_reason,
+        resumed_from_stage="case-processing" if body.action.value == "override" else None,
+        message="Rejected case returned to processing."
+        if body.action.value == "override"
+        else "Rejected case closed and archived.",
+    )
 
 
 @router.get(
