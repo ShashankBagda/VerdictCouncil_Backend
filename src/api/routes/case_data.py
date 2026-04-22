@@ -18,10 +18,10 @@ from sqlalchemy import select
 from src.api.deps import CurrentUser, DBSession
 from src.api.schemas.cases import (
     ArgumentResponse,
-    HearingAnalysisResponse,
     DocumentResponse,
     EvidenceResponse,
     FactResponse,
+    HearingAnalysisResponse,
     LegalRuleResponse,
     PrecedentResponse,
     WitnessResponse,
@@ -33,10 +33,10 @@ from src.models.case import (
     Argument,
     Case,
     CaseStatus,
-    HearingAnalysis,
     Document,
     Evidence,
     Fact,
+    HearingAnalysis,
     LegalRule,
     Precedent,
     Witness,
@@ -238,13 +238,35 @@ async def upload_documents(
 ) -> list[Document]:
     case = await _get_case_or_404(case_id, db, current_user)
 
+    import openai
+
+    from src.shared.config import settings
+
+    oa_client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
+
     created = []
     for upload in files:
+        content = await upload.read()
+        openai_file_id: str | None = None
+        try:
+            oa_file = await oa_client.files.create(
+                file=(
+                    upload.filename or "document.bin",
+                    content,
+                    upload.content_type or "application/octet-stream",
+                ),
+                purpose="assistants",
+            )
+            openai_file_id = oa_file.id
+        except Exception:
+            logger.warning("OpenAI Files API upload failed for %s", upload.filename)
+
         doc = Document(
             case_id=case.id,
             filename=upload.filename or "unnamed",
             file_type=upload.content_type,
             uploaded_by=current_user.id,
+            openai_file_id=openai_file_id,
         )
         db.add(doc)
         created.append(doc)
@@ -289,13 +311,35 @@ async def upload_supplementary_documents(
             detail="Closed cases cannot accept supplementary documents",
         )
 
+    import openai
+
+    from src.shared.config import settings
+
+    oa_client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
+
     created: list[Document] = []
     for upload in files:
+        content = await upload.read()
+        openai_file_id: str | None = None
+        try:
+            oa_file = await oa_client.files.create(
+                file=(
+                    upload.filename or "document.bin",
+                    content,
+                    upload.content_type or "application/octet-stream",
+                ),
+                purpose="assistants",
+            )
+            openai_file_id = oa_file.id
+        except Exception:
+            logger.warning("OpenAI Files API upload failed for %s", upload.filename)
+
         doc = Document(
             case_id=case.id,
             filename=upload.filename or "unnamed",
             file_type=upload.content_type,
             uploaded_by=current_user.id,
+            openai_file_id=openai_file_id,
         )
         db.add(doc)
         created.append(doc)
@@ -322,16 +366,13 @@ async def upload_supplementary_documents(
     from src.models.pipeline_job import PipelineJobType
     from src.workers.outbox import enqueue_outbox_job
 
+    # Supplementary upload resets to gate 1 — judge reviews before re-analysis continues.
+    case.gate_state = {"current_gate": 1, "awaiting_review": False, "rerun_agent": None}
     await enqueue_outbox_job(
         db,
         case_id=case_id,
-        job_type=PipelineJobType.case_pipeline,
-        payload={
-            "resume_from_stage": SUPPLEMENTARY_RETRIGGERED_STAGES[0],
-            "retriggered_stages": SUPPLEMENTARY_RETRIGGERED_STAGES,
-            "preserved_stages": SUPPLEMENTARY_PRESERVED_STAGES,
-            "reason": reason,
-        },
+        job_type=PipelineJobType.gate_run,
+        payload={"gate_name": "gate1"},
     )
 
     await db.flush()
