@@ -1,5 +1,21 @@
 # Part 6: CI/CD Pipeline
 
+> **Reality vs. Target State — read this first**
+>
+> This document describes both the **live implementation** and **target design**. The table below records the key differences between what the actual workflow files do today and what the architecture diagram and later sections describe as the intended state. All gaps are tracked for remediation.
+>
+> | Area | Live (`.github/workflows/*.yml`) | Target / This doc describes |
+> |---|---|---|
+> | Staging trigger | Push to `development` branch | Push to `release/**` branch |
+> | Docker build | Single `Dockerfile` at repo root, one image tagged per deploy | Per-agent `./docker/{agent}/Dockerfile` with matrix build |
+> | Staging smoke tests | Not implemented (deploy + rollout only) | Full smoke test job: health check + end-to-end case submission + polling |
+> | Production canary tests | Not implemented (deploy + rollout only) | Canary test job: health check + case submission + polling |
+> | GitHub Release creation | Not implemented | Automatic `gh release create` after production deploy |
+> | Security scan gate | `pip-audit` + `bandit` advisory (`continue-on-error: true`) | Hard CI failure |
+> | Integration tests in CI | Not run (no Postgres/Redis services wired) | Dedicated job with managed service containers |
+>
+> The Mermaid diagrams in §6.7 and §6.8 reflect the **target architecture**. The YAML snippets in §6.4 and §6.5 reflect the **target workflow**. The live `ci.yml` in §6.2 is a faithful mirror of the actual file.
+
 ## 6.1 Platform Overview
 
 VerdictCouncil deploys to **DigitalOcean** using the following managed services:
@@ -20,8 +36,8 @@ VerdictCouncil deploys to **DigitalOcean** using the following managed services:
 | Workflow | Trigger | Purpose | Target |
 |---|---|---|---|
 | `ci.yml` | Push to any branch (`**`); PR into `development` or `main` | Ruff lint + format check, pytest with coverage, OpenAPI snapshot, `pip-audit` + `bandit` (advisory), Docker build verification | — |
-| `staging-deploy.yml` | Push to `release/*` | Build images, push to DOCR, deploy to DOKS staging | DOKS staging namespace |
-| `production-deploy.yml` | Push to `main` | Build release images, deploy to DOKS production, create GitHub Release | DOKS production namespace |
+| `staging-deploy.yml` | **Push to `development`** *(live)* / `release/**` *(target)* | Build single image, push to DOCR (`rc-{sha}` tag), deploy all 12 agent deployments via `kubectl set image`, wait 300s for rollout | DOKS staging namespace |
+| `production-deploy.yml` | Push to `main` | Build image (`v{semver}` tag), deploy to DOKS production via `kubectl apply`, wait for rollout | DOKS production namespace |
 
 ### GitHub Secrets Required
 
