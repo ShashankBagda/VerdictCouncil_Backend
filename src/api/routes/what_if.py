@@ -265,8 +265,7 @@ async def submit_whatif_scenario(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
-                f"Case must be in 'ready_for_review' status. "
-                f"Current status: '{case.status.value}'"
+                f"Case must be in 'ready_for_review' status. Current status: '{case.status.value}'"
             ),
         )
 

@@ -163,7 +163,7 @@ def create_app() -> FastAPI:
         case_data,
         cases,
         dashboard,
-        escalation,
+        documents,
         health,
         hearing_notes,
         hearing_pack,
@@ -171,7 +171,6 @@ def create_app() -> FastAPI:
         knowledge_base,
         precedent_search,
         reopen_requests,
-        senior_inbox,
         what_if,
     )
 
@@ -192,8 +191,7 @@ def create_app() -> FastAPI:
     app.include_router(
         knowledge_base.router, prefix="/api/v1/knowledge-base", tags=["knowledge-base"]
     )
-    app.include_router(escalation.router, prefix="/api/v1/escalated-cases", tags=["escalation"])
-    app.include_router(senior_inbox.router, prefix="/api/v1/senior-inbox", tags=["senior-inbox"])
+    app.include_router(documents.router, prefix="/api/v1/documents", tags=["documents"])
     app.include_router(admin.router, prefix="/api/v1/admin", tags=["admin"])
 
     # Prometheus-compatible metrics (excluded from OpenAPI spec)

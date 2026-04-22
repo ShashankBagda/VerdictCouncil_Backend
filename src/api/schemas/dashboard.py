@@ -8,7 +8,9 @@ class DashboardStats(BaseModel):
 
     total_cases: int = Field(..., description="Total number of cases in the system", examples=[42])
     by_status: dict[str, int] = Field(
-        ..., description="Case count grouped by status", examples=[{"pending": 10, "ready_for_review": 5, "closed": 3}]
+        ...,
+        description="Case count grouped by status",
+        examples=[{"pending": 10, "ready_for_review": 5, "closed": 3}],
     )
     by_domain: dict[str, int] = Field(
         ...,

@@ -42,7 +42,7 @@ def _listify(value):
 async def generate_hearing_pack(
     case_id: UUID,
     db: DBSession,
-    current_user: User = require_role(UserRole.judge, UserRole.senior_judge),
+    current_user: User = require_role(UserRole.judge),
 ) -> HearingPackResponse:
     result = await db.execute(
         select(Case)
@@ -55,7 +55,6 @@ async def generate_hearing_pack(
             selectinload(Case.legal_rules),
             selectinload(Case.precedents),
             selectinload(Case.arguments),
-            selectinload(Case.verdicts),
         )
     )
     case = result.scalar_one_or_none()
@@ -213,16 +212,7 @@ async def generate_hearing_pack(
                     }
                 )
 
-    current_verdict = None
-    if case.verdicts:
-        latest = sorted(case.verdicts, key=lambda v: v.id.hex)[-1]
-        current_verdict = {
-            "id": str(latest.id),
-            "recommendation_type": latest.recommendation_type.value,
-            "recommended_outcome": latest.recommended_outcome,
-            "confidence_score": latest.confidence_score,
-            "amendment_of": str(latest.amendment_of) if latest.amendment_of else None,
-        }
+    current_verdict = case.judicial_decision
 
     return HearingPackResponse(
         case_id=case.id,
