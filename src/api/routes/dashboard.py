@@ -3,7 +3,7 @@ from sqlalchemy import func, select
 
 from src.api.deps import CurrentUser, DBSession
 from src.api.schemas.dashboard import DashboardStats
-from src.models.case import Case
+from src.models.case import Case, CaseStatus, Verdict
 from src.shared.circuit_breaker import get_pair_search_breaker
 
 router = APIRouter()
@@ -43,12 +43,25 @@ async def get_stats(db: DBSession, current_user: CurrentUser) -> dict:
     recent = [
         {
             "id": str(c.id),
+            "title": c.title,
             "domain": c.domain.value,
             "status": c.status.value,
+            "filed_date": c.filed_date.isoformat() if c.filed_date else None,
             "created_at": c.created_at.isoformat() if c.created_at else None,
         }
         for c in recent_result.scalars().all()
     ]
+
+    escalated_total = (
+        await db.execute(select(func.count(Case.id)).where(Case.status == CaseStatus.escalated))
+    ).scalar_one()
+    escalation_rate = round((escalated_total / total) * 100, 2) if total else 0.0
+
+    avg_confidence = (
+        await db.execute(
+            select(func.avg(Verdict.confidence_score)).where(Verdict.confidence_score.is_not(None))
+        )
+    ).scalar_one()
 
     pair_status = await get_pair_search_breaker().get_status()
 
@@ -56,6 +69,11 @@ async def get_stats(db: DBSession, current_user: CurrentUser) -> dict:
         "total_cases": total,
         "by_status": by_status,
         "by_domain": by_domain,
+        "escalation_rate_percent": escalation_rate,
+        "average_verdict_confidence": round(float(avg_confidence), 2)
+        if avg_confidence is not None
+        else None,
+        "average_processing_time_seconds": None,
         "recent_cases": recent,
         "pair_api_status": pair_status,
     }

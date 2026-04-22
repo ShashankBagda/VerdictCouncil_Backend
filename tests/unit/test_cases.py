@@ -37,6 +37,12 @@ def _make_case(created_by: uuid.UUID, **overrides) -> MagicMock:
     defaults = {
         "id": uuid.uuid4(),
         "domain": CaseDomain.traffic_violation,
+        "title": "Traffic light prosecution",
+        "description": "Traffic prosecution arising from an alleged red-light offence.",
+        "filed_date": datetime.now(UTC).date(),
+        "claim_amount": None,
+        "consent_to_higher_claim_limit": False,
+        "offence_code": "RTA-S64",
         "status": CaseStatus.pending,
         "jurisdiction_valid": True,
         "complexity": None,
@@ -54,6 +60,7 @@ def _make_case(created_by: uuid.UUID, **overrides) -> MagicMock:
         "arguments": [],
         "deliberations": [],
         "verdicts": [],
+        "reopen_requests": [],
         "audit_logs": [],
     }
     defaults.update(overrides)
@@ -74,6 +81,12 @@ def _mock_scalars_result(values: list):
     scalars = MagicMock()
     scalars.all.return_value = values
     result.scalars.return_value = scalars
+    return result
+
+
+def _mock_count_result(value: int):
+    result = MagicMock()
+    result.scalar_one.return_value = value
     return result
 
 
@@ -123,14 +136,50 @@ class TestCreateCase:
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.post(
                 "/api/v1/cases/",
-                json={"domain": "traffic_violation"},
+                json={
+                    "domain": "traffic_violation",
+                    "title": "Traffic prosecution",
+                    "description": "Alleged red-light offence at Orchard Road junction.",
+                    "filed_date": "2026-04-20",
+                    "parties": [
+                        {"name": "Public Prosecutor", "role": "prosecution"},
+                        {"name": "John Tan", "role": "accused"},
+                    ],
+                    "offence_code": "RTA-S64",
+                },
             )
 
         assert resp.status_code == 201
         data = resp.json()
         assert data["domain"] == "traffic_violation"
+        assert data["title"] == "Traffic prosecution"
         assert data["status"] == "pending"
+        assert data["status_group"] == "processing"
         mock_db.add.assert_called_once()
+
+    async def test_create_case_rejects_small_claims_without_claim_amount(self):
+        user = _make_user()
+        mock_db = _build_mock_session()
+
+        app = _app_with_overrides(mock_db, user)
+        transport = ASGITransport(app=app)
+
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(
+                "/api/v1/cases/",
+                json={
+                    "domain": "small_claims",
+                    "title": "Defective furniture claim",
+                    "description": "Claimant alleges delivered goods were defective.",
+                    "filed_date": "2026-04-20",
+                    "parties": [
+                        {"name": "Lim", "role": "claimant"},
+                        {"name": "FurniturePlus", "role": "respondent"},
+                    ],
+                },
+            )
+
+        assert resp.status_code == 422
 
 
 class TestListCases:
@@ -138,7 +187,7 @@ class TestListCases:
         """GET /api/v1/cases/ with no cases returns 200 with empty list."""
         user = _make_user()
         mock_db = _build_mock_session()
-        mock_db.execute.return_value = _mock_scalars_result([])
+        mock_db.execute.side_effect = [_mock_count_result(0), _mock_scalars_result([])]
 
         app = _app_with_overrides(mock_db, user)
         transport = ASGITransport(app=app)
@@ -148,12 +197,8 @@ class TestListCases:
 
         assert resp.status_code == 200
         data = resp.json()
-        # Response can be a list or a paginated dict with an items key
-        if isinstance(data, list):
-            assert data == []
-        else:
-            items = data.get("items", data.get("cases", []))
-            assert items == []
+        assert data["items"] == []
+        assert data["total"] == 0
 
     async def test_list_cases_with_data(self):
         """GET /api/v1/cases/ returns existing cases."""
@@ -164,7 +209,7 @@ class TestListCases:
             _make_case(user.id, domain=CaseDomain.traffic_violation),
             _make_case(user.id, domain=CaseDomain.small_claims),
         ]
-        mock_db.execute.return_value = _mock_scalars_result(cases)
+        mock_db.execute.side_effect = [_mock_count_result(len(cases)), _mock_scalars_result(cases)]
 
         app = _app_with_overrides(mock_db, user)
         transport = ASGITransport(app=app)
@@ -174,8 +219,10 @@ class TestListCases:
 
         assert resp.status_code == 200
         data = resp.json()
-        items = data if isinstance(data, list) else data.get("items", data.get("cases", []))
+        items = data["items"]
         assert len(items) == 2
+        assert items[0]["case_id"]
+        assert items[0]["pipeline_progress"]["pipeline_progress_percent"] == 0
 
 
 class TestGetCaseDetail:
@@ -197,6 +244,8 @@ class TestGetCaseDetail:
         data = resp.json()
         assert data["id"] == str(case.id)
         assert data["domain"] == "traffic_violation"
+        assert data["title"] == case.title
+        assert "decision_history" in data
 
     async def test_get_case_not_found(self):
         """GET /api/v1/cases/{nonexistent_id} returns 404."""
@@ -359,12 +408,18 @@ class TestGetCaseResponseShape:
 
         expected_keys = {
             "id",
+            "case_id",
+            "title",
+            "description",
             "domain",
             "status",
-            "jurisdiction_valid",
+            "status_group",
+            "jurisdiction",
             "complexity",
             "route",
             "created_by",
+            "pipeline_progress",
+            "decision_history",
             "parties",
             "documents",
             "evidence",

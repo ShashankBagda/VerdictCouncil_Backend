@@ -1,6 +1,7 @@
 """Judge decision request/response schemas."""
 
 import enum
+from datetime import datetime
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -28,4 +29,9 @@ class DecisionResponse(BaseModel):
     case_id: UUID = Field(..., description="Case ID")
     action: DecisionAction = Field(..., description="Decision action taken")
     status: CaseStatus = Field(..., description="New case status after decision")
+    decision_type: str = Field(..., description="Recorded decision type")
+    reason: str | None = Field(None, description="Judge reason for modify or reject decisions")
+    final_order: str | None = Field(None, description="Final order text when supplied")
+    recorded_at: datetime | None = Field(None, description="Timestamp for the decision record")
+    recorded_by: str | None = Field(None, description="Judge identifier")
     message: str = Field(..., description="Confirmation message")

@@ -1,9 +1,11 @@
 import logging
-from uuid import UUID
+from datetime import date
+from typing import Any
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Response, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import selectinload
 
 from src.api.deps import CurrentUser, DBSession, require_role
@@ -14,10 +16,15 @@ from src.api.schemas.cases import (
     CaseResponse,
 )
 from src.api.schemas.common import ErrorResponse, MessageResponse, ValidationErrorResponse
+from src.models.audit import AuditLog
 from src.models.case import (
     Case,
+    CaseComplexity,
     CaseDomain,
     CaseStatus,
+    Fact,
+    Party,
+    Verdict,
 )
 from src.models.user import User, UserRole
 from src.services.case_report_data import build_case_report_data
@@ -28,6 +35,285 @@ from src.services.pipeline_events import subscribe as subscribe_pipeline_events
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+PIPELINE_AGENT_ORDER = [
+    "case-processing",
+    "complexity-routing",
+    "evidence-analysis",
+    "fact-reconstruction",
+    "witness-analysis",
+    "legal-knowledge",
+    "argument-construction",
+    "deliberation",
+    "governance-verdict",
+]
+
+
+def _status_group(status_value: CaseStatus) -> str:
+    if status_value in {CaseStatus.pending, CaseStatus.processing, CaseStatus.failed_retryable}:
+        return "processing"
+    if status_value in {CaseStatus.ready_for_review, CaseStatus.decided}:
+        return "completed"
+    if status_value == CaseStatus.escalated:
+        return "escalated"
+    if status_value == CaseStatus.rejected:
+        return "rejected"
+    if status_value == CaseStatus.closed:
+        return "closed"
+    if status_value == CaseStatus.failed:
+        return "failed"
+    return status_value.value
+
+
+def _map_status_filter(status_filter: str) -> list[CaseStatus]:
+    raw = status_filter.strip().lower()
+    if raw == "completed":
+        return [CaseStatus.ready_for_review, CaseStatus.decided]
+    if raw == "processing":
+        return [CaseStatus.pending, CaseStatus.processing, CaseStatus.failed_retryable]
+    try:
+        return [CaseStatus(raw)]
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"Unknown case status filter: {status_filter}",
+        ) from exc
+
+
+def _serialize_parties(parties: list[Party]) -> list[dict[str, Any]]:
+    return [
+        {
+            "id": party.id,
+            "name": party.name,
+            "role": party.role,
+            "contact_info": party.contact_info,
+        }
+        for party in parties
+    ]
+
+
+def _optional_text(value: Any) -> str | None:
+    if isinstance(value, str):
+        stripped = value.strip()
+        return stripped or None
+    return None
+
+
+def _display_text(value: Any, fallback: str) -> str:
+    return _optional_text(value) or fallback
+
+
+def _party_role_lookup(parties: list[Party]) -> dict[str, str]:
+    lookup: dict[str, str] = {}
+    for party in parties:
+        lookup[party.role.value] = party.name
+    return lookup
+
+
+def _extract_decision_history(audit_logs: list[AuditLog]) -> list[dict[str, Any]]:
+    history: list[dict[str, Any]] = []
+    for log in sorted(
+        audit_logs, key=lambda item: item.created_at.timestamp() if item.created_at else 0.0
+    ):
+        if log.agent_name != "judge":
+            continue
+        if not log.action.startswith("decision_"):
+            continue
+        payload = log.input_payload or {}
+        history.append(
+            {
+                "decision_type": log.action.removeprefix("decision_"),
+                "reason": payload.get("notes"),
+                "final_order": payload.get("final_order"),
+                "recorded_at": log.created_at,
+                "recorded_by": payload.get("judge_id"),
+            }
+        )
+    return history
+
+
+def _extract_latest_verdict(case: Case) -> Verdict | None:
+    verdicts = list(case.verdicts or [])
+    if not verdicts:
+        return None
+    return verdicts[-1]
+
+
+def _extract_escalation_reason(case: Case) -> str | None:
+    for log in sorted(
+        case.audit_logs or [],
+        key=lambda item: item.created_at.timestamp() if item.created_at else 0.0,
+        reverse=True,
+    ):
+        if "escalat" not in log.action.lower():
+            continue
+        for payload in (log.output_payload or {}, log.input_payload or {}):
+            for key in ("reason", "escalation_reason", "summary", "detail", "message"):
+                value = payload.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value
+    if case.route and case.route.value == "escalate_human":
+        complexity = case.complexity.value if case.complexity else "unspecified"
+        return f"Route escalated for human review (complexity: {complexity})."
+    return None
+
+
+def _build_jurisdiction_summary(case: Case) -> dict[str, Any]:
+    reasons: list[str] = []
+    warning = False
+
+    if case.domain == CaseDomain.small_claims and case.claim_amount is not None:
+        limit = 30000 if case.consent_to_higher_claim_limit else 20000
+        reasons.append(f"Claim amount: ${case.claim_amount:,.2f} against ${limit:,.0f} limit.")
+        if case.claim_amount in {20000, 30000}:
+            warning = True
+
+    if case.domain == CaseDomain.traffic_violation and case.offence_code:
+        reasons.append(f"Offence code: {case.offence_code}.")
+
+    if case.filed_date:
+        reasons.append(f"Filed date: {case.filed_date.isoformat()}.")
+
+    if case.jurisdiction_valid is True:
+        status_value = "warning" if warning else "pass"
+    elif case.jurisdiction_valid is False:
+        status_value = "fail"
+    elif warning:
+        status_value = "warning"
+    else:
+        status_value = "pending"
+
+    return {
+        "status": status_value,
+        "valid": case.jurisdiction_valid,
+        "reasons": reasons,
+    }
+
+
+def _build_pipeline_progress(case: Case) -> dict[str, Any]:
+    completed_agents: set[str] = set()
+    running_agent: str | None = None
+
+    grouped_logs: dict[str, list[AuditLog]] = {agent_id: [] for agent_id in PIPELINE_AGENT_ORDER}
+    for log in case.audit_logs or []:
+        if log.agent_name in grouped_logs:
+            grouped_logs[log.agent_name].append(log)
+
+    for agent_id in PIPELINE_AGENT_ORDER:
+        logs = grouped_logs[agent_id]
+        if not logs:
+            continue
+        last_action = (logs[-1].action or "").lower()
+        if "fail" in last_action or "error" in last_action:
+            break
+        if any(token in last_action for token in ("complet", "done", "finish", "emit", "persist")):
+            completed_agents.add(agent_id)
+            continue
+        running_agent = agent_id
+        break
+
+    if case.status in {CaseStatus.ready_for_review, CaseStatus.decided, CaseStatus.closed}:
+        return {"pipeline_progress_percent": 100, "current_agent": None}
+
+    if case.status == CaseStatus.failed:
+        progress_percent = round(
+            len(completed_agents) / len(PIPELINE_AGENT_ORDER) * 100,
+        )
+        return {
+            "pipeline_progress_percent": progress_percent,
+            "current_agent": running_agent,
+        }
+
+    if case.status == CaseStatus.processing and running_agent is None:
+        remaining = [agent for agent in PIPELINE_AGENT_ORDER if agent not in completed_agents]
+        running_agent = remaining[0] if remaining else None
+
+    return {
+        "pipeline_progress_percent": round(len(completed_agents) / len(PIPELINE_AGENT_ORDER) * 100),
+        "current_agent": running_agent,
+    }
+
+
+def _serialize_case_summary(case: Case) -> dict[str, Any]:
+    role_lookup = _party_role_lookup(case.parties or [])
+    decision_history = _extract_decision_history(case.audit_logs or [])
+    latest_decision = decision_history[-1] if decision_history else None
+    latest_verdict = _extract_latest_verdict(case)
+    description = case.description or case.title or ""
+    summary_snippet = description[:157] + "..." if len(description) > 160 else description
+
+    outcome_summary = None
+    if latest_decision and latest_decision.get("final_order"):
+        outcome_summary = latest_decision["final_order"]
+    elif latest_verdict is not None:
+        outcome_summary = latest_verdict.recommended_outcome
+
+    amendment_state = "amended" if any(v.amendment_of for v in case.verdicts or []) else None
+    reopen_requests = list(case.reopen_requests or [])
+    reopen_state = reopen_requests[-1].status.value if reopen_requests else None
+
+    return {
+        "id": case.id,
+        "case_id": case.id,
+        "title": _display_text(case.title, f"Case {case.id}"),
+        "description": case.description,
+        "summary_snippet": summary_snippet,
+        "domain": case.domain,
+        "status": case.status,
+        "status_group": _status_group(case.status),
+        "jurisdiction": _build_jurisdiction_summary(case),
+        "complexity": case.complexity.value if case.complexity else None,
+        "route": case.route.value if case.route else None,
+        "created_by": case.created_by,
+        "created_at": case.created_at,
+        "updated_at": case.updated_at,
+        "filed_date": case.filed_date,
+        "claim_amount": case.claim_amount,
+        "consent_to_higher_claim_limit": case.consent_to_higher_claim_limit,
+        "offence_code": case.offence_code,
+        "parties": _serialize_parties(case.parties or []),
+        "party_names": [party.name for party in case.parties or []],
+        "claimant_name": role_lookup.get("claimant"),
+        "respondent_name": role_lookup.get("respondent"),
+        "prosecution_name": role_lookup.get("prosecution"),
+        "accused_name": role_lookup.get("accused"),
+        "document_count": len(case.documents or []),
+        "pipeline_progress": _build_pipeline_progress(case),
+        "outcome_summary": outcome_summary,
+        "escalation_reason": _extract_escalation_reason(case),
+        "reopen_state": reopen_state,
+        "amendment_state": amendment_state,
+        "latest_decision": latest_decision,
+    }
+
+
+def _serialize_case_detail(case: Case) -> dict[str, Any]:
+    summary = _serialize_case_summary(case)
+    summary.update(
+        {
+            "documents": [
+                {
+                    "id": document.id,
+                    "openai_file_id": _optional_text(getattr(document, "openai_file_id", None)),
+                    "filename": document.filename,
+                    "file_type": _optional_text(getattr(document, "file_type", None)),
+                    "uploaded_at": document.uploaded_at,
+                }
+                for document in case.documents or []
+            ],
+            "evidence": list(case.evidence or []),
+            "facts": list(case.facts or []),
+            "witnesses": list(case.witnesses or []),
+            "legal_rules": list(case.legal_rules or []),
+            "precedents": list(case.precedents or []),
+            "arguments": list(case.arguments or []),
+            "deliberations": list(case.deliberations or []),
+            "verdicts": list(case.verdicts or []),
+            "decision_history": _extract_decision_history(case.audit_logs or []),
+            "audit_logs": list(case.audit_logs or []),
+        }
+    )
+    return summary
 
 
 async def _load_case_for_export(case_id: UUID, db, current_user: User) -> Case:
@@ -42,11 +328,6 @@ async def _load_case_for_export(case_id: UUID, db, current_user: User) -> Case:
             detail="Not authorized to view this case",
         )
     return case
-
-
-# --------------------------------------------------------------------------- #
-# Endpoints
-# --------------------------------------------------------------------------- #
 
 
 @router.post(
@@ -64,16 +345,32 @@ async def _load_case_for_export(case_id: UUID, db, current_user: User) -> Case:
 async def create_case(
     body: CaseCreateRequest,
     db: DBSession,
-    current_user: User = require_role(UserRole.clerk, UserRole.judge),
-) -> Case:
+    current_user: User = require_role(UserRole.clerk, UserRole.judge, UserRole.senior_judge),
+) -> dict[str, Any]:
     case = Case(
+        id=uuid4(),
         domain=body.domain,
+        title=body.title.strip(),
+        description=body.description.strip() if body.description else None,
+        filed_date=body.filed_date,
+        claim_amount=body.claim_amount,
+        consent_to_higher_claim_limit=body.consent_to_higher_claim_limit,
+        offence_code=body.offence_code,
         created_by=current_user.id,
     )
+    for party in body.parties:
+        case.parties.append(
+            Party(
+                id=uuid4(),
+                name=party.name.strip(),
+                role=party.role,
+                contact_info=party.contact_info,
+            )
+        )
     db.add(case)
     await db.flush()
     await db.refresh(case)
-    return case
+    return _serialize_case_summary(case)
 
 
 @router.get(
@@ -81,39 +378,90 @@ async def create_case(
     response_model=CaseListResponse,
     operation_id="list_cases",
     summary="List cases with pagination",
-    description="List cases with optional status and domain filters. "
-    "Clerks and judges see only their own cases; admins see all.",
+    description="List cases with story-aligned filters and pagination.",
 )
 async def list_cases(
     db: DBSession,
     current_user: CurrentUser,
-    status_filter: CaseStatus | None = Query(None, alias="status"),
+    status_filter: str | None = Query(None, alias="status"),
     domain: CaseDomain | None = None,
+    search: str | None = Query(None),
+    complexity: str | None = Query(None),
+    outcome: str | None = Query(None),
+    filed_from: date | None = Query(None),
+    filed_to: date | None = Query(None),
+    sort_by: str = Query("created_at"),
+    sort_direction: str = Query("desc"),
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
-) -> dict:
+) -> dict[str, Any]:
     query = select(Case)
 
-    # Role-based filtering
-    if current_user.role == UserRole.clerk or current_user.role == UserRole.judge:
+    if current_user.role in {UserRole.clerk, UserRole.judge}:
         query = query.where(Case.created_by == current_user.id)
-    # Admin sees all
 
     if status_filter:
-        query = query.where(Case.status == status_filter)
+        status_values = _map_status_filter(status_filter)
+        query = query.where(Case.status.in_(status_values))
     if domain:
         query = query.where(Case.domain == domain)
+    if complexity:
+        try:
+            query = query.where(Case.complexity == CaseComplexity(complexity))
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=f"Unknown complexity filter: {complexity}",
+            ) from exc
+    if filed_from:
+        query = query.where(Case.filed_date >= filed_from)
+    if filed_to:
+        query = query.where(Case.filed_date <= filed_to)
+    if outcome:
+        pattern = f"%{outcome.strip()}%"
+        query = query.where(Case.verdicts.any(Verdict.recommended_outcome.ilike(pattern)))
+    if search and search.strip():
+        pattern = f"%{search.strip()}%"
+        query = query.where(
+            or_(
+                Case.title.ilike(pattern),
+                Case.description.ilike(pattern),
+                Case.parties.any(Party.name.ilike(pattern)),
+                Case.facts.any(Fact.description.ilike(pattern)),
+            )
+        )
 
-    # Count
-    count_query = select(func.count()).select_from(query.subquery())
+    count_query = select(func.count()).select_from(query.order_by(None).subquery())
     total = (await db.execute(count_query)).scalar_one()
 
-    # Paginate
+    sort_column = {
+        "created_at": Case.created_at,
+        "filed_date": Case.filed_date,
+        "status": Case.status,
+        "complexity": Case.complexity,
+    }.get(sort_by, Case.created_at)
+    if sort_direction.lower() == "asc":
+        query = query.order_by(sort_column.asc().nullslast())
+    else:
+        query = query.order_by(sort_column.desc().nullslast())
+
+    query = query.options(
+        selectinload(Case.parties),
+        selectinload(Case.documents),
+        selectinload(Case.verdicts),
+        selectinload(Case.reopen_requests),
+        selectinload(Case.audit_logs),
+    )
     query = query.offset((page - 1) * per_page).limit(per_page)
     result = await db.execute(query)
     items = list(result.scalars().all())
 
-    return {"items": items, "total": total, "page": page, "per_page": per_page}
+    return {
+        "items": [_serialize_case_summary(item) for item in items],
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+    }
 
 
 @router.get(
@@ -121,9 +469,7 @@ async def list_cases(
     response_model=CaseDetailResponse,
     operation_id="get_case",
     summary="Get full case details",
-    description="Retrieve a case with all related entities: parties, documents, "
-    "evidence, facts, witnesses, legal rules, precedents, arguments, "
-    "deliberations, verdicts, and audit logs.",
+    description="Retrieve a case with all related entities and story-aligned summary fields.",
     responses={
         403: {"model": ErrorResponse, "description": "Not authorized to view this case"},
         404: {"model": ErrorResponse, "description": "Case not found"},
@@ -133,7 +479,7 @@ async def get_case(
     case_id: UUID,
     db: DBSession,
     current_user: CurrentUser,
-) -> Case:
+) -> dict[str, Any]:
     result = await db.execute(
         select(Case)
         .where(Case.id == case_id)
@@ -148,6 +494,7 @@ async def get_case(
             selectinload(Case.arguments),
             selectinload(Case.deliberations),
             selectinload(Case.verdicts),
+            selectinload(Case.reopen_requests),
             selectinload(Case.audit_logs),
         )
     )
@@ -156,22 +503,23 @@ async def get_case(
     if not case:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
 
-    # Role-based access check
     if current_user.role == UserRole.clerk and case.created_by != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to view this case",
         )
 
-    return case
+    return _serialize_case_detail(case)
 
 
 @router.get(
     "/{case_id}/report.pdf",
     operation_id="export_case_report_pdf",
     summary="Export the case as a PDF report",
-    description="Render a case summary PDF covering parties, evidence, facts, arguments, "
-    "verdict, and fairness report.",
+    description=(
+        "Render a case summary PDF covering parties, evidence, facts, "
+        "arguments, verdict, and fairness report."
+    ),
     responses={
         403: {"model": ErrorResponse, "description": "Not authorized to view this case"},
         404: {"model": ErrorResponse, "description": "Case not found"},
@@ -200,8 +548,10 @@ async def export_case_report_pdf(
     "/{case_id}/hearing-pack",
     operation_id="export_hearing_pack",
     summary="Export the hearing pack zip for a case",
-    description="Assemble a zip archive of manifest, case summary, evidence, facts, "
-    "arguments, and verdict for in-court review.",
+    description=(
+        "Assemble a zip archive of manifest, case summary, evidence, "
+        "facts, arguments, and verdict for in-court review."
+    ),
     responses={
         403: {"model": ErrorResponse, "description": "Not authorized to view this case"},
         404: {"model": ErrorResponse, "description": "Case not found"},
@@ -230,8 +580,7 @@ async def export_hearing_pack(
     "/{case_id}/status/stream",
     operation_id="stream_pipeline_status",
     summary="Stream pipeline progress events via SSE",
-    description="Server-Sent Events stream backed by the Redis progress pub/sub. "
-    "Closes when the governance-verdict agent reaches a terminal phase.",
+    description="Server-Sent Events stream backed by the Redis progress pub/sub.",
     responses={
         403: {"model": ErrorResponse, "description": "Not authorized to view this case"},
         404: {"model": ErrorResponse, "description": "Case not found"},
@@ -259,17 +608,9 @@ async def stream_pipeline_status(
     )
 
 
-# --------------------------------------------------------------------------- #
-# Pipeline trigger
-# --------------------------------------------------------------------------- #
-
-
 async def _run_case_pipeline(case_id: UUID) -> None:
-    """Background task: run the 9-agent pipeline for a case and persist results.
+    """Background task: run the 9-agent pipeline for a case and persist results."""
 
-    Imports are deferred to keep FastAPI module-import cheap and to open a fresh
-    session for the background task.
-    """
     from src.db.persist_case_results import persist_case_results
     from src.models.case import CaseStatus as CaseStatusModel
     from src.services.database import async_session
@@ -278,7 +619,9 @@ async def _run_case_pipeline(case_id: UUID) -> None:
 
     async with async_session() as db:
         case_result = await db.execute(
-            select(Case).where(Case.id == case_id).options(selectinload(Case.documents))
+            select(Case)
+            .where(Case.id == case_id)
+            .options(selectinload(Case.documents), selectinload(Case.parties))
         )
         case = case_result.scalar_one_or_none()
         if not case:
@@ -290,13 +633,35 @@ async def _run_case_pipeline(case_id: UUID) -> None:
 
         raw_documents = [
             {
-                "document_id": str(d.id),
-                "filename": d.filename,
-                "file_type": d.file_type,
+                "document_id": str(document.id),
+                "filename": document.filename,
+                "file_type": _optional_text(getattr(document, "file_type", None)),
+                "openai_file_id": _optional_text(getattr(document, "openai_file_id", None)),
             }
-            for d in case.documents
+            for document in case.documents
         ]
-        initial_state = CaseState(case_id=str(case.id), raw_documents=raw_documents)
+        initial_state = CaseState(
+            case_id=str(case.id),
+            domain=case.domain.value,
+            status="processing",
+            parties=[
+                {
+                    "name": party.name,
+                    "role": party.role.value,
+                    "contact_info": party.contact_info,
+                }
+                for party in case.parties
+            ],
+            case_metadata={
+                "title": case.title,
+                "description": case.description,
+                "filed_date": case.filed_date.isoformat() if case.filed_date else None,
+                "claim_amount": case.claim_amount,
+                "consent_to_higher_claim_limit": case.consent_to_higher_claim_limit,
+                "offence_code": case.offence_code,
+            },
+            raw_documents=raw_documents,
+        )
 
     try:
         if settings.use_mesh_runner:
@@ -311,7 +676,6 @@ async def _run_case_pipeline(case_id: UUID) -> None:
     except Exception:
         logger.exception("Pipeline run failed for case_id=%s", case_id)
         async with async_session() as db:
-            await db.execute(select(Case).where(Case.id == case_id))
             db_case = (
                 await db.execute(select(Case).where(Case.id == case_id))
             ).scalar_one_or_none()
@@ -330,9 +694,7 @@ async def _run_case_pipeline(case_id: UUID) -> None:
     status_code=status.HTTP_202_ACCEPTED,
     operation_id="process_case",
     summary="Start the 9-agent pipeline for a case",
-    description="Kicks off the multi-agent pipeline asynchronously. Returns 202 "
-    "immediately. Subscribe to `GET /cases/{case_id}/status/stream` for "
-    "progress updates, or poll `GET /cases/{case_id}/status` for a snapshot.",
+    description="Kicks off the multi-agent pipeline asynchronously.",
     responses={
         400: {
             "model": ErrorResponse,
@@ -361,12 +723,12 @@ async def process_case(
             detail="Not authorized to run this case",
         )
 
-    if case.status in (CaseStatus.processing,):
+    if case.status in {CaseStatus.processing}:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Pipeline already running for this case",
         )
-    if case.status in (CaseStatus.decided, CaseStatus.closed):
+    if case.status in {CaseStatus.decided, CaseStatus.closed}:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Case is in terminal status '{case.status.value}' and cannot be reprocessed",

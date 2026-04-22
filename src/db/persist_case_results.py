@@ -128,6 +128,9 @@ async def _update_case_row(
         from src.models.case import CaseRoute
 
         case.route = CaseRoute(route)
+    jurisdiction_valid = (state.case_metadata or {}).get("jurisdiction_valid")
+    if isinstance(jurisdiction_valid, bool):
+        case.jurisdiction_valid = jurisdiction_valid
 
 
 # ---------------------------------------------------------------------------

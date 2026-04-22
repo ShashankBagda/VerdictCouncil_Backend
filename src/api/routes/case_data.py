@@ -51,24 +51,24 @@ router = APIRouter()
 # 9-agent pipeline topology used for status derivation
 PIPELINE_AGENTS = [
     "case-processing",
-    "fact-reconstruction",
+    "complexity-routing",
     "evidence-analysis",
+    "fact-reconstruction",
     "witness-analysis",
     "legal-knowledge",
     "argument-construction",
-    "complexity-routing",
     "deliberation",
     "governance-verdict",
 ]
 
 AGENT_LABELS = {
     "case-processing": "Case Processing",
-    "fact-reconstruction": "Fact Reconstruction",
+    "complexity-routing": "Complexity Routing",
     "evidence-analysis": "Evidence Analysis",
+    "fact-reconstruction": "Fact Reconstruction",
     "witness-analysis": "Witness Analysis",
     "legal-knowledge": "Legal Knowledge",
     "argument-construction": "Argument Construction",
-    "complexity-routing": "Complexity Routing",
     "deliberation": "Deliberation",
     "governance-verdict": "Governance & Verdict",
 }
@@ -105,6 +105,7 @@ def _derive_agent_status(case: Case, audit_logs: list[AuditLog]) -> list[dict[st
             agent_status = "pending"
             start_time = None
             end_time = None
+            elapsed_seconds = None
         else:
             last = logs[-1]
             action_lower = (last.action or "").lower()
@@ -118,6 +119,13 @@ def _derive_agent_status(case: Case, audit_logs: list[AuditLog]) -> list[dict[st
                 agent_status = "completed"
             start_time = logs[0].created_at.isoformat() if logs[0].created_at else None
             end_time = last.created_at.isoformat() if last.created_at else None
+            if logs[0].created_at and last.created_at:
+                elapsed_seconds = max(
+                    int((last.created_at - logs[0].created_at).total_seconds()),
+                    0,
+                )
+            else:
+                elapsed_seconds = None
 
         agents.append(
             {
@@ -126,7 +134,7 @@ def _derive_agent_status(case: Case, audit_logs: list[AuditLog]) -> list[dict[st
                 "status": agent_status,
                 "start_time": start_time,
                 "end_time": end_time,
-                "elapsed_seconds": None,
+                "elapsed_seconds": elapsed_seconds,
                 "error_message": None,
                 "output_summary": None,
             }
@@ -170,6 +178,22 @@ def _derive_overall_status(case: Case, agents: list[dict]) -> str:
     if any(a["status"] == "running" for a in agents):
         return "processing"
     return "pending"
+
+
+def _derive_current_agent(agents: list[dict[str, Any]]) -> str | None:
+    for agent in agents:
+        if agent["status"] == "running":
+            return agent["agent_id"]
+    return None
+
+
+def _derive_overall_elapsed_seconds(agents: list[dict[str, Any]]) -> int | None:
+    completed = [
+        agent["elapsed_seconds"] for agent in agents if agent.get("elapsed_seconds") is not None
+    ]
+    if not completed:
+        return None
+    return int(sum(completed))
 
 
 # ---------------------------------------------------------------------------
@@ -259,6 +283,8 @@ async def get_pipeline_status(
         "agents": agents,
         "overall_progress_percent": progress,
         "overall_status": overall,
+        "current_agent": _derive_current_agent(agents),
+        "overall_elapsed_seconds": _derive_overall_elapsed_seconds(agents),
     }
 
 
