@@ -50,6 +50,15 @@ class VerdictRecommendation(BaseModel):
     alternative_outcomes: list[AlternativeOutcome]
 
 
+class Deliberation(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    preliminary_conclusion: str | None = None
+    confidence_score: int | None = None
+    reasoning_chain: list[dict[str, Any]] = Field(default_factory=list)
+    uncertainty_flags: list[dict[str, Any]] = Field(default_factory=list)
+
+
 class AuditEntry(BaseModel):
     agent: str
     timestamp: datetime = Field(default_factory=datetime.utcnow)
@@ -101,7 +110,7 @@ class CaseState(BaseModel):
     arguments: dict[str, Any] | None = None
 
     # Deliberation (written by Deliberation)
-    deliberation: dict[str, Any] | None = None
+    deliberation: Deliberation | None = None
 
     # Governance (written by Governance & Verdict)
     fairness_check: FairnessCheck | None = None

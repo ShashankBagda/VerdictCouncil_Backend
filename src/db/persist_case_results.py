@@ -291,17 +291,16 @@ def _insert_arguments(db: AsyncSession, case_id: UUID, state: CaseState) -> None
 
 
 def _insert_deliberation(db: AsyncSession, case_id: UUID, state: CaseState) -> None:
-    data = state.deliberation or {}
-    if not isinstance(data, dict) or not data:
+    data = state.deliberation
+    if not data:
         return
-    confidence = data.get("confidence_score")
     db.add(
         Deliberation(
             case_id=case_id,
-            reasoning_chain=_as_jsonb(data.get("reasoning_chain")),
-            preliminary_conclusion=data.get("preliminary_conclusion"),
-            uncertainty_flags=_as_jsonb(data.get("uncertainty_flags")),
-            confidence_score=int(confidence) if isinstance(confidence, (int, float)) else None,
+            reasoning_chain=_as_jsonb(data.reasoning_chain),
+            preliminary_conclusion=data.preliminary_conclusion,
+            uncertainty_flags=_as_jsonb(data.uncertainty_flags),
+            confidence_score=data.confidence_score,
         )
     )
 
