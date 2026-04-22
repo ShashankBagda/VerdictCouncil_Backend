@@ -1,5 +1,6 @@
 """Unit tests for the SSE pipeline status stream endpoint (US-002)."""
 
+import asyncio
 import json
 import uuid
 from datetime import UTC, datetime
@@ -232,7 +233,7 @@ class TestPipelineEventsHelper:
     ["started", "completed", "failed"],
 )
 def test_pipeline_progress_event_validates_phase(phase):
-    """The Pydantic model accepts the 3 documented phases."""
+    """The Pydantic model accepts the 3 documented per-agent phases."""
     PipelineProgressEvent(
         case_id=uuid.uuid4(),
         agent="case-processing",
@@ -240,3 +241,166 @@ def test_pipeline_progress_event_validates_phase(phase):
         step=1,
         ts=datetime.now(UTC),
     )
+
+
+def test_pipeline_progress_event_accepts_terminal_shape():
+    """The schema must accept the run-level terminal event: agent='pipeline',
+    phase='terminal', no step, detail carries reason + stopped_at.
+    """
+    event = PipelineProgressEvent(
+        case_id=uuid.uuid4(),
+        agent="pipeline",
+        phase="terminal",
+        step=None,
+        ts=datetime.now(UTC),
+        detail={"reason": "complexity_escalation", "stopped_at": "complexity-routing"},
+    )
+    assert event.step is None
+    assert event.detail["reason"] == "complexity_escalation"
+
+
+class TestTerminalCloseCondition:
+    """Subscriber must close on either the legacy governance-verdict happy
+    path or the new pipeline/terminal halt signal — both are authoritative.
+    """
+
+    async def test_subscribe_closes_on_pipeline_terminal_event(self, monkeypatch):
+        from src.services import pipeline_events as pe
+
+        case_id = "case-pipeline-terminal"
+        events = [
+            json.dumps({"agent": "case-processing", "phase": "started"}),
+            json.dumps(
+                {
+                    "agent": "pipeline",
+                    "phase": "terminal",
+                    "detail": {
+                        "reason": "complexity_escalation",
+                        "stopped_at": "complexity-routing",
+                    },
+                }
+            ),
+            # Must NOT be yielded — subscriber closed on the terminal above.
+            json.dumps({"agent": "case-processing", "phase": "started"}),
+        ]
+
+        async def _fake_listen():
+            for payload in events:
+                yield {"type": "message", "data": payload}
+
+        fake_pubsub = MagicMock()
+        fake_pubsub.subscribe = AsyncMock()
+        fake_pubsub.unsubscribe = AsyncMock()
+        fake_pubsub.aclose = AsyncMock()
+        fake_pubsub.listen = _fake_listen
+
+        fake_redis = MagicMock()
+        fake_redis.pubsub = MagicMock(return_value=fake_pubsub)
+
+        async def _fake_get_client():
+            return fake_redis
+
+        monkeypatch.setattr(pe, "_get_redis_client", _fake_get_client)
+
+        collected = []
+        async for payload in pe.subscribe(case_id):
+            collected.append(payload)
+
+        assert len(collected) == 2
+        assert json.loads(collected[-1])["agent"] == "pipeline"
+        fake_pubsub.unsubscribe.assert_awaited_once()
+        fake_pubsub.aclose.assert_awaited_once()
+
+
+class TestSSEStreamHeartbeatAndDisconnect:
+    """Wire-level behaviour: heartbeats on idle, clean teardown on client
+    disconnect. No real Redis — we feed a controlled async generator into
+    the route's subscribe hook and drive timing with asyncio.sleep.
+    """
+
+    async def test_emits_keepalive_comment_on_idle(self, monkeypatch):
+        """If no events arrive within SSE_HEARTBEAT_SECONDS, the stream emits
+        an SSE comment line (`: keepalive`) instead of hanging.
+        """
+        user = _make_user()
+        case_id = uuid.uuid4()
+        case = _make_case(case_id, user.id)
+        mock_db = _build_mock_session(case)
+
+        event_payload = PipelineProgressEvent(
+            case_id=case_id,
+            agent="governance-verdict",
+            phase="completed",
+            step=9,
+            ts=datetime.now(UTC),
+        ).model_dump_json()
+
+        # Yield nothing for an interval longer than the heartbeat (forces the
+        # TimeoutError branch), then one terminal event so the subscriber
+        # closes cleanly and the test doesn't run until the watchdog trips.
+        async def _slow_subscribe(case_id):
+            await asyncio.sleep(0.15)
+            yield event_payload
+
+        from src.api.routes import cases as cases_module
+
+        monkeypatch.setattr(cases_module, "subscribe_pipeline_events", _slow_subscribe)
+        # Shrink heartbeat so the test finishes in <1s.
+        monkeypatch.setattr(cases_module, "SSE_HEARTBEAT_SECONDS", 0.05)
+
+        app = _app_with_overrides(mock_db, user)
+        transport = ASGITransport(app=app)
+
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get(f"/api/v1/cases/{case_id}/status/stream")
+
+        assert resp.status_code == 200
+        body = resp.text
+        assert ": keepalive" in body, (
+            f"expected heartbeat comment in SSE body, got: {body!r}"
+        )
+        assert "data: " in body
+
+    async def test_watchdog_emits_synthetic_terminal_event(self, monkeypatch):
+        """A runaway subscriber that never produces a terminal event must
+        be closed by the watchdog with a synthetic pipeline/terminal event
+        so the client can stop waiting.
+        """
+        user = _make_user()
+        case_id = uuid.uuid4()
+        case = _make_case(case_id, user.id)
+        mock_db = _build_mock_session(case)
+
+        async def _never_terminates(case_id):
+            # Sleep longer than the (shrunk) watchdog horizon — the wait_for
+            # heartbeat timeout will trip first, then the watchdog closes
+            # the generator.
+            await asyncio.sleep(3600)
+            yield "unreachable"
+
+        from src.api.routes import cases as cases_module
+
+        monkeypatch.setattr(cases_module, "subscribe_pipeline_events", _never_terminates)
+        # Heartbeat small; watchdog just above it so we get at least one
+        # heartbeat-loop pass before the watchdog trips.
+        monkeypatch.setattr(cases_module, "SSE_HEARTBEAT_SECONDS", 0.02)
+        monkeypatch.setattr(cases_module, "SSE_WATCHDOG_SECONDS", 0.05)
+
+        app = _app_with_overrides(mock_db, user)
+        transport = ASGITransport(app=app)
+
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get(f"/api/v1/cases/{case_id}/status/stream")
+
+        assert resp.status_code == 200
+        body = resp.text
+        data_lines = [line for line in body.splitlines() if line.startswith("data: ")]
+        terminals = [json.loads(line[len("data: ") :]) for line in data_lines]
+        watchdog = [
+            e
+            for e in terminals
+            if e.get("agent") == "pipeline"
+            and e.get("phase") == "terminal"
+            and e.get("detail", {}).get("reason") == "watchdog_timeout"
+        ]
+        assert len(watchdog) == 1

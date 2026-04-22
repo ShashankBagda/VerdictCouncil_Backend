@@ -143,36 +143,75 @@ class MeshPipelineRunner:
         """
         run_id = self._resolve_run_id(case_state, run_id)
         state = case_state
+        current_agent = "input-guardrail"
 
-        state = await self._apply_input_guardrail(state)
+        try:
+            state = await self._apply_input_guardrail(state)
 
-        # L1 — sequential agents 1 & 2 with the escalation halt after 2.
-        for agent_name in L1_AGENTS:
-            state = await self._invoke_agent_sequential(agent_name, state, run_id)
-            await self._checkpoint(state, run_id, agent_name)
-            if agent_name == "complexity-routing" and state.status == CaseStatusEnum.escalated:
-                logger.warning(
-                    "Mesh pipeline halted at complexity-routing: escalated (case_id=%s)",
-                    state.case_id,
-                )
-                assert state.run_id == run_id, "run_id invariant broken on escalation halt"
-                return state
+            # L1 — sequential agents 1 & 2 with the escalation halt after 2.
+            for agent_name in L1_AGENTS:
+                current_agent = agent_name
+                state = await self._invoke_agent_sequential(agent_name, state, run_id)
+                await self._checkpoint(state, run_id, agent_name)
+                if agent_name == "complexity-routing" and state.status == CaseStatusEnum.escalated:
+                    logger.warning(
+                        "Mesh pipeline halted at complexity-routing: escalated (case_id=%s)",
+                        state.case_id,
+                    )
+                    assert state.run_id == run_id, "run_id invariant broken on escalation halt"
+                    await self._emit_terminal(
+                        state,
+                        reason="complexity_escalation",
+                        stopped_at="complexity-routing",
+                    )
+                    return state
 
-        # L2 — parallel fan-out via the aggregator.
-        state = await self._invoke_l2_fanout(state, run_id)
-        await self._checkpoint(state, run_id, "layer2-aggregator")
+            # L2 — parallel fan-out via the aggregator.
+            current_agent = "layer2-aggregator"
+            state = await self._invoke_l2_fanout(state, run_id)
+            await self._checkpoint(state, run_id, "layer2-aggregator")
 
-        # L3 — sequential agents 6–9 with the post-L9 output-integrity +
-        # fairness halts.
-        for agent_name in L3_AGENTS:
-            state = await self._invoke_agent_sequential(agent_name, state, run_id)
-            await self._checkpoint(state, run_id, agent_name)
+            # L3 — sequential agents 6–9 with the post-L9 output-integrity +
+            # fairness halts.
+            for agent_name in L3_AGENTS:
+                current_agent = agent_name
+                state = await self._invoke_agent_sequential(agent_name, state, run_id)
+                await self._checkpoint(state, run_id, agent_name)
 
-            if agent_name == "governance-verdict":
-                maybe_halted = self._apply_governance_halts(state)
-                if maybe_halted is not None:
-                    assert maybe_halted.run_id == run_id, "run_id invariant broken on halt"
-                    return maybe_halted
+                if agent_name == "governance-verdict":
+                    maybe_halted = self._apply_governance_halts(state)
+                    if maybe_halted is not None:
+                        assert maybe_halted.run_id == run_id, "run_id invariant broken on halt"
+                        await self._emit_terminal(
+                            maybe_halted,
+                            reason="governance_halt",
+                            stopped_at="governance-verdict",
+                        )
+                        return maybe_halted
+        except TimeoutError as exc:
+            # _invoke_l2_fanout re-raises TimeoutError without emitting its
+            # own terminal; we preserve the specific halt reason here
+            # instead of falling into the generic exception branch.
+            reason = (
+                "l2_barrier_timeout"
+                if current_agent == "layer2-aggregator"
+                else "agent_timeout"
+            )
+            await self._emit_terminal(
+                state,
+                reason=reason,
+                stopped_at=current_agent,
+                error=str(exc)[:500],
+            )
+            raise
+        except Exception as exc:
+            await self._emit_terminal(
+                state,
+                reason="exception",
+                stopped_at=current_agent,
+                error=str(exc)[:500],
+            )
+            raise
 
         logger.info(
             "Mesh pipeline completed for case_id=%s run_id=%s status=%s",
@@ -206,39 +245,79 @@ class MeshPipelineRunner:
         """
         run_id = self._resolve_run_id(case_state, run_id)
         state = case_state
+        current_agent = start_agent
 
-        if start_agent in L1_AGENTS:
-            l1_start = L1_AGENTS.index(start_agent)
-            for agent_name in L1_AGENTS[l1_start:]:
+        try:
+            if start_agent in L1_AGENTS:
+                l1_start = L1_AGENTS.index(start_agent)
+                for agent_name in L1_AGENTS[l1_start:]:
+                    current_agent = agent_name
+                    state = await self._invoke_agent_sequential(agent_name, state, run_id)
+                    await self._checkpoint(state, run_id, agent_name)
+                    if (
+                        agent_name == "complexity-routing"
+                        and state.status == CaseStatusEnum.escalated
+                    ):
+                        assert state.run_id == run_id, "run_id invariant broken on escalation halt"
+                        await self._emit_terminal(
+                            state,
+                            reason="complexity_escalation",
+                            stopped_at="complexity-routing",
+                        )
+                        return state
+                current_agent = "layer2-aggregator"
+                state = await self._invoke_l2_fanout(state, run_id)
+                await self._checkpoint(state, run_id, AGGREGATOR_NAME)
+                l3_start = 0
+            elif start_agent in L2_AGENTS:
+                current_agent = "layer2-aggregator"
+                state = await self._invoke_l2_fanout(state, run_id)
+                await self._checkpoint(state, run_id, AGGREGATOR_NAME)
+                l3_start = 0
+            elif start_agent in L3_AGENTS:
+                l3_start = L3_AGENTS.index(start_agent)
+            else:
+                raise ValueError(
+                    f"Unknown start_agent '{start_agent}'. "
+                    f"Must be one of {L1_AGENTS + L2_AGENTS + L3_AGENTS}"
+                )
+
+            for agent_name in L3_AGENTS[l3_start:]:
+                current_agent = agent_name
                 state = await self._invoke_agent_sequential(agent_name, state, run_id)
                 await self._checkpoint(state, run_id, agent_name)
-                if agent_name == "complexity-routing" and state.status == CaseStatusEnum.escalated:
-                    assert state.run_id == run_id, "run_id invariant broken on escalation halt"
-                    return state
-            state = await self._invoke_l2_fanout(state, run_id)
-            await self._checkpoint(state, run_id, AGGREGATOR_NAME)
-            l3_start = 0
-        elif start_agent in L2_AGENTS:
-            state = await self._invoke_l2_fanout(state, run_id)
-            await self._checkpoint(state, run_id, AGGREGATOR_NAME)
-            l3_start = 0
-        elif start_agent in L3_AGENTS:
-            l3_start = L3_AGENTS.index(start_agent)
-        else:
-            raise ValueError(
-                f"Unknown start_agent '{start_agent}'. "
-                f"Must be one of {L1_AGENTS + L2_AGENTS + L3_AGENTS}"
+
+                if agent_name == "governance-verdict":
+                    maybe_halted = self._apply_governance_halts(state)
+                    if maybe_halted is not None:
+                        assert maybe_halted.run_id == run_id, "run_id invariant broken on halt"
+                        await self._emit_terminal(
+                            maybe_halted,
+                            reason="governance_halt",
+                            stopped_at="governance-verdict",
+                        )
+                        return maybe_halted
+        except TimeoutError as exc:
+            reason = (
+                "l2_barrier_timeout"
+                if current_agent == "layer2-aggregator"
+                else "agent_timeout"
             )
-
-        for agent_name in L3_AGENTS[l3_start:]:
-            state = await self._invoke_agent_sequential(agent_name, state, run_id)
-            await self._checkpoint(state, run_id, agent_name)
-
-            if agent_name == "governance-verdict":
-                maybe_halted = self._apply_governance_halts(state)
-                if maybe_halted is not None:
-                    assert maybe_halted.run_id == run_id, "run_id invariant broken on halt"
-                    return maybe_halted
+            await self._emit_terminal(
+                state,
+                reason=reason,
+                stopped_at=current_agent,
+                error=str(exc)[:500],
+            )
+            raise
+        except Exception as exc:
+            await self._emit_terminal(
+                state,
+                reason="exception",
+                stopped_at=current_agent,
+                error=str(exc)[:500],
+            )
+            raise
 
         assert state.run_id == run_id, "run_id invariant broken at run_from() exit"
         return state
@@ -395,6 +474,10 @@ class MeshPipelineRunner:
                 mesh_task_id, timeout=L2_BARRIER_TIMEOUT_SECONDS
             )
         except TimeoutError:
+            # Per-L2 wire events stay here so each agent shows as failed in
+            # the per-agent stream. The run-level terminal event is the
+            # outer orchestrator's responsibility (run/run_from), so we
+            # don't double-emit it from here — just re-raise.
             for agent_name in L2_AGENTS:
                 await self._emit_progress(agent_name, state, "failed", error="L2 barrier timeout")
             raise
@@ -523,6 +606,34 @@ class MeshPipelineRunner:
             total=len(AGENT_ORDER),
             ts=datetime.now(UTC),
             error=error,
+        )
+        await publish_progress(event)
+
+    async def _emit_terminal(
+        self,
+        state: CaseState,
+        *,
+        reason: str,
+        stopped_at: str,
+        error: str | None = None,
+    ) -> None:
+        """Emit the run-level terminal SSE event.
+
+        One event per halt path; ``agent="pipeline"`` + ``phase="terminal"``
+        is the subscriber's authoritative close signal. ``detail`` carries
+        the stage at which the halt occurred so downstream analytics can
+        attribute it correctly without mislabelling every halt as a
+        governance-verdict failure.
+        """
+        event = PipelineProgressEvent(
+            case_id=state.case_id,
+            agent="pipeline",
+            phase="terminal",
+            step=None,
+            total=len(AGENT_ORDER),
+            ts=datetime.now(UTC),
+            error=error,
+            detail={"reason": reason, "stopped_at": stopped_at},
         )
         await publish_progress(event)
 

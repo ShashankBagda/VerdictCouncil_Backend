@@ -17,11 +17,28 @@ from src.tools.search_precedents import _get_redis_client
 
 logger = logging.getLogger(__name__)
 
-_TERMINAL_PHASES = {"completed", "failed"}
+_GOVERNANCE_TERMINAL_PHASES = {"completed", "failed"}
 
 
 def _channel(case_id: str | object) -> str:
     return f"vc:case:{case_id}:progress"
+
+
+def _is_terminal_event(parsed: dict) -> bool:
+    """Close the stream on either the happy path or any halt path.
+
+    - ``governance-verdict`` + ``completed``/``failed`` is the happy-path
+      close signal left over from US-002.
+    - ``pipeline`` + ``terminal`` is the run-level halt signal the mesh
+      runner emits on L1 escalation, L2 barrier timeout, governance halt,
+      orchestrator exception, and watchdog timeout. Subscribers must
+      close on this event regardless of which agent owned the halt.
+    """
+    agent = parsed.get("agent")
+    phase = parsed.get("phase")
+    if agent == "governance-verdict" and phase in _GOVERNANCE_TERMINAL_PHASES:
+        return True
+    return agent == "pipeline" and phase == "terminal"
 
 
 async def publish_progress(event: PipelineProgressEvent) -> None:
@@ -52,10 +69,7 @@ async def subscribe(case_id: str | object) -> AsyncGenerator[str, None]:
                 parsed = json.loads(payload)
             except json.JSONDecodeError:
                 continue
-            if (
-                parsed.get("agent") == "governance-verdict"
-                and parsed.get("phase") in _TERMINAL_PHASES
-            ):
+            if _is_terminal_event(parsed):
                 return
     finally:
         await pubsub.unsubscribe(_channel(case_id))
