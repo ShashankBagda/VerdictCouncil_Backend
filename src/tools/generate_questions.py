@@ -76,7 +76,10 @@ async def generate_questions(
     weaknesses: Annotated[list[str], "List of identified weaknesses or gaps to probe"],
     question_types: Annotated[
         list[str] | None,
-        "Types of questions: 'clarification' | 'challenge' | 'exploration' | 'credibility'",
+        (
+            "Types of questions: 'factual_clarification' | 'evidence_gap'"
+            " | 'credibility_probe' | 'legal_interpretation'"
+        ),
     ] = None,
     max_questions: Annotated[int, "Maximum number of questions to generate"] = 5,
 ) -> list[dict]:
@@ -89,7 +92,7 @@ async def generate_questions(
         argument_summary: Summary of the argument or testimony to analyze.
         weaknesses: List of identified weaknesses or gaps to probe.
         question_types: Types of questions to generate. Defaults to
-            ['clarification', 'challenge'].
+            ['factual_clarification', 'evidence_gap'].
         max_questions: Maximum number of questions to generate. Defaults to 5.
 
     Returns:
@@ -103,7 +106,7 @@ async def generate_questions(
         QuestionGenerationError: If generation fails.
     """
     if question_types is None:
-        question_types = ["clarification", "challenge"]
+        question_types = ["factual_clarification", "evidence_gap"]
 
     if not argument_summary:
         return []

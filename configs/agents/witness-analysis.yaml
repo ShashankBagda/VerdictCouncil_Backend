@@ -59,6 +59,13 @@ apps:
         - Testimony simulation must NOT fabricate beyond written statements.
         - Credibility concerns must cite specific evidence, not suspicion.
 
+        PHASE 4 - SUGGESTED QUESTIONS:
+        Use the generate_questions tool with question_types from this taxonomy only:
+          - factual_clarification: pin down disputed or vague factual claims
+          - evidence_gap: surface missing evidence the witness could address
+          - credibility_probe: challenge inconsistencies or bias
+          - legal_interpretation: clarify how the witness understands relevant rules
+
         GUARDRAILS:
         - Must assess all witnesses equally regardless of which party called them.
         - Testimony simulation output must be marked as simulated preparation material.
