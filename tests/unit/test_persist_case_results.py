@@ -322,7 +322,11 @@ async def test_case_row_status_and_metadata_sync():
     state = CaseState(
         case_id=str(case_id),
         status=CaseStatusEnum.escalated,
-        case_metadata={"complexity": "high", "route": "escalate_human"},
+        case_metadata={
+            "complexity": "high",
+            "route": "escalate_human",
+            "jurisdiction_valid": True,
+        },
     )
 
     session = _RecordingSession(case=case)
@@ -333,6 +337,7 @@ async def test_case_row_status_and_metadata_sync():
     assert case.status == CaseStatus.escalated
     assert case.complexity == CaseComplexity.high
     assert case.route == CaseRoute.escalate_human
+    assert case.jurisdiction_valid is True
 
 
 @pytest.mark.asyncio

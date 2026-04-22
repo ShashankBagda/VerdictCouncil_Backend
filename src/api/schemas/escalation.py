@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import enum
+from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -27,16 +29,29 @@ class EscalationActionRequest(BaseModel):
     )
 
 
+class WorkflowHistoryEntryResponse(BaseModel):
+    action: str
+    reason: str | None = None
+    actor: str | None = None
+    created_at: datetime | None = None
+    details: dict[str, Any] | None = None
+
+
 class EscalatedCaseResponse(BaseModel):
-    id: UUID
+    id: str
+    case_id: UUID
+    item_type: str
+    case_title: str | None = None
     domain: CaseDomain
-    description: str | None = None
     status: CaseStatus
     route: str | None = None
     complexity: str | None = None
-    created_by: UUID
-
-    model_config = {"from_attributes": True}
+    originating_judge: str | None = None
+    reason: str | None = None
+    priority: str = "high"
+    submitted_at: datetime | None = None
+    preview: str | None = None
+    history: list[WorkflowHistoryEntryResponse] = Field(default_factory=list)
 
 
 class EscalatedCaseListResponse(BaseModel):

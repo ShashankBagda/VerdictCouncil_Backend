@@ -129,7 +129,14 @@ class Case(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "cases"
 
     domain: Mapped[CaseDomain] = mapped_column(Enum(CaseDomain), nullable=False)
+    title: Mapped[str | None] = mapped_column(String(255))
     description: Mapped[str | None] = mapped_column(Text)
+    filed_date: Mapped[date | None] = mapped_column(Date)
+    claim_amount: Mapped[float | None] = mapped_column(Float)
+    consent_to_higher_claim_limit: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false"
+    )
+    offence_code: Mapped[str | None] = mapped_column(String(100))
     status: Mapped[CaseStatus] = mapped_column(
         Enum(CaseStatus), nullable=False, server_default=CaseStatus.pending.value
     )

@@ -17,6 +17,17 @@ from src.models.user import User, UserRole
 router = APIRouter()
 
 
+def _listify(value):
+    if isinstance(value, list):
+        return value
+    if isinstance(value, dict):
+        for key in ("items", "questions", "suggested_questions"):
+            nested = value.get(key)
+            if isinstance(nested, list):
+                return nested
+    return []
+
+
 @router.post(
     "/{case_id}/hearing-pack",
     response_model=HearingPackResponse,
@@ -61,6 +72,19 @@ async def generate_hearing_pack(
         }
         for f in case.facts
     ]
+    disputed_issues = [
+        {
+            "id": str(f.id),
+            "description": f.description,
+            "confidence": f.confidence.value if f.confidence else None,
+            "status": f.status.value if f.status else None,
+            "dispute_reason": (f.corroboration or {}).get("dispute_reason")
+            if isinstance(f.corroboration, dict)
+            else None,
+        }
+        for f in case.facts
+        if f.status and f.status.value == "disputed"
+    ]
     evidence = [
         {
             "id": str(e.id),
@@ -69,6 +93,27 @@ async def generate_hearing_pack(
             "admissibility_flags": e.admissibility_flags,
         }
         for e in case.evidence
+    ]
+    evidence_gaps = [
+        {
+            "id": f"weak-{e.id}",
+            "type": "weak_evidence",
+            "description": f"Weak {e.evidence_type.value} evidence item",
+            "status": e.strength.value if e.strength else None,
+            "details": e.admissibility_flags or e.linked_claims,
+        }
+        for e in case.evidence
+        if e.strength and e.strength.value == "weak"
+    ] + [
+        {
+            "id": f"uncorroborated-{f.id}",
+            "type": "uncorroborated_fact",
+            "description": f.description,
+            "status": f.status.value if f.status else None,
+            "details": f.corroboration,
+        }
+        for f in case.facts
+        if not f.corroboration
     ]
     witnesses = [
         {
@@ -107,6 +152,15 @@ async def generate_hearing_pack(
             for a in case.arguments
             if a.side.value == "claimant"
         ],
+        "prosecution": [
+            {
+                "id": str(a.id),
+                "legal_basis": a.legal_basis,
+                "weaknesses": a.weaknesses,
+            }
+            for a in case.arguments
+            if a.side.value == "prosecution"
+        ],
         "respondent": [
             {
                 "id": str(a.id),
@@ -116,7 +170,48 @@ async def generate_hearing_pack(
             for a in case.arguments
             if a.side.value == "respondent"
         ],
+        "defense": [
+            {
+                "id": str(a.id),
+                "legal_basis": a.legal_basis,
+                "weaknesses": a.weaknesses,
+            }
+            for a in case.arguments
+            if a.side.value == "defense"
+        ],
     }
+    suggested_questions = []
+    weak_points = []
+    for argument in case.arguments:
+        if argument.weaknesses:
+            weak_points.append(
+                {
+                    "side": argument.side.value,
+                    "issue": argument.legal_basis,
+                    "weakness": argument.weaknesses,
+                }
+            )
+        for index, question in enumerate(_listify(argument.suggested_questions)):
+            if isinstance(question, dict):
+                suggested_questions.append(
+                    {
+                        "id": question.get("id") or f"{argument.id}-{index}",
+                        "side": argument.side.value,
+                        "text": question.get("text") or question.get("question"),
+                        "type": question.get("type"),
+                        "linked_issue": question.get("linked_issue") or argument.legal_basis,
+                    }
+                )
+            elif isinstance(question, str):
+                suggested_questions.append(
+                    {
+                        "id": f"{argument.id}-{index}",
+                        "side": argument.side.value,
+                        "text": question,
+                        "type": None,
+                        "linked_issue": argument.legal_basis,
+                    }
+                )
 
     current_verdict = None
     if case.verdicts:
@@ -134,12 +229,17 @@ async def generate_hearing_pack(
         case_title=case.description or f"Case {case.id}",
         domain=case.domain.value,
         status=case.status.value,
+        case_summary=case.description,
         parties=parties,
         facts=facts,
+        disputed_issues=disputed_issues,
         evidence=evidence,
+        evidence_gaps=evidence_gaps,
         witnesses=witnesses,
         legal_framework=legal_framework,
         arguments=arguments,
+        suggested_questions=suggested_questions,
+        weak_points=weak_points,
         current_verdict=current_verdict,
         created_at=case.created_at,
         last_updated=case.updated_at or case.created_at,

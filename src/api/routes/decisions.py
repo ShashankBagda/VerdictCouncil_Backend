@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, status
@@ -68,10 +69,17 @@ async def record_decision(
     )
     db.add(audit_entry)
     await db.flush()
+    recorded_at = datetime.now(UTC)
+    audit_entry.created_at = recorded_at
 
     return {
         "case_id": case_id,
         "action": body.action,
         "status": new_status,
+        "decision_type": body.action.value,
+        "reason": body.notes,
+        "final_order": body.final_order,
+        "recorded_at": recorded_at,
+        "recorded_by": str(current_user.id),
         "message": f"Case {body.action.value}ed by judge",
     }

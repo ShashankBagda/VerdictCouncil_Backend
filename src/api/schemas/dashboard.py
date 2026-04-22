@@ -15,5 +15,14 @@ class DashboardStats(BaseModel):
         description="Case count grouped by domain",
         examples=[{"small_claims": 30, "traffic_violation": 12}],
     )
+    escalation_rate_percent: float = Field(
+        ..., description="Percentage of cases currently escalated"
+    )
+    average_verdict_confidence: float | None = Field(
+        None, description="Average governance-verdict confidence score"
+    )
+    average_processing_time_seconds: float | None = Field(
+        None, description="Average pipeline processing time when available"
+    )
     recent_cases: list[dict] = Field(..., description="Most recent cases (last 10)")
     pair_api_status: dict | None = Field(None, description="PAIR API circuit breaker status")
