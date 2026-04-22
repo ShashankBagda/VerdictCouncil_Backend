@@ -13,7 +13,7 @@ import logging
 import uuid
 from typing import Any
 
-from src.pipeline.runner import AGENT_ORDER, PipelineRunner
+from src.pipeline.mesh_runner import MeshPipelineRunner
 from src.services.whatif_controller.diff_engine import generate_diff
 from src.shared.case_state import CaseState
 
@@ -34,8 +34,8 @@ class WhatIfController:
         "legal_interpretation": "legal-knowledge",  # Agent 6
     }
 
-    def __init__(self, pipeline_runner: PipelineRunner) -> None:
-        self._pipeline_runner = pipeline_runner
+    def __init__(self, mesh_runner: MeshPipelineRunner) -> None:
+        self._mesh_runner = mesh_runner
 
     async def create_scenario(
         self,
@@ -70,24 +70,25 @@ class WhatIfController:
         cloned.parent_run_id = case_state.run_id
         cloned.run_id = str(uuid.uuid4())
 
-        # Determine which agents to re-run
+        # Determine where the mesh pipeline must re-enter. `run_from` is
+        # topology-aware: L1/L2/L3 start_agent each dispatch the correct
+        # fanout/sequential sub-plan, honour the L2 aggregator barrier,
+        # and emit per-step checkpoints through the same session factory
+        # the forward pipeline uses.
         start_agent = self.CHANGE_IMPACT_MAP[modification_type]
-        start_index = AGENT_ORDER.index(start_agent)
-        agents_to_run = AGENT_ORDER[start_index:]
 
         logger.info(
-            "What-if scenario: re-running agents %s for case_id=%s, run_id=%s",
-            agents_to_run,
+            "What-if scenario: re-entering mesh pipeline at %s for case_id=%s, run_id=%s",
+            start_agent,
             cloned.case_id,
             cloned.run_id,
         )
 
-        # Re-run the pipeline from the re-entry point onwards
-        state = cloned
-        for agent_name in agents_to_run:
-            state = await self._pipeline_runner._run_agent(agent_name, state)
-
-        return state
+        return await self._mesh_runner.run_from(
+            cloned,
+            start_agent=start_agent,
+            run_id=cloned.run_id,
+        )
 
     def _apply_modification(
         self,

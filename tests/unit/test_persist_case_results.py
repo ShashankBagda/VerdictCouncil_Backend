@@ -61,7 +61,7 @@ class _RecordingSession:
     def add(self, obj: Any) -> None:
         self.added.append(obj)
 
-    async def execute(self, statement: Any) -> None:
+    async def execute(self, statement: Any, params: Any = None) -> None:
         self.executed.append(statement)
 
     async def get(self, model: type, pk: Any) -> Any:
@@ -106,9 +106,10 @@ async def test_commits_and_clears_all_child_tables_first():
 
     assert session.committed is True
     assert session.rolled_back is False
-    # 9 child tables cleared (Evidence, Fact, Witness, LegalRule, Precedent,
-    # Argument, Deliberation, Verdict, AuditLog)
-    assert len(session.executed) == 9
+    # 9 child-table clears (Evidence, Fact, Witness, LegalRule, Precedent,
+    # Argument, Deliberation, Verdict, AuditLog) + 1 terminal
+    # pipeline_checkpoints upsert for what-if rehydration = 10.
+    assert len(session.executed) == 10
 
 
 @pytest.mark.asyncio
