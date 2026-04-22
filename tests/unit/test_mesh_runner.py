@@ -252,7 +252,7 @@ async def test_l2_fanout_publishes_three_parallel_with_aggregator_reply_to():
     # Merged state returned with L2 fields populated
     assert result.evidence_analysis == {"exhibits": []}
     assert result.extracted_facts == {"timeline": []}
-    assert result.witnesses == {"statements": []}
+    assert result.witnesses is not None and result.witnesses.statements == []
 
 
 @pytest.mark.asyncio
@@ -390,7 +390,7 @@ async def test_parse_agent_response_strips_unauthorized_fields():
     result = runner._parse_agent_response(envelope, prior, "witness-analysis")
 
     # Authorized write is kept.
-    assert result.witnesses == {"statements": ["w1"]}
+    assert result.witnesses is not None and result.witnesses.statements == ["w1"]
     # Unauthorized writes are reverted to prior state.
     assert result.evidence_analysis == {"exhibits": ["legit"]}
     assert result.arguments == {"claim": "original"}
@@ -410,7 +410,7 @@ async def test_parse_agent_response_accepts_authorized_fragment():
     envelope = _send_task_response("t-frag", {"witnesses": {"statements": ["w1"]}})
     result = runner._parse_agent_response(envelope, prior, "witness-analysis")
 
-    assert result.witnesses == {"statements": ["w1"]}
+    assert result.witnesses is not None and result.witnesses.statements == ["w1"]
     assert result.evidence_analysis == {"exhibits": ["keep"]}
 
 
