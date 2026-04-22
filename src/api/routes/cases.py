@@ -5,7 +5,7 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Response, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import selectinload
 
 from src.api.deps import CurrentUser, DBSession, require_role
@@ -35,6 +35,8 @@ from src.services.pipeline_events import subscribe as subscribe_pipeline_events
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+STARTABLE_STATUSES = (CaseStatus.pending, CaseStatus.ready_for_review)
 
 PIPELINE_AGENT_ORDER = [
     "case-processing",
@@ -628,9 +630,6 @@ async def _run_case_pipeline(case_id: UUID) -> None:
             logger.warning("run_case_pipeline: case %s not found", case_id)
             return
 
-        case.status = CaseStatusModel.processing
-        await db.commit()
-
         raw_documents = [
             {
                 "document_id": str(document.id),
@@ -723,21 +722,24 @@ async def process_case(
             detail="Not authorized to run this case",
         )
 
-    if case.status in {CaseStatus.processing}:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Pipeline already running for this case",
-        )
-    if case.status in {CaseStatus.decided, CaseStatus.closed}:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Case is in terminal status '{case.status.value}' and cannot be reprocessed",
-        )
     if not case.documents:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Case has no uploaded documents",
         )
+
+    flip = await db.execute(
+        update(Case)
+        .where(Case.id == case_id, Case.status.in_(STARTABLE_STATUSES))
+        .values(status=CaseStatus.processing)
+        .returning(Case.id)
+    )
+    if flip.scalar_one_or_none() is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Case is not in a startable state",
+        )
+    await db.commit()
 
     background_tasks.add_task(_run_case_pipeline, case_id)
 

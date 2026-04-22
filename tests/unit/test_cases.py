@@ -288,20 +288,28 @@ class TestCaseOwnership:
 
 
 class TestProcessCase:
-    async def test_process_case_accepted(self, monkeypatch):
-        """POST /api/v1/cases/{id}/process returns 202 and schedules a background task."""
-        user = _make_user()
-        mock_db = _build_mock_session()
-
+    @staticmethod
+    def _doc() -> MagicMock:
         doc = MagicMock()
         doc.id = uuid.uuid4()
         doc.filename = "evidence.pdf"
         doc.file_type = "application/pdf"
-        case = _make_case(user.id, documents=[doc])
-        mock_db.execute.return_value = _mock_scalar_result(case)
+        return doc
+
+    async def test_process_case_accepted(self, monkeypatch):
+        """POST /api/v1/cases/{id}/process returns 202 when the atomic flip matches."""
+        user = _make_user()
+        mock_db = _build_mock_session()
+
+        case = _make_case(user.id, documents=[self._doc()])
+        mock_db.execute.side_effect = [
+            _mock_scalar_result(case),
+            _mock_scalar_result(case.id),
+        ]
+
+        from src.api.routes import cases as cases_module
 
         scheduled = []
-        from src.api.routes import cases as cases_module
 
         async def _noop_runner(_case_id):
             scheduled.append(_case_id)
@@ -316,6 +324,7 @@ class TestProcessCase:
 
         assert resp.status_code == 202
         assert resp.json()["message"]
+        mock_db.commit.assert_awaited()
 
     async def test_process_case_rejects_empty_documents(self):
         """POST /process returns 400 when the case has no documents."""
@@ -347,17 +356,16 @@ class TestProcessCase:
 
         assert resp.status_code == 404
 
-    async def test_process_case_rejects_terminal_status(self):
-        """POST /process returns 400 when the case is already decided or closed."""
+    async def test_process_case_rejects_non_startable_status(self):
+        """Decided / closed / processing cases return 409 from the atomic flip."""
         user = _make_user()
         mock_db = _build_mock_session()
 
-        doc = MagicMock()
-        doc.id = uuid.uuid4()
-        doc.filename = "a.pdf"
-        doc.file_type = "application/pdf"
-        case = _make_case(user.id, documents=[doc], status=CaseStatus.decided)
-        mock_db.execute.return_value = _mock_scalar_result(case)
+        case = _make_case(user.id, documents=[self._doc()], status=CaseStatus.decided)
+        mock_db.execute.side_effect = [
+            _mock_scalar_result(case),
+            _mock_scalar_result(None),
+        ]
 
         app = _app_with_overrides(mock_db, user)
         transport = ASGITransport(app=app)
@@ -365,7 +373,53 @@ class TestProcessCase:
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.post(f"/api/v1/cases/{case.id}/process")
 
-        assert resp.status_code == 400
+        assert resp.status_code == 409
+        mock_db.commit.assert_not_awaited()
+
+    async def test_process_case_rejects_concurrent_start(self):
+        """If two POSTs race, one wins the atomic flip; the other gets 409."""
+        user = _make_user()
+        mock_db = _build_mock_session()
+
+        case = _make_case(user.id, documents=[self._doc()], status=CaseStatus.processing)
+        mock_db.execute.side_effect = [
+            _mock_scalar_result(case),
+            _mock_scalar_result(None),
+        ]
+
+        app = _app_with_overrides(mock_db, user)
+        transport = ASGITransport(app=app)
+
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(f"/api/v1/cases/{case.id}/process")
+
+        assert resp.status_code == 409
+
+    async def test_process_case_accepts_ready_for_review(self, monkeypatch):
+        """ready_for_review is explicitly startable per STARTABLE_STATUSES."""
+        user = _make_user()
+        mock_db = _build_mock_session()
+
+        case = _make_case(user.id, documents=[self._doc()], status=CaseStatus.ready_for_review)
+        mock_db.execute.side_effect = [
+            _mock_scalar_result(case),
+            _mock_scalar_result(case.id),
+        ]
+
+        from src.api.routes import cases as cases_module
+
+        async def _noop_runner(_case_id):
+            return None
+
+        monkeypatch.setattr(cases_module, "_run_case_pipeline", _noop_runner)
+
+        app = _app_with_overrides(mock_db, user)
+        transport = ASGITransport(app=app)
+
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(f"/api/v1/cases/{case.id}/process")
+
+        assert resp.status_code == 202
 
 
 class TestCors:
