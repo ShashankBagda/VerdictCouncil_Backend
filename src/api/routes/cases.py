@@ -272,9 +272,9 @@ async def _run_case_pipeline(case_id: UUID) -> None:
     """
     from src.db.persist_case_results import persist_case_results
     from src.models.case import CaseStatus as CaseStatusModel
-    from src.pipeline.runner import PipelineRunner
     from src.services.database import async_session
     from src.shared.case_state import CaseState
+    from src.shared.config import settings
 
     async with async_session() as db:
         case_result = await db.execute(
@@ -299,7 +299,15 @@ async def _run_case_pipeline(case_id: UUID) -> None:
         initial_state = CaseState(case_id=str(case.id), raw_documents=raw_documents)
 
     try:
-        final_state = await PipelineRunner().run(initial_state)
+        if settings.use_mesh_runner:
+            from src.pipeline.mesh_runner_factory import get_mesh_runner
+
+            runner = await get_mesh_runner()
+            final_state = await runner.run(initial_state, run_id=initial_state.run_id)
+        else:
+            from src.pipeline.runner import PipelineRunner
+
+            final_state = await PipelineRunner().run(initial_state)
     except Exception:
         logger.exception("Pipeline run failed for case_id=%s", case_id)
         async with async_session() as db:

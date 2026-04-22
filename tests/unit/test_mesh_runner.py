@@ -10,8 +10,9 @@ required. Integration coverage against a live mesh lives in
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -76,12 +77,37 @@ def _send_task_response(task_id: str, case_state_dict: dict) -> dict:
     }
 
 
+def _fake_session_factory():
+    """Return a callable mimicking an `async_sessionmaker` for unit tests.
+
+    Each call returns an async context manager that yields an `AsyncMock`
+    standing in for an `AsyncSession`. `persist_case_state` will happily
+    swallow its own errors on the mock, so checkpoints are no-ops in
+    unit tests.
+    """
+    factory = MagicMock(name="session_factory")
+    factory.calls = []  # type: ignore[attr-defined]
+
+    @asynccontextmanager
+    async def _cm():
+        session = AsyncMock(name="AsyncSession")
+        factory.calls.append(session)  # type: ignore[attr-defined]
+        try:
+            yield session
+        finally:
+            pass
+
+    factory.side_effect = lambda: _cm()
+    return factory
+
+
 def _make_runner(
     a2a_client: FakeA2AClient,
     redis_client: _FakeRedis,
 ) -> MeshPipelineRunner:
     return MeshPipelineRunner(
         a2a_client=a2a_client,
+        session_factory=_fake_session_factory(),
         client=AsyncMock(),  # OpenAI client only used by the input guardrail
         redis_client=redis_client,
         namespace=NAMESPACE,
@@ -386,3 +412,145 @@ async def test_parse_agent_response_accepts_authorized_fragment():
 
     assert result.witnesses == {"statements": ["w1"]}
     assert result.evidence_analysis == {"exhibits": ["keep"]}
+
+
+# ---------------------------------------------------------------------------
+# Prereq A — agent_response audit entry (B1)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_parse_agent_response_emits_agent_response_audit_entry():
+    """Mesh runner must emit `action="agent_response"` audit entries so
+    `routes/judge.py:367` and `routes/case_data.py:93` continue to see
+    per-agent outputs after the runner switch.
+    """
+    a2a = FakeA2AClient()
+    redis = _FakeRedis()
+    runner = _make_runner(a2a, redis)
+
+    prior = _case_state()
+    fragment = {"witnesses": {"statements": ["w1"]}}
+    envelope = _send_task_response("t-audit", fragment)
+
+    result = runner._parse_agent_response(envelope, prior, "witness-analysis")
+
+    audit_entries = [e for e in result.audit_log if e.action == "agent_response"]
+    assert len(audit_entries) == 1, (
+        "exactly one agent_response entry should be appended per successful parse"
+    )
+    entry = audit_entries[0]
+    assert entry.agent == "witness-analysis"
+    assert entry.output_payload == fragment  # raw agent payload, unfiltered
+
+
+# ---------------------------------------------------------------------------
+# Prereq C — run_id invariant (H2)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_run_id_invariant_mismatch_raises():
+    """Passing a run_id that differs from state.run_id is a programming
+    error — the runner refuses rather than silently picking one.
+    """
+    a2a = FakeA2AClient()
+    redis = _FakeRedis()
+    runner = _make_runner(a2a, redis)
+    state = _case_state()  # state.run_id is auto-generated
+
+    with pytest.raises(ValueError, match="run_id invariant violated"):
+        await runner.run(state, run_id="deliberately-mismatched")
+
+
+@pytest.mark.asyncio
+async def test_run_id_invariant_defaults_to_state_run_id():
+    """When no run_id arg is supplied, the runner uses state.run_id and
+    never mints a fresh one.
+    """
+    a2a = FakeA2AClient()
+    redis = _FakeRedis()
+    state = _case_state()
+
+    def resolver(topic, envelope, reply_to):
+        agent = topic.rsplit("/", 1)[-1]
+        if agent in L2_AGENTS:
+            # Only respond once all three are seen via the aggregator path.
+            if sum(1 for t, _e, _r in a2a.publishes if t.rsplit("/", 1)[-1] in L2_AGENTS) == 3:
+                merged = state.model_dump(mode="json")
+                merged["evidence_analysis"] = {}
+                merged["extracted_facts"] = {}
+                merged["witnesses"] = {}
+                sub_val = next(
+                    iter(
+                        v.decode()
+                        for k, v in redis.store.items()
+                        if k.startswith("vc:aggregator:sub_task:")
+                    )
+                )
+                _k, case_id, rid = sub_val.split("|")
+                return _send_task_response(f"layer2-{case_id}-{rid}", merged)
+            return None
+        return _send_task_response(envelope["id"], state.model_dump(mode="json"))
+
+    a2a.auto_resolver = resolver
+    runner = _make_runner(a2a, redis)
+
+    result = await runner.run(state)  # no run_id kwarg
+
+    assert result.run_id == state.run_id
+
+
+# ---------------------------------------------------------------------------
+# Prereq B — checkpoint opens its own short-lived session (H1)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_opens_short_lived_session_per_call():
+    """`_checkpoint` must not take an external session — it opens its
+    own via `session_factory` so the pool is never held across an A2A
+    await. Verified by counting factory invocations across agents.
+    """
+    a2a = FakeA2AClient()
+    redis = _FakeRedis()
+    session_factory = _fake_session_factory()
+    state = _case_state()
+
+    def resolver(topic, envelope, reply_to):
+        agent = topic.rsplit("/", 1)[-1]
+        if agent in L2_AGENTS:
+            if sum(1 for t, _e, _r in a2a.publishes if t.rsplit("/", 1)[-1] in L2_AGENTS) == 3:
+                merged = state.model_dump(mode="json")
+                merged["evidence_analysis"] = {}
+                merged["extracted_facts"] = {}
+                merged["witnesses"] = {}
+                sub_val = next(
+                    iter(
+                        v.decode()
+                        for k, v in redis.store.items()
+                        if k.startswith("vc:aggregator:sub_task:")
+                    )
+                )
+                _k, case_id, rid = sub_val.split("|")
+                return _send_task_response(f"layer2-{case_id}-{rid}", merged)
+            return None
+        return _send_task_response(envelope["id"], state.model_dump(mode="json"))
+
+    a2a.auto_resolver = resolver
+
+    runner = MeshPipelineRunner(
+        a2a_client=a2a,
+        session_factory=session_factory,
+        client=AsyncMock(),
+        redis_client=redis,
+        namespace=NAMESPACE,
+        agent_timeout_seconds=2.0,
+    )
+
+    await runner.run(state)
+
+    # One checkpoint per L1 agent (2) + L2 aggregator (1) + L3 agents (4) = 7.
+    assert session_factory.call_count == 7, (
+        f"expected 7 short-lived sessions, got {session_factory.call_count}"
+    )
