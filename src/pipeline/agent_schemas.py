@@ -14,38 +14,14 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.shared.case_state import AlternativeOutcome, FairnessCheck, VerdictRecommendation
+
 logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
 # Agent 9: governance-verdict (strict mode — fully specified)
 # ---------------------------------------------------------------------------
-
-
-class AlternativeOutcome(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    outcome: str
-    reasoning: str
-
-
-class FairnessCheck(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    critical_issues_found: bool
-    audit_passed: bool
-    issues: list[str]
-    recommendations: list[str]
-
-
-class VerdictRecommendation(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    recommendation_type: str
-    recommended_outcome: str
-    confidence_score: int
-    reasoning: str
-    alternative_outcomes: list[AlternativeOutcome]
 
 
 class GovernanceVerdictOutput(BaseModel):

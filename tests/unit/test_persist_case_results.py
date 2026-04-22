@@ -272,9 +272,15 @@ async def test_deliberation_and_verdict_single_row_each():
             "recommendation_type": "guilty",
             "recommended_outcome": "Fine $500",
             "confidence_score": 85,
+            "reasoning": "Evidence supports guilty verdict.",
             "alternative_outcomes": [{"outcome": "Warning", "reasoning": "mitigation"}],
         },
-        fairness_check={"critical_issues_found": False, "audit_passed": True},
+        fairness_check={
+            "critical_issues_found": False,
+            "audit_passed": True,
+            "issues": [],
+            "recommendations": [],
+        },
     )
 
     session = _RecordingSession(case=_case(case_id))

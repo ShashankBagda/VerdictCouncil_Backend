@@ -67,7 +67,13 @@ async def test_load_case_state_round_trips_a_valid_row():
         case_id=str(case_id),
         run_id="run-1",
         status=CaseStatusEnum.decided,
-        verdict_recommendation={"recommendation_type": "compensation", "recommended_outcome": "x"},
+        verdict_recommendation={
+            "recommendation_type": "compensation",
+            "recommended_outcome": "x",
+            "confidence_score": 70,
+            "reasoning": "test",
+            "alternative_outcomes": [],
+        },
     )
     payload = json.loads(original.model_dump_json())
 
@@ -78,10 +84,8 @@ async def test_load_case_state_round_trips_a_valid_row():
     assert loaded.case_id == str(case_id)
     assert loaded.run_id == "run-1"
     assert loaded.status == CaseStatusEnum.decided
-    assert loaded.verdict_recommendation == {
-        "recommendation_type": "compensation",
-        "recommended_outcome": "x",
-    }
+    assert loaded.verdict_recommendation.recommendation_type == "compensation"
+    assert loaded.verdict_recommendation.recommended_outcome == "x"
 
 
 @pytest.mark.asyncio

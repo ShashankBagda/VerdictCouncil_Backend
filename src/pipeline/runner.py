@@ -659,7 +659,7 @@ class PipelineRunner:
             if (
                 agent_name == "governance-verdict"
                 and state.fairness_check
-                and state.fairness_check.get("critical_issues_found")
+                and state.fairness_check.critical_issues_found
             ):
                 logger.warning(
                     "Pipeline halted at governance-verdict: "

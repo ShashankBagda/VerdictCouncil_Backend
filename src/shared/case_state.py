@@ -5,7 +5,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class CaseStatusEnum(str, Enum):
@@ -22,6 +22,32 @@ class CaseStatusEnum(str, Enum):
 class CaseDomainEnum(str, Enum):
     small_claims = "small_claims"
     traffic_violation = "traffic_violation"
+
+
+class AlternativeOutcome(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    outcome: str
+    reasoning: str
+
+
+class FairnessCheck(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    critical_issues_found: bool
+    audit_passed: bool
+    issues: list[str]
+    recommendations: list[str]
+
+
+class VerdictRecommendation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    recommendation_type: str
+    recommended_outcome: str
+    confidence_score: int
+    reasoning: str
+    alternative_outcomes: list[AlternativeOutcome]
 
 
 class AuditEntry(BaseModel):
@@ -78,8 +104,8 @@ class CaseState(BaseModel):
     deliberation: dict[str, Any] | None = None
 
     # Governance (written by Governance & Verdict)
-    fairness_check: dict[str, Any] | None = None
-    verdict_recommendation: dict[str, Any] | None = None
+    fairness_check: FairnessCheck | None = None
+    verdict_recommendation: VerdictRecommendation | None = None
 
     # Judge decision (written externally)
     judge_decision: dict[str, Any] | None = None
@@ -87,4 +113,4 @@ class CaseState(BaseModel):
     # Audit (append-only)
     audit_log: list[AuditEntry] = Field(default_factory=list)
 
-    model_config = {"populate_by_name": True}
+    model_config = {"populate_by_name": True, "validate_assignment": True}

@@ -360,7 +360,7 @@ class MeshPipelineRunner:
             )
             state.status = CaseStatusEnum.escalated
             return state
-        if state.fairness_check and state.fairness_check.get("critical_issues_found"):
+        if state.fairness_check and state.fairness_check.critical_issues_found:
             logger.warning(
                 "Mesh pipeline halted: critical fairness issues (case_id=%s)",
                 state.case_id,

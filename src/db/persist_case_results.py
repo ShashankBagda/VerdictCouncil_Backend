@@ -307,22 +307,21 @@ def _insert_deliberation(db: AsyncSession, case_id: UUID, state: CaseState) -> N
 
 
 def _insert_verdict(db: AsyncSession, case_id: UUID, state: CaseState) -> None:
-    verdict = state.verdict_recommendation or {}
-    if not isinstance(verdict, dict) or not verdict:
+    verdict = state.verdict_recommendation
+    if not verdict:
         return
-    rec_type = _coerce_enum(verdict.get("recommendation_type"), RecommendationType)
-    outcome = (verdict.get("recommended_outcome") or "").strip()
+    rec_type = _coerce_enum(verdict.recommendation_type, RecommendationType)
+    outcome = verdict.recommended_outcome.strip()
     if rec_type is None or not outcome:
         return
-    confidence = verdict.get("confidence_score")
     db.add(
         Verdict(
             case_id=case_id,
             recommendation_type=rec_type,
             recommended_outcome=outcome,
-            sentence=_as_jsonb(verdict.get("sentence")),
-            confidence_score=int(confidence) if isinstance(confidence, (int, float)) else None,
-            alternative_outcomes=_as_jsonb(verdict.get("alternative_outcomes")),
+            sentence=None,
+            confidence_score=verdict.confidence_score,
+            alternative_outcomes=_as_jsonb(verdict.alternative_outcomes),
             fairness_report=_as_jsonb(state.fairness_check),
         )
     )

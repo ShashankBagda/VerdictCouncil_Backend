@@ -181,22 +181,20 @@ def _confidence_delta(original: CaseState, modified: CaseState) -> int:
 def _extract_verdict_summary(state: CaseState) -> dict[str, Any] | None:
     """Extract a summary of the verdict from CaseState."""
     verdict = state.verdict_recommendation
-    if not verdict or not isinstance(verdict, dict):
+    if not verdict:
         return None
 
     return {
-        "recommendation_type": verdict.get("recommendation_type"),
-        "recommended_outcome": verdict.get("recommended_outcome"),
-        "confidence_score": verdict.get("confidence_score"),
+        "recommendation_type": verdict.recommendation_type,
+        "recommended_outcome": verdict.recommended_outcome,
+        "confidence_score": verdict.confidence_score,
     }
 
 
 def _get_confidence(state: CaseState) -> int:
     """Extract confidence score from verdict or deliberation."""
-    if state.verdict_recommendation and isinstance(state.verdict_recommendation, dict):
-        score = state.verdict_recommendation.get("confidence_score")
-        if isinstance(score, (int, float)):
-            return int(score)
+    if state.verdict_recommendation:
+        return state.verdict_recommendation.confidence_score
 
     if state.deliberation and isinstance(state.deliberation, dict):
         score = state.deliberation.get("confidence_score")

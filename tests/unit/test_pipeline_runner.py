@@ -148,7 +148,12 @@ async def test_pipeline_halts_on_fairness_issues():
         if call_count == len(AGENT_ORDER):
             return _make_chat_response(
                 {
-                    "fairness_check": {"critical_issues_found": True, "issues": ["bias detected"]},
+                    "fairness_check": {
+                        "critical_issues_found": True,
+                        "audit_passed": False,
+                        "issues": ["bias detected"],
+                        "recommendations": [],
+                    },
                 }
             )
         return _make_chat_response({})
@@ -161,7 +166,7 @@ async def test_pipeline_halts_on_fairness_issues():
         result = await runner.run(_minimal_state())
 
     assert result.status == CaseStatusEnum.escalated
-    assert result.fairness_check["critical_issues_found"] is True
+    assert result.fairness_check.critical_issues_found is True
 
 
 # ------------------------------------------------------------------ #
