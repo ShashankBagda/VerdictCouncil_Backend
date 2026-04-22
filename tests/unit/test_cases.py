@@ -419,6 +419,64 @@ class TestProcessCase:
             resp = await client.post(f"/api/v1/cases/{case.id}/process")
 
         assert resp.status_code == 202
+
+
+class TestRejectedCaseReview:
+    async def test_override_rejected_case_restarts_processing(self):
+        user = _make_user()
+        rejection_log = MagicMock()
+        rejection_log.created_at = datetime.now(UTC)
+        rejection_log.input_payload = {}
+        rejection_log.output_payload = {
+            "jurisdiction_issues": [
+                "Offence date 2025-03-15 exceeds the 12-month limitation "
+                "period for this offence category."
+            ]
+        }
+        rejection_log.action = "case_processing_rejected"
+        case = _make_case(user.id, status=CaseStatus.rejected, audit_logs=[rejection_log])
+
+        mock_db = _build_mock_session()
+        mock_db.execute.return_value = _mock_scalar_result(case)
+
+        app = _app_with_overrides(mock_db, user)
+        transport = ASGITransport(app=app)
+
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(
+                f"/api/v1/cases/{case.id}/rejection-review",
+                json={
+                    "action": "override",
+                    "justification": ("Charge sheet confirms the offence was in 2026."),
+                },
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "processing"
+        assert resp.json()["resumed_from_stage"] == "case-processing"
+        mock_db.commit.assert_awaited()
+
+    async def test_close_rejected_case_archives_it(self):
+        user = _make_user()
+        case = _make_case(user.id, status=CaseStatus.rejected, audit_logs=[])
+
+        mock_db = _build_mock_session()
+        mock_db.execute.return_value = _mock_scalar_result(case)
+
+        app = _app_with_overrides(mock_db, user)
+        transport = ASGITransport(app=app)
+
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(
+                f"/api/v1/cases/{case.id}/rejection-review",
+                json={
+                    "action": "close",
+                    "justification": ("No lawful basis to override the jurisdiction rejection."),
+                },
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "closed"
         mock_db.add.assert_called_once()
 
 

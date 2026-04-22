@@ -12,7 +12,7 @@ import logging
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 from sqlalchemy import select
 
 from src.api.deps import CurrentUser, DBSession
@@ -28,6 +28,7 @@ from src.api.schemas.cases import (
     WitnessResponse,
 )
 from src.api.schemas.common import ErrorResponse
+from src.api.schemas.workflows import SupplementaryUploadResponse
 from src.models.audit import AuditLog
 from src.models.case import (
     Argument,
@@ -72,6 +73,9 @@ AGENT_LABELS = {
     "deliberation": "Deliberation",
     "governance-verdict": "Governance & Verdict",
 }
+
+SUPPLEMENTARY_RETRIGGERED_STAGES = PIPELINE_AGENTS[2:]
+SUPPLEMENTARY_PRESERVED_STAGES = PIPELINE_AGENTS[:2]
 
 
 # ---------------------------------------------------------------------------
@@ -196,6 +200,20 @@ def _derive_overall_elapsed_seconds(agents: list[dict[str, Any]]) -> int | None:
     return int(sum(completed))
 
 
+def _latest_reprocessing_summary(audit_logs: list[AuditLog]) -> dict[str, Any] | None:
+    for log in reversed(audit_logs):
+        if log.action != "supplementary_document_upload":
+            continue
+        payload = log.output_payload or {}
+        return {
+            "retriggered_stages": payload.get("retriggered_stages") or [],
+            "preserved_stages": payload.get("preserved_stages") or [],
+            "reason": (log.input_payload or {}).get("reason"),
+            "requested_at": log.created_at.isoformat() if log.created_at else None,
+        }
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Document upload
 # ---------------------------------------------------------------------------
@@ -248,6 +266,91 @@ async def upload_documents(
     return created
 
 
+@router.post(
+    "/{case_id}/supplementary-documents",
+    response_model=SupplementaryUploadResponse,
+    status_code=status.HTTP_201_CREATED,
+    operation_id="upload_supplementary_documents",
+    summary="Upload supplementary documents and trigger selective re-processing",
+    responses={
+        400: {"model": ErrorResponse, "description": "Closed cases cannot accept documents"},
+        404: {"model": ErrorResponse, "description": "Case not found"},
+    },
+)
+async def upload_supplementary_documents(
+    case_id: UUID,
+    db: DBSession,
+    current_user: CurrentUser,
+    files: list[UploadFile] = File(..., description="Supplementary files to upload"),
+    reason: str | None = Form(default=None),
+) -> SupplementaryUploadResponse:
+    case = await _get_case_or_404(case_id, db, current_user)
+    if case.status == CaseStatus.closed:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Closed cases cannot accept supplementary documents",
+        )
+
+    created: list[Document] = []
+    for upload in files:
+        doc = Document(
+            case_id=case.id,
+            filename=upload.filename or "unnamed",
+            file_type=upload.content_type,
+            uploaded_by=current_user.id,
+        )
+        db.add(doc)
+        created.append(doc)
+
+    case.status = CaseStatus.processing
+
+    db.add(
+        AuditLog(
+            case_id=case.id,
+            agent_name="system",
+            action="supplementary_document_upload",
+            input_payload={
+                "filenames": [f.filename for f in files],
+                "reason": reason,
+                "uploaded_by": str(current_user.id),
+            },
+            output_payload={
+                "retriggered_stages": SUPPLEMENTARY_RETRIGGERED_STAGES,
+                "preserved_stages": SUPPLEMENTARY_PRESERVED_STAGES,
+            },
+        )
+    )
+
+    from src.models.pipeline_job import PipelineJobType
+    from src.workers.outbox import enqueue_outbox_job
+
+    await enqueue_outbox_job(
+        db,
+        case_id=case_id,
+        job_type=PipelineJobType.case_pipeline,
+        payload={
+            "resume_from_stage": SUPPLEMENTARY_RETRIGGERED_STAGES[0],
+            "retriggered_stages": SUPPLEMENTARY_RETRIGGERED_STAGES,
+            "preserved_stages": SUPPLEMENTARY_PRESERVED_STAGES,
+            "reason": reason,
+        },
+    )
+
+    await db.flush()
+    for doc in created:
+        await db.refresh(doc)
+    await db.commit()
+
+    return SupplementaryUploadResponse(
+        case_id=case.id,
+        documents=created,
+        retriggered_stages=SUPPLEMENTARY_RETRIGGERED_STAGES,
+        preserved_stages=SUPPLEMENTARY_PRESERVED_STAGES,
+        status=case.status,
+        message="Supplementary documents stored and selective re-processing requested.",
+    )
+
+
 # ---------------------------------------------------------------------------
 # Pipeline status
 # ---------------------------------------------------------------------------
@@ -285,6 +388,7 @@ async def get_pipeline_status(
         "overall_status": overall,
         "current_agent": _derive_current_agent(agents),
         "overall_elapsed_seconds": _derive_overall_elapsed_seconds(agents),
+        "reprocessing_summary": _latest_reprocessing_summary(logs),
     }
 
 

@@ -14,7 +14,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.shared.case_state import AlternativeOutcome, FairnessCheck, VerdictRecommendation
+from src.shared.case_state import FairnessCheck, VerdictRecommendation
 
 logger = logging.getLogger(__name__)
 

@@ -100,9 +100,7 @@ async def test_task_aborts_on_job_type_mismatch():
         patch.object(tasks, "_load_job", new=AsyncMock(return_value=job)),
         patch.object(tasks, "_complete", new=AsyncMock()) as mock_complete,
         patch.object(tasks, "_fail", new=AsyncMock()) as mock_fail,
-        patch(
-            "src.api.routes.what_if._run_stability_computation", new=AsyncMock()
-        ) as mock_run,
+        patch("src.api.routes.what_if._run_stability_computation", new=AsyncMock()) as mock_run,
     ):
         await tasks.run_stability_computation_job({}, str(job.id))
 

@@ -117,9 +117,7 @@ async def stuck_recovery_loop() -> None:
     while True:
         try:
             async with async_session() as db:
-                recovered = await recover_stuck_jobs(
-                    db, threshold_secs=STUCK_THRESHOLD_SECONDS
-                )
+                recovered = await recover_stuck_jobs(db, threshold_secs=STUCK_THRESHOLD_SECONDS)
                 await db.commit()
             if recovered:
                 logger.warning(

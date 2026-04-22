@@ -131,6 +131,18 @@ async def review_reopen_request(
         case = (await db.execute(select(Case).where(Case.id == case_id))).scalar_one_or_none()
         if case:
             case.status = CaseStatus.processing
+            from src.models.pipeline_job import PipelineJobType
+            from src.workers.outbox import enqueue_outbox_job
+
+            await enqueue_outbox_job(
+                db,
+                case_id=case_id,
+                job_type=PipelineJobType.case_pipeline,
+                payload={
+                    "resume_from_stage": "evidence-analysis",
+                    "resume_reason": "reopen_approved",
+                },
+            )
 
     db.add(
         AuditLog(
