@@ -686,7 +686,7 @@
           "cases"
         ],
         "summary": "List cases with pagination",
-        "description": "List cases with optional status and domain filters. Clerks and judges see only their own cases; admins see all.",
+        "description": "List cases with story-aligned filters and pagination.",
         "operationId": "list_cases",
         "parameters": [
           {
@@ -696,7 +696,7 @@
             "schema": {
               "anyOf": [
                 {
-                  "$ref": "#/components/schemas/CaseStatus"
+                  "type": "string"
                 },
                 {
                   "type": "null"
@@ -719,6 +719,108 @@
                 }
               ],
               "title": "Domain"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Search"
+            }
+          },
+          {
+            "name": "complexity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Complexity"
+            }
+          },
+          {
+            "name": "outcome",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Outcome"
+            }
+          },
+          {
+            "name": "filed_from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Filed From"
+            }
+          },
+          {
+            "name": "filed_to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Filed To"
+            }
+          },
+          {
+            "name": "sort_by",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "created_at",
+              "title": "Sort By"
+            }
+          },
+          {
+            "name": "sort_direction",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "desc",
+              "title": "Sort Direction"
             }
           },
           {
@@ -809,7 +911,7 @@
           "cases"
         ],
         "summary": "Get full case details",
-        "description": "Retrieve a case with all related entities: parties, documents, evidence, facts, witnesses, legal rules, precedents, arguments, deliberations, verdicts, and audit logs.",
+        "description": "Retrieve a case with all related entities and story-aligned summary fields.",
         "operationId": "get_case",
         "parameters": [
           {
@@ -1195,7 +1297,7 @@
           "cases"
         ],
         "summary": "Stream pipeline progress events via SSE",
-        "description": "Server-Sent Events stream backed by the Redis progress pub/sub. Closes when the governance-verdict agent reaches a terminal phase.",
+        "description": "Server-Sent Events stream backed by the Redis progress pub/sub.",
         "operationId": "stream_pipeline_status",
         "parameters": [
           {
@@ -1291,7 +1393,7 @@
           "cases"
         ],
         "summary": "Start the 9-agent pipeline for a case",
-        "description": "Kicks off the multi-agent pipeline asynchronously. Returns 202 immediately. Subscribe to `GET /cases/{case_id}/status/stream` for progress updates, or poll `GET /cases/{case_id}/status` for a snapshot.",
+        "description": "Kicks off the multi-agent pipeline asynchronously.",
         "operationId": "process_case",
         "parameters": [
           {
@@ -5206,7 +5308,7 @@
           "escalation"
         ],
         "summary": "Take action on an escalated case",
-        "description": "Available actions: `add_notes` (stays escalated), `return_to_pipeline` (\u2192 processing), `manual_decision` (\u2192 decided, requires `final_order`), `reject` (\u2192 rejected). Requires judge role.",
+        "description": "Available actions: `add_notes` (stays escalated), `return_to_pipeline` (-> processing), `manual_decision` (-> decided, requires `final_order`), `reject` (-> rejected). Requires judge role.",
         "operationId": "take_escalation_action",
         "parameters": [
           {
@@ -5732,6 +5834,19 @@
             "title": "Legal Basis",
             "description": "Legal basis for the argument"
           },
+          "supporting_evidence": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supporting Evidence",
+            "description": "Supporting evidence chain"
+          },
           "weaknesses": {
             "anyOf": [
               {
@@ -5743,6 +5858,19 @@
             ],
             "title": "Weaknesses",
             "description": "Identified weaknesses"
+          },
+          "suggested_questions": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suggested Questions",
+            "description": "Suggested judicial questions"
           }
         },
         "type": "object",
@@ -5900,6 +6028,18 @@
             ],
             "title": "Created At",
             "description": "Timestamp"
+          },
+          "solace_message_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Solace Message Id",
+            "description": "Broker message id"
           }
         },
         "type": "object",
@@ -5962,14 +6102,141 @@
             "examples": [
               "small_claims"
             ]
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Title"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 5000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "filed_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filed Date",
+            "description": "Filed date in the tribunal"
+          },
+          "parties": {
+            "items": {
+              "$ref": "#/components/schemas/CasePartyCreateRequest"
+            },
+            "type": "array",
+            "title": "Parties"
+          },
+          "claim_amount": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claim Amount"
+          },
+          "consent_to_higher_claim_limit": {
+            "type": "boolean",
+            "title": "Consent To Higher Claim Limit",
+            "default": false
+          },
+          "offence_code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Offence Code"
           }
         },
         "type": "object",
         "required": [
-          "domain"
+          "domain",
+          "title"
         ],
         "title": "CaseCreateRequest",
         "description": "Create a new case for processing."
+      },
+      "CaseDecisionRecordResponse": {
+        "properties": {
+          "decision_type": {
+            "type": "string",
+            "title": "Decision Type",
+            "description": "accept, modify, reject, or amendment type"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "final_order": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Final Order"
+          },
+          "recorded_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recorded At"
+          },
+          "recorded_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recorded By"
+          }
+        },
+        "type": "object",
+        "required": [
+          "decision_type"
+        ],
+        "title": "CaseDecisionRecordResponse"
       },
       "CaseDetailResponse": {
         "properties": {
@@ -5979,6 +6246,48 @@
             "title": "Id",
             "description": "Case ID"
           },
+          "case_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Case Id",
+            "description": "Case ID duplicate for client compatibility"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title",
+            "description": "Case title"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "Case summary or description"
+          },
+          "summary_snippet": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary Snippet",
+            "description": "Short search-result summary"
+          },
           "domain": {
             "$ref": "#/components/schemas/CaseDomain",
             "description": "Legal domain"
@@ -5987,17 +6296,14 @@
             "$ref": "#/components/schemas/CaseStatus",
             "description": "Current case status"
           },
-          "jurisdiction_valid": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Jurisdiction Valid",
-            "description": "Whether jurisdiction is valid"
+          "status_group": {
+            "type": "string",
+            "title": "Status Group",
+            "description": "High-level status bucket for filtering"
+          },
+          "jurisdiction": {
+            "$ref": "#/components/schemas/CaseJurisdictionResponse",
+            "description": "Jurisdiction summary"
           },
           "complexity": {
             "anyOf": [
@@ -6027,7 +6333,75 @@
             "type": "string",
             "format": "uuid",
             "title": "Created By",
-            "description": "Creator user ID"
+            "description": "ID of the user who created the case"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At",
+            "description": "Creation timestamp"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At",
+            "description": "Last update timestamp"
+          },
+          "filed_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filed Date",
+            "description": "Filed date"
+          },
+          "claim_amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claim Amount",
+            "description": "SCT claim amount"
+          },
+          "consent_to_higher_claim_limit": {
+            "type": "boolean",
+            "title": "Consent To Higher Claim Limit",
+            "default": false
+          },
+          "offence_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Offence Code",
+            "description": "Traffic offence code"
           },
           "parties": {
             "items": {
@@ -6036,6 +6410,127 @@
             "type": "array",
             "title": "Parties",
             "description": "Case parties"
+          },
+          "party_names": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Party Names",
+            "description": "Flattened party names"
+          },
+          "claimant_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claimant Name"
+          },
+          "respondent_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Respondent Name"
+          },
+          "prosecution_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prosecution Name"
+          },
+          "accused_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accused Name"
+          },
+          "document_count": {
+            "type": "integer",
+            "title": "Document Count",
+            "description": "Number of documents attached",
+            "default": 0
+          },
+          "pipeline_progress": {
+            "$ref": "#/components/schemas/CaseProgressResponse",
+            "description": "Pipeline progress summary"
+          },
+          "outcome_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outcome Summary",
+            "description": "Latest recommendation or decision"
+          },
+          "escalation_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Escalation Reason",
+            "description": "Why the case was escalated"
+          },
+          "reopen_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reopen State",
+            "description": "Pending or latest reopen-request state"
+          },
+          "amendment_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amendment State",
+            "description": "Current amendment status"
+          },
+          "latest_decision": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CaseDecisionRecordResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Most recent judge decision record"
           },
           "documents": {
             "items": {
@@ -6109,6 +6604,14 @@
             "title": "Verdicts",
             "description": "Generated verdicts"
           },
+          "decision_history": {
+            "items": {
+              "$ref": "#/components/schemas/CaseDecisionRecordResponse"
+            },
+            "type": "array",
+            "title": "Decision History",
+            "description": "Recorded judge decisions and amendments"
+          },
           "audit_logs": {
             "items": {
               "$ref": "#/components/schemas/AuditLogSummary"
@@ -6121,9 +6624,13 @@
         "type": "object",
         "required": [
           "id",
+          "case_id",
           "domain",
           "status",
-          "created_by"
+          "status_group",
+          "jurisdiction",
+          "created_by",
+          "pipeline_progress"
         ],
         "title": "CaseDetailResponse",
         "description": "Full case with all related entities."
@@ -6135,6 +6642,39 @@
           "traffic_violation"
         ],
         "title": "CaseDomain"
+      },
+      "CaseJurisdictionResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "pass, fail, warning, or pending"
+          },
+          "valid": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid",
+            "description": "Whether the case passed jurisdiction checks"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Reasons"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "CaseJurisdictionResponse"
       },
       "CaseListResponse": {
         "properties": {
@@ -6181,6 +6721,65 @@
         "title": "CaseListResponse",
         "description": "Paginated list of cases."
       },
+      "CasePartyCreateRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "role": {
+            "$ref": "#/components/schemas/PartyRole",
+            "description": "Role in the matter"
+          },
+          "contact_info": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Info",
+            "description": "Optional contact information"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "role"
+        ],
+        "title": "CasePartyCreateRequest"
+      },
+      "CaseProgressResponse": {
+        "properties": {
+          "pipeline_progress_percent": {
+            "type": "integer",
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Pipeline Progress Percent"
+          },
+          "current_agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Agent"
+          }
+        },
+        "type": "object",
+        "required": [
+          "pipeline_progress_percent"
+        ],
+        "title": "CaseProgressResponse"
+      },
       "CaseResponse": {
         "properties": {
           "id": {
@@ -6188,6 +6787,48 @@
             "format": "uuid",
             "title": "Id",
             "description": "Case ID"
+          },
+          "case_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Case Id",
+            "description": "Case ID duplicate for client compatibility"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title",
+            "description": "Case title"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "Case summary or description"
+          },
+          "summary_snippet": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary Snippet",
+            "description": "Short search-result summary"
           },
           "domain": {
             "$ref": "#/components/schemas/CaseDomain",
@@ -6197,17 +6838,14 @@
             "$ref": "#/components/schemas/CaseStatus",
             "description": "Current case status"
           },
-          "jurisdiction_valid": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Jurisdiction Valid",
-            "description": "Whether jurisdiction is valid"
+          "status_group": {
+            "type": "string",
+            "title": "Status Group",
+            "description": "High-level status bucket for filtering"
+          },
+          "jurisdiction": {
+            "$ref": "#/components/schemas/CaseJurisdictionResponse",
+            "description": "Jurisdiction summary"
           },
           "complexity": {
             "anyOf": [
@@ -6238,14 +6876,215 @@
             "format": "uuid",
             "title": "Created By",
             "description": "ID of the user who created the case"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At",
+            "description": "Creation timestamp"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At",
+            "description": "Last update timestamp"
+          },
+          "filed_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filed Date",
+            "description": "Filed date"
+          },
+          "claim_amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claim Amount",
+            "description": "SCT claim amount"
+          },
+          "consent_to_higher_claim_limit": {
+            "type": "boolean",
+            "title": "Consent To Higher Claim Limit",
+            "default": false
+          },
+          "offence_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Offence Code",
+            "description": "Traffic offence code"
+          },
+          "parties": {
+            "items": {
+              "$ref": "#/components/schemas/PartyResponse"
+            },
+            "type": "array",
+            "title": "Parties",
+            "description": "Case parties"
+          },
+          "party_names": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Party Names",
+            "description": "Flattened party names"
+          },
+          "claimant_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claimant Name"
+          },
+          "respondent_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Respondent Name"
+          },
+          "prosecution_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prosecution Name"
+          },
+          "accused_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accused Name"
+          },
+          "document_count": {
+            "type": "integer",
+            "title": "Document Count",
+            "description": "Number of documents attached",
+            "default": 0
+          },
+          "pipeline_progress": {
+            "$ref": "#/components/schemas/CaseProgressResponse",
+            "description": "Pipeline progress summary"
+          },
+          "outcome_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outcome Summary",
+            "description": "Latest recommendation or decision"
+          },
+          "escalation_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Escalation Reason",
+            "description": "Why the case was escalated"
+          },
+          "reopen_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reopen State",
+            "description": "Pending or latest reopen-request state"
+          },
+          "amendment_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amendment State",
+            "description": "Current amendment status"
+          },
+          "latest_decision": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CaseDecisionRecordResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Most recent judge decision record"
           }
         },
         "type": "object",
         "required": [
           "id",
+          "case_id",
           "domain",
           "status",
-          "created_by"
+          "status_group",
+          "jurisdiction",
+          "created_by",
+          "pipeline_progress"
         ],
         "title": "CaseResponse",
         "description": "Summary response for a case."
@@ -6372,6 +7211,35 @@
               }
             ]
           },
+          "escalation_rate_percent": {
+            "type": "number",
+            "title": "Escalation Rate Percent",
+            "description": "Percentage of cases currently escalated"
+          },
+          "average_verdict_confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Average Verdict Confidence",
+            "description": "Average governance-verdict confidence score"
+          },
+          "average_processing_time_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Average Processing Time Seconds",
+            "description": "Average pipeline processing time when available"
+          },
           "recent_cases": {
             "items": {
               "additionalProperties": true,
@@ -6400,6 +7268,7 @@
           "total_cases",
           "by_status",
           "by_domain",
+          "escalation_rate_percent",
           "recent_cases"
         ],
         "title": "DashboardStats",
@@ -6471,6 +7340,60 @@
             "$ref": "#/components/schemas/CaseStatus",
             "description": "New case status after decision"
           },
+          "decision_type": {
+            "type": "string",
+            "title": "Decision Type",
+            "description": "Recorded decision type"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason",
+            "description": "Judge reason for modify or reject decisions"
+          },
+          "final_order": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Final Order",
+            "description": "Final order text when supplied"
+          },
+          "recorded_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recorded At",
+            "description": "Timestamp for the decision record"
+          },
+          "recorded_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recorded By",
+            "description": "Judge identifier"
+          },
           "message": {
             "type": "string",
             "title": "Message",
@@ -6482,6 +7405,7 @@
           "case_id",
           "action",
           "status",
+          "decision_type",
           "message"
         ],
         "title": "DecisionResponse",
@@ -6494,6 +7418,19 @@
             "format": "uuid",
             "title": "Id"
           },
+          "reasoning_chain": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning Chain",
+            "description": "Structured reasoning chain"
+          },
           "preliminary_conclusion": {
             "anyOf": [
               {
@@ -6505,6 +7442,19 @@
             ],
             "title": "Preliminary Conclusion",
             "description": "Preliminary conclusion"
+          },
+          "uncertainty_flags": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uncertainty Flags",
+            "description": "Uncertainty flags and pivot factors"
           },
           "confidence_score": {
             "anyOf": [
@@ -6585,6 +7535,17 @@
             "type": "string",
             "format": "uuid",
             "title": "Id"
+          },
+          "openai_file_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Openai File Id"
           },
           "filename": {
             "type": "string",
@@ -6677,13 +7638,18 @@
         "properties": {
           "id": {
             "type": "string",
-            "format": "uuid",
             "title": "Id"
           },
-          "domain": {
-            "$ref": "#/components/schemas/CaseDomain"
+          "case_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Case Id"
           },
-          "description": {
+          "item_type": {
+            "type": "string",
+            "title": "Item Type"
+          },
+          "case_title": {
             "anyOf": [
               {
                 "type": "string"
@@ -6692,7 +7658,10 @@
                 "type": "null"
               }
             ],
-            "title": "Description"
+            "title": "Case Title"
+          },
+          "domain": {
+            "$ref": "#/components/schemas/CaseDomain"
           },
           "status": {
             "$ref": "#/components/schemas/CaseStatus"
@@ -6719,18 +7688,71 @@
             ],
             "title": "Complexity"
           },
-          "created_by": {
+          "originating_judge": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Originating Judge"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "priority": {
             "type": "string",
-            "format": "uuid",
-            "title": "Created By"
+            "title": "Priority",
+            "default": "high"
+          },
+          "submitted_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Submitted At"
+          },
+          "preview": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preview"
+          },
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/WorkflowHistoryEntryResponse"
+            },
+            "type": "array",
+            "title": "History"
           }
         },
         "type": "object",
         "required": [
           "id",
+          "case_id",
+          "item_type",
           "domain",
-          "status",
-          "created_by"
+          "status"
         ],
         "title": "EscalatedCaseResponse"
       },
@@ -6893,6 +7915,19 @@
             ],
             "title": "Admissibility Flags",
             "description": "Admissibility flags"
+          },
+          "linked_claims": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Linked Claims",
+            "description": "Linked claims, contradictions, or corroboration metadata"
           }
         },
         "type": "object",
@@ -6957,6 +7992,19 @@
             "title": "Event Date",
             "description": "Date of the event"
           },
+          "event_time": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Time",
+            "description": "Time of the event"
+          },
           "confidence": {
             "anyOf": [
               {
@@ -6978,6 +8026,32 @@
               }
             ],
             "description": "Agreed or disputed"
+          },
+          "corroboration": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Corroboration",
+            "description": "Corroboration or dispute metadata"
+          },
+          "source_document_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Document Id",
+            "description": "Originating document id"
           }
         },
         "type": "object",
@@ -7279,6 +8353,17 @@
             "title": "Status",
             "description": "Case status"
           },
+          "case_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Case Summary"
+          },
           "parties": {
             "items": {
               "additionalProperties": true,
@@ -7295,6 +8380,14 @@
             "type": "array",
             "title": "Facts"
           },
+          "disputed_issues": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Disputed Issues"
+          },
           "evidence": {
             "items": {
               "additionalProperties": true,
@@ -7302,6 +8395,14 @@
             },
             "type": "array",
             "title": "Evidence"
+          },
+          "evidence_gaps": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Evidence Gaps"
           },
           "witnesses": {
             "items": {
@@ -7323,6 +8424,22 @@
             "additionalProperties": true,
             "type": "object",
             "title": "Arguments"
+          },
+          "suggested_questions": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Suggested Questions"
+          },
+          "weak_points": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Weak Points"
           },
           "current_verdict": {
             "anyOf": [
@@ -7659,6 +8776,18 @@
             "title": "Section",
             "description": "Section reference"
           },
+          "verbatim_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verbatim Text",
+            "description": "Verbatim statutory text"
+          },
           "relevance_score": {
             "anyOf": [
               {
@@ -7670,6 +8799,18 @@
             ],
             "title": "Relevance Score",
             "description": "Relevance score (0-1)"
+          },
+          "application": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Application",
+            "description": "Narrative application to the case facts"
           }
         },
         "type": "object",
@@ -8054,6 +9195,18 @@
             "title": "Outcome",
             "description": "Case outcome"
           },
+          "reasoning_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning Summary",
+            "description": "Key reasoning summary"
+          },
           "similarity_score": {
             "anyOf": [
               {
@@ -8065,6 +9218,41 @@
             ],
             "title": "Similarity Score",
             "description": "Similarity score (0-1)"
+          },
+          "distinguishing_factors": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Distinguishing Factors",
+            "description": "How the precedent differs from the current case"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PrecedentSource"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "curated or live_search"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url",
+            "description": "Source URL when available"
           }
         },
         "type": "object",
@@ -8228,6 +9416,14 @@
           "citation"
         ],
         "title": "PrecedentSearchResultItem"
+      },
+      "PrecedentSource": {
+        "type": "string",
+        "enum": [
+          "curated",
+          "live_search"
+        ],
+        "title": "PrecedentSource"
       },
       "RecommendationType": {
         "type": "string",
@@ -8957,6 +10153,19 @@
             "title": "Recommended Outcome",
             "description": "Recommended outcome text"
           },
+          "sentence": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sentence",
+            "description": "Traffic sentence details"
+          },
           "confidence_score": {
             "anyOf": [
               {
@@ -8968,6 +10177,70 @@
             ],
             "title": "Confidence Score",
             "description": "Confidence score (0-100)"
+          },
+          "alternative_outcomes": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alternative Outcomes",
+            "description": "Alternative outcomes and pivot factors"
+          },
+          "fairness_report": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fairness Report",
+            "description": "Structured fairness and bias audit"
+          },
+          "amendment_of": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amendment Of",
+            "description": "Previous verdict in the amendment chain"
+          },
+          "amendment_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amendment Reason",
+            "description": "Reason for the amendment"
+          },
+          "amended_by": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amended By",
+            "description": "Judge who amended the verdict"
           }
         },
         "type": "object",
@@ -9269,6 +10542,31 @@
             ],
             "title": "Credibility Score",
             "description": "Credibility score (0-100)"
+          },
+          "bias_indicators": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bias Indicators",
+            "description": "Bias indicators and credibility factors"
+          },
+          "simulated_testimony": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Simulated Testimony",
+            "description": "Traffic-only simulated testimony summary"
           }
         },
         "type": "object",
@@ -9277,6 +10575,65 @@
           "name"
         ],
         "title": "WitnessResponse"
+      },
+      "WorkflowHistoryEntryResponse": {
+        "properties": {
+          "action": {
+            "type": "string",
+            "title": "Action"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "actor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "details": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Details"
+          }
+        },
+        "type": "object",
+        "required": [
+          "action"
+        ],
+        "title": "WorkflowHistoryEntryResponse"
       }
     },
     "securitySchemes": {
