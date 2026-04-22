@@ -141,17 +141,14 @@ def _diff_arguments(original: CaseState, modified: CaseState) -> list[dict[str, 
 
 def _diff_reasoning(original: CaseState, modified: CaseState) -> dict[str, Any]:
     """Compare deliberation reasoning between original and modified."""
-    orig_delib = original.deliberation or {}
-    mod_delib = modified.deliberation or {}
-
-    if not isinstance(orig_delib, dict) or not isinstance(mod_delib, dict):
-        return {"original": None, "modified": None}
+    orig_delib = original.deliberation
+    mod_delib = modified.deliberation
 
     return {
-        "original": orig_delib.get("preliminary_conclusion"),
-        "modified": mod_delib.get("preliminary_conclusion"),
-        "original_confidence": orig_delib.get("confidence_score"),
-        "modified_confidence": mod_delib.get("confidence_score"),
+        "original": orig_delib.preliminary_conclusion if orig_delib else None,
+        "modified": mod_delib.preliminary_conclusion if mod_delib else None,
+        "original_confidence": orig_delib.confidence_score if orig_delib else None,
+        "modified_confidence": mod_delib.confidence_score if mod_delib else None,
     }
 
 
@@ -196,10 +193,8 @@ def _get_confidence(state: CaseState) -> int:
     if state.verdict_recommendation:
         return state.verdict_recommendation.confidence_score
 
-    if state.deliberation and isinstance(state.deliberation, dict):
-        score = state.deliberation.get("confidence_score")
-        if isinstance(score, (int, float)):
-            return int(score)
+    if state.deliberation and state.deliberation.confidence_score is not None:
+        return state.deliberation.confidence_score
 
     return 0
 
