@@ -554,3 +554,227 @@ async def test_checkpoint_opens_short_lived_session_per_call():
     assert session_factory.call_count == 7, (
         f"expected 7 short-lived sessions, got {session_factory.call_count}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 3.2 — terminal SSE events on every halt path
+# ---------------------------------------------------------------------------
+
+
+def _terminal_events(mock_publish: AsyncMock) -> list:
+    """Pick out the run-level terminal events from all publish calls."""
+    return [
+        call.args[0]
+        for call in mock_publish.await_args_list
+        if call.args and call.args[0].agent == "pipeline" and call.args[0].phase == "terminal"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_terminal_event_emitted_on_complexity_escalation(monkeypatch):
+    """L1 halt at complexity-routing emits ('pipeline', 'terminal') before
+    returning — the per-agent 'failed' wire misattribution is gone.
+    """
+    publish_mock = AsyncMock(return_value=None)
+    monkeypatch.setattr("src.pipeline.mesh_runner.publish_progress", publish_mock)
+
+    a2a = FakeA2AClient()
+    redis = _FakeRedis()
+    state = _case_state()
+
+    def resolver(topic, envelope, reply_to):
+        agent = topic.rsplit("/", 1)[-1]
+        dumped = state.model_dump(mode="json")
+        if agent == "complexity-routing":
+            dumped["status"] = CaseStatusEnum.escalated.value
+        return _send_task_response(envelope["id"], dumped)
+
+    a2a.auto_resolver = resolver
+    runner = _make_runner(a2a, redis)
+    await runner.run(state)
+
+    terminals = _terminal_events(publish_mock)
+    assert len(terminals) == 1
+    event = terminals[0]
+    assert event.detail == {
+        "reason": "complexity_escalation",
+        "stopped_at": "complexity-routing",
+    }
+    # governance-verdict/failed is NOT emitted for this halt — plan M1/codex.
+    bad = [
+        c.args[0]
+        for c in publish_mock.await_args_list
+        if c.args and c.args[0].agent == "governance-verdict" and c.args[0].phase == "failed"
+    ]
+    assert bad == []
+
+
+@pytest.mark.asyncio
+async def test_terminal_event_emitted_on_governance_escalation(monkeypatch):
+    """A critical fairness issue flips status to escalated and must emit a
+    terminal event attributed to governance-verdict.
+    """
+    publish_mock = AsyncMock(return_value=None)
+    monkeypatch.setattr("src.pipeline.mesh_runner.publish_progress", publish_mock)
+
+    a2a = FakeA2AClient()
+    redis = _FakeRedis()
+    state = _case_state()
+
+    l2_count = [0]
+
+    def resolver(topic, envelope, reply_to):
+        agent = topic.rsplit("/", 1)[-1]
+        if agent in L2_AGENTS:
+            l2_count[0] += 1
+            if l2_count[0] == 3:
+                merged = state.model_dump(mode="json")
+                merged["evidence_analysis"] = {}
+                merged["extracted_facts"] = {}
+                merged["witnesses"] = {}
+                sub_val = next(
+                    iter(
+                        v.decode()
+                        for k, v in redis.store.items()
+                        if k.startswith("vc:aggregator:sub_task:")
+                    )
+                )
+                _k, case_id, rid = sub_val.split("|")
+                return _send_task_response(f"layer2-{case_id}-{rid}", merged)
+            return None
+        dumped = state.model_dump(mode="json")
+        if agent == "governance-verdict":
+            dumped["fairness_check"] = {"critical_issues_found": True, "issues": ["x"]}
+        return _send_task_response(envelope["id"], dumped)
+
+    a2a.auto_resolver = resolver
+    runner = _make_runner(a2a, redis)
+    result = await runner.run(state)
+
+    assert result.status == CaseStatusEnum.escalated
+    terminals = _terminal_events(publish_mock)
+    assert len(terminals) == 1
+    assert terminals[0].detail == {
+        "reason": "governance_halt",
+        "stopped_at": "governance-verdict",
+    }
+
+
+@pytest.mark.asyncio
+async def test_terminal_event_emitted_on_agent_timeout(monkeypatch):
+    """A sequential agent timeout inside run() emits a terminal event with
+    reason='agent_timeout' (distinct from 'l2_barrier_timeout' so analytics
+    can attribute the halt correctly) before the exception propagates.
+    """
+    publish_mock = AsyncMock(return_value=None)
+    monkeypatch.setattr("src.pipeline.mesh_runner.publish_progress", publish_mock)
+
+    a2a = FakeA2AClient()
+    a2a.auto_resolver = lambda *_: None  # never resolves → TimeoutError
+    redis = _FakeRedis()
+    runner = _make_runner(a2a, redis)
+    runner._agent_timeout = 0.05
+
+    with pytest.raises(asyncio.TimeoutError):
+        await runner.run(_case_state())
+
+    terminals = _terminal_events(publish_mock)
+    assert len(terminals) == 1
+    assert terminals[0].detail["reason"] == "agent_timeout"
+    assert terminals[0].detail["stopped_at"] == "case-processing"
+
+
+@pytest.mark.asyncio
+async def test_terminal_event_emitted_on_orchestrator_exception(monkeypatch):
+    """A non-timeout exception inside run() falls into the generic handler
+    and emits reason='exception' with the current agent as stopped_at.
+    """
+    publish_mock = AsyncMock(return_value=None)
+    monkeypatch.setattr("src.pipeline.mesh_runner.publish_progress", publish_mock)
+
+    a2a = FakeA2AClient()
+
+    def resolver(topic, envelope, reply_to):
+        raise RuntimeError("boom")
+
+    a2a.auto_resolver = resolver
+    redis = _FakeRedis()
+    runner = _make_runner(a2a, redis)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        await runner.run(_case_state())
+
+    terminals = _terminal_events(publish_mock)
+    assert len(terminals) == 1
+    assert terminals[0].detail["reason"] == "exception"
+    assert terminals[0].detail["stopped_at"] == "case-processing"
+
+
+@pytest.mark.asyncio
+async def test_terminal_event_emitted_on_l2_barrier_timeout(monkeypatch):
+    """L2 barrier timeout inside the full run() emits exactly one terminal
+    event at the orchestrator layer with reason='l2_barrier_timeout'. This
+    drives the full run() path rather than `_invoke_l2_fanout` directly so
+    we also verify the outer TimeoutError handler doesn't double-emit.
+    """
+    publish_mock = AsyncMock(return_value=None)
+    monkeypatch.setattr("src.pipeline.mesh_runner.publish_progress", publish_mock)
+
+    a2a = FakeA2AClient()
+    redis = _FakeRedis()
+    state = _case_state()
+
+    def resolver(topic, envelope, reply_to):
+        agent = topic.rsplit("/", 1)[-1]
+        if agent in L2_AGENTS:
+            # Never resolve the aggregator merge → barrier TimeoutError
+            return None
+        return _send_task_response(envelope["id"], state.model_dump(mode="json"))
+
+    a2a.auto_resolver = resolver
+    runner = _make_runner(a2a, redis)
+
+    with (
+        patch("src.pipeline.mesh_runner.L2_BARRIER_TIMEOUT_SECONDS", 0.05),
+        pytest.raises(asyncio.TimeoutError),
+    ):
+        await runner.run(state)
+
+    terminals = _terminal_events(publish_mock)
+    assert len(terminals) == 1, (
+        f"expected exactly one terminal event, got {len(terminals)}: "
+        f"{[t.detail for t in terminals]}"
+    )
+    assert terminals[0].detail == {
+        "reason": "l2_barrier_timeout",
+        "stopped_at": "layer2-aggregator",
+    }
+
+
+@pytest.mark.asyncio
+async def test_run_from_emits_terminal_on_complexity_escalation(monkeypatch):
+    """What-If re-entry at complexity-routing must also emit a terminal
+    event when that agent escalates — otherwise a scenario SSE stream
+    would hang on the halt path.
+    """
+    publish_mock = AsyncMock(return_value=None)
+    monkeypatch.setattr("src.pipeline.mesh_runner.publish_progress", publish_mock)
+
+    a2a = FakeA2AClient()
+    redis = _FakeRedis()
+    state = _case_state()
+
+    def resolver(topic, envelope, reply_to):
+        agent = topic.rsplit("/", 1)[-1]
+        dumped = state.model_dump(mode="json")
+        if agent == "complexity-routing":
+            dumped["status"] = CaseStatusEnum.escalated.value
+        return _send_task_response(envelope["id"], dumped)
+
+    a2a.auto_resolver = resolver
+    runner = _make_runner(a2a, redis)
+    await runner.run_from(state, start_agent="complexity-routing")
+
+    terminals = _terminal_events(publish_mock)
+    assert len(terminals) == 1
+    assert terminals[0].detail["reason"] == "complexity_escalation"

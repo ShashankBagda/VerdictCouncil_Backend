@@ -1,9 +1,13 @@
+import asyncio
+import contextlib
+import json
 import logging
-from datetime import date
+import time
+from datetime import UTC, date, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Response, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import selectinload
@@ -37,6 +41,13 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 STARTABLE_STATUSES = (CaseStatus.pending, CaseStatus.ready_for_review)
+
+# SSE stream tuning — exposed at module scope so tests can override.
+# HEARTBEAT cadence must be short enough to defeat reverse-proxy idle timers
+# (typical: 30-60s). WATCHDOG caps total stream time so a runaway pipeline
+# can't hang a client forever; we emit a synthetic terminal event and close.
+SSE_HEARTBEAT_SECONDS = 15.0
+SSE_WATCHDOG_SECONDS = 600.0
 
 PIPELINE_AGENT_ORDER = [
     "case-processing",
@@ -590,14 +601,71 @@ async def export_hearing_pack(
 )
 async def stream_pipeline_status(
     case_id: UUID,
+    request: Request,
     db: DBSession,
     current_user: CurrentUser,
 ) -> StreamingResponse:
     await _load_case_for_export(case_id, db, current_user)
 
     async def event_generator():
-        async for payload in subscribe_pipeline_events(case_id):
-            yield f"data: {payload}\n\n"
+        # Producer-consumer pattern: a background task owns the subscribe()
+        # generator for its full lifetime and pushes payloads onto a queue.
+        # The consumer wakes up every SSE_HEARTBEAT_SECONDS to emit keepalives
+        # and check for client disconnect / watchdog expiry. This avoids the
+        # wait_for-on-__anext__ pitfall where a heartbeat-driven cancellation
+        # would tear down the underlying pubsub mid-iteration.
+        queue: asyncio.Queue[str] = asyncio.Queue()
+        producer_done = asyncio.Event()
+
+        async def _producer():
+            try:
+                async for payload in subscribe_pipeline_events(case_id):
+                    await queue.put(payload)
+            finally:
+                producer_done.set()
+
+        producer_task = asyncio.create_task(_producer())
+        stream_start = time.monotonic()
+
+        try:
+            while True:
+                if await request.is_disconnected():
+                    return
+                remaining = SSE_WATCHDOG_SECONDS - (time.monotonic() - stream_start)
+                if remaining <= 0:
+                    timeout_event = {
+                        "case_id": str(case_id),
+                        "agent": "pipeline",
+                        "phase": "terminal",
+                        "ts": datetime.now(UTC).isoformat(),
+                        "detail": {
+                            "reason": "watchdog_timeout",
+                            "stopped_at": "sse-stream",
+                        },
+                    }
+                    yield f"data: {json.dumps(timeout_event)}\n\n"
+                    return
+                try:
+                    payload = await asyncio.wait_for(
+                        queue.get(),
+                        timeout=min(SSE_HEARTBEAT_SECONDS, remaining),
+                    )
+                except TimeoutError:
+                    if producer_done.is_set() and queue.empty():
+                        return
+                    # SSE comment lines keep idle connections warm without
+                    # polluting the event log on the subscriber side.
+                    yield ": keepalive\n\n"
+                    continue
+                yield f"data: {payload}\n\n"
+                if producer_done.is_set() and queue.empty():
+                    return
+        finally:
+            producer_task.cancel()
+            # Cancellation and cleanup errors must not escape — the client
+            # already disconnected or the watchdog fired.
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await producer_task
 
     return StreamingResponse(
         event_generator(),
