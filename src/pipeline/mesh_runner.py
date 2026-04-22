@@ -43,7 +43,12 @@ from src.pipeline._a2a_client import (
     build_send_task_request,
     new_task_id,
 )
-from src.pipeline.guardrails import check_input_injection, validate_output_integrity
+from src.pipeline.hooks import (
+    HookContext,
+    HookResult,
+    PipelineHook,
+    default_hooks,
+)
 from src.pipeline.runner import AGENT_ORDER  # preserve pipeline order
 from src.services.layer2_aggregator.a2a import parse_send_task_response
 from src.services.pipeline_events import publish_progress
@@ -114,6 +119,7 @@ class MeshPipelineRunner:
         redis_client: redis.Redis | None = None,
         namespace: str = "verdictcouncil",
         agent_timeout_seconds: float = DEFAULT_AGENT_TIMEOUT_SECONDS,
+        hooks: list[PipelineHook] | None = None,
     ) -> None:
         self._a2a = a2a_client
         self._session_factory = session_factory
@@ -123,6 +129,9 @@ class MeshPipelineRunner:
         )
         self._namespace = namespace.strip("/")
         self._agent_timeout = agent_timeout_seconds
+        self._hooks: list[PipelineHook] = (
+            hooks if hooks is not None else default_hooks(self._client)
+        )
 
     # ------------------------------------------------------------------
     # Public API — matches PipelineRunner
@@ -143,27 +152,22 @@ class MeshPipelineRunner:
         """
         run_id = self._resolve_run_id(case_state, run_id)
         state = case_state
+        ctx = HookContext(is_resume=False, run_id=run_id, case_id=str(state.case_id))
         current_agent = "input-guardrail"
 
         try:
-            state = await self._apply_input_guardrail(state)
+            # before_run hooks — InputGuardrailHook fires here.
+            state, halted = await self._run_before_run_hooks(state, ctx, run_id)
+            if halted:
+                return state
 
-            # L1 — sequential agents 1 & 2 with the escalation halt after 2.
+            # L1 — sequential agents 1 & 2.
             for agent_name in L1_AGENTS:
                 current_agent = agent_name
                 state = await self._invoke_agent_sequential(agent_name, state, run_id)
                 await self._checkpoint(state, run_id, agent_name)
-                if agent_name == "complexity-routing" and state.status == CaseStatusEnum.escalated:
-                    logger.warning(
-                        "Mesh pipeline halted at complexity-routing: escalated (case_id=%s)",
-                        state.case_id,
-                    )
-                    assert state.run_id == run_id, "run_id invariant broken on escalation halt"
-                    await self._emit_terminal(
-                        state,
-                        reason="complexity_escalation",
-                        stopped_at="complexity-routing",
-                    )
+                state, halted = await self._run_after_agent_hooks(agent_name, state, ctx, run_id)
+                if halted:
                     return state
 
             # L2 — parallel fan-out via the aggregator.
@@ -171,23 +175,14 @@ class MeshPipelineRunner:
             state = await self._invoke_l2_fanout(state, run_id)
             await self._checkpoint(state, run_id, "layer2-aggregator")
 
-            # L3 — sequential agents 6–9 with the post-L9 output-integrity +
-            # fairness halts.
+            # L3 — sequential agents 6–9.
             for agent_name in L3_AGENTS:
                 current_agent = agent_name
                 state = await self._invoke_agent_sequential(agent_name, state, run_id)
                 await self._checkpoint(state, run_id, agent_name)
-
-                if agent_name == "governance-verdict":
-                    maybe_halted = self._apply_governance_halts(state)
-                    if maybe_halted is not None:
-                        assert maybe_halted.run_id == run_id, "run_id invariant broken on halt"
-                        await self._emit_terminal(
-                            maybe_halted,
-                            reason="governance_halt",
-                            stopped_at="governance-verdict",
-                        )
-                        return maybe_halted
+                state, halted = await self._run_after_agent_hooks(agent_name, state, ctx, run_id)
+                if halted:
+                    return state
         except TimeoutError as exc:
             # _invoke_l2_fanout re-raises TimeoutError without emitting its
             # own terminal; we preserve the specific halt reason here
@@ -243,25 +238,25 @@ class MeshPipelineRunner:
         """
         run_id = self._resolve_run_id(case_state, run_id)
         state = case_state
+        ctx = HookContext(is_resume=True, run_id=run_id, case_id=str(state.case_id))
         current_agent = start_agent
 
         try:
+            # before_run hooks — InputGuardrailHook no-ops when is_resume=True.
+            state, halted = await self._run_before_run_hooks(state, ctx, run_id)
+            if halted:
+                return state
+
             if start_agent in L1_AGENTS:
                 l1_start = L1_AGENTS.index(start_agent)
                 for agent_name in L1_AGENTS[l1_start:]:
                     current_agent = agent_name
                     state = await self._invoke_agent_sequential(agent_name, state, run_id)
                     await self._checkpoint(state, run_id, agent_name)
-                    if (
-                        agent_name == "complexity-routing"
-                        and state.status == CaseStatusEnum.escalated
-                    ):
-                        assert state.run_id == run_id, "run_id invariant broken on escalation halt"
-                        await self._emit_terminal(
-                            state,
-                            reason="complexity_escalation",
-                            stopped_at="complexity-routing",
-                        )
+                    state, halted = await self._run_after_agent_hooks(
+                        agent_name, state, ctx, run_id
+                    )
+                    if halted:
                         return state
                 current_agent = "layer2-aggregator"
                 state = await self._invoke_l2_fanout(state, run_id)
@@ -284,17 +279,9 @@ class MeshPipelineRunner:
                 current_agent = agent_name
                 state = await self._invoke_agent_sequential(agent_name, state, run_id)
                 await self._checkpoint(state, run_id, agent_name)
-
-                if agent_name == "governance-verdict":
-                    maybe_halted = self._apply_governance_halts(state)
-                    if maybe_halted is not None:
-                        assert maybe_halted.run_id == run_id, "run_id invariant broken on halt"
-                        await self._emit_terminal(
-                            maybe_halted,
-                            reason="governance_halt",
-                            stopped_at="governance-verdict",
-                        )
-                        return maybe_halted
+                state, halted = await self._run_after_agent_hooks(agent_name, state, ctx, run_id)
+                if halted:
+                    return state
         except TimeoutError as exc:
             reason = (
                 "l2_barrier_timeout" if current_agent == "layer2-aggregator" else "agent_timeout"
@@ -319,54 +306,39 @@ class MeshPipelineRunner:
         return state
 
     # ------------------------------------------------------------------
-    # Inter-agent hooks (ported from PipelineRunner)
+    # Hook dispatch helpers
     # ------------------------------------------------------------------
 
-    async def _apply_input_guardrail(self, state: CaseState) -> CaseState:
-        description = state.case_metadata.get("description", "") if state.case_metadata else ""
-        if not description:
-            return state
-        result = await check_input_injection(description, self._client)
-        if not result.get("blocked"):
-            return state
-        logger.warning(
-            "Input injection detected (method=%s, case_id=%s): %s",
-            result["method"],
-            state.case_id,
-            result["reason"],
-        )
-        state.case_metadata["description"] = result["sanitized_text"]
-        return append_audit_entry(
-            state,
-            agent="guardrails",
-            action="input_injection_blocked",
-            input_payload={"method": result["method"]},
-            output_payload={"reason": result["reason"]},
-        )
+    async def _run_before_run_hooks(
+        self, state: CaseState, ctx: HookContext, run_id: str
+    ) -> tuple[CaseState, bool]:
+        for hook in self._hooks:
+            result = await hook.before_run(state, ctx)
+            state = result.state
+            if result.halt:
+                await self._emit_terminal(
+                    state,
+                    reason=result.reason,
+                    stopped_at=result.stopped_at or "before_run",
+                )
+                return state, True
+        return state, False
 
-    def _apply_governance_halts(self, state: CaseState) -> CaseState | None:
-        integrity = validate_output_integrity(state.model_dump())
-        if not integrity["passed"]:
-            logger.error(
-                "Output integrity check FAILED (case_id=%s): %s",
-                state.case_id,
-                integrity["issues"],
-            )
-            state = append_audit_entry(
-                state,
-                agent="guardrails",
-                action="output_integrity_failed",
-                output_payload=integrity,
-            )
-            state.status = CaseStatusEnum.escalated
-            return state
-        if state.fairness_check and state.fairness_check.critical_issues_found:
-            logger.warning(
-                "Mesh pipeline halted: critical fairness issues (case_id=%s)",
-                state.case_id,
-            )
-            return state.model_copy(update={"status": CaseStatusEnum.escalated})
-        return None
+    async def _run_after_agent_hooks(
+        self, agent_name: str, state: CaseState, ctx: HookContext, run_id: str
+    ) -> tuple[CaseState, bool]:
+        for hook in self._hooks:
+            result = await hook.after_agent(agent_name, state, ctx)
+            state = result.state
+            if result.halt:
+                assert state.run_id == run_id, "run_id invariant broken on halt"
+                await self._emit_terminal(
+                    state,
+                    reason=result.reason,
+                    stopped_at=result.stopped_at or agent_name,
+                )
+                return state, True
+        return state, False
 
     # ------------------------------------------------------------------
     # Agent invocation — single-agent sequential path
