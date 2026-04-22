@@ -429,7 +429,8 @@ class TestRejectedCaseReview:
         rejection_log.input_payload = {}
         rejection_log.output_payload = {
             "jurisdiction_issues": [
-                "Offence date 2025-03-15 exceeds the 12-month limitation period for this offence category."
+                "Offence date 2025-03-15 exceeds the 12-month limitation "
+                "period for this offence category."
             ]
         }
         rejection_log.action = "case_processing_rejected"
@@ -444,7 +445,12 @@ class TestRejectedCaseReview:
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.post(
                 f"/api/v1/cases/{case.id}/rejection-review",
-                json={"action": "override", "justification": "Charge sheet confirms the offence was in 2026."},
+                json={
+                    "action": "override",
+                    "justification": (
+                        "Charge sheet confirms the offence was in 2026."
+                    ),
+                },
             )
 
         assert resp.status_code == 200
@@ -465,7 +471,12 @@ class TestRejectedCaseReview:
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.post(
                 f"/api/v1/cases/{case.id}/rejection-review",
-                json={"action": "close", "justification": "No lawful basis to override the jurisdiction rejection."},
+                json={
+                    "action": "close",
+                    "justification": (
+                        "No lawful basis to override the jurisdiction rejection."
+                    ),
+                },
             )
 
         assert resp.status_code == 200

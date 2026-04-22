@@ -197,7 +197,10 @@ class TestDecisionAmendments:
         prior_decision_log = MagicMock()
         prior_decision_log.agent_name = "judge"
         prior_decision_log.action = "decision_modify"
-        prior_decision_log.input_payload = {"judge_id": str(judge.id), "final_order": "Original order"}
+        prior_decision_log.input_payload = {
+            "judge_id": str(judge.id),
+            "final_order": "Original order",
+        }
         prior_decision_log.created_at = datetime.now(UTC)
         verdict = MagicMock()
         verdict.id = uuid.uuid4()
@@ -240,7 +243,10 @@ class TestDecisionAmendments:
         prior_decision_log = MagicMock()
         prior_decision_log.agent_name = "judge"
         prior_decision_log.action = "decision_modify"
-        prior_decision_log.input_payload = {"judge_id": str(recording_judge.id), "final_order": "Original order"}
+        prior_decision_log.input_payload = {
+            "judge_id": str(recording_judge.id),
+            "final_order": "Original order",
+        }
         prior_decision_log.created_at = datetime.now(UTC)
         case = _make_case(
             recording_judge.id,

@@ -14,11 +14,11 @@ from sqlalchemy.orm import selectinload
 
 from src.api.deps import CurrentUser, DBSession, require_role
 from src.api.schemas.cases import (
+    KNOWN_TRAFFIC_OFFENCE_CODES,
     CaseCreateRequest,
     CaseDetailResponse,
     CaseListResponse,
     CaseResponse,
-    KNOWN_TRAFFIC_OFFENCE_CODES,
 )
 from src.api.schemas.common import ErrorResponse, MessageResponse, ValidationErrorResponse
 from src.api.schemas.workflows import RejectionReviewRequest, RejectionReviewResponse
@@ -195,7 +195,9 @@ def _build_jurisdiction_summary(case: Case) -> dict[str, Any]:
         elif case.claim_amount == limit:
             warning = True
             reasons.append(
-                f"Claim amount ${case.claim_amount:,.0f} is exactly at the ${limit:,.0f} SCT threshold and needs judge review."
+                "Claim amount "
+                f"${case.claim_amount:,.0f} is exactly at the ${limit:,.0f} "
+                "SCT threshold and needs judge review."
             )
         else:
             reasons.append(
@@ -206,16 +208,24 @@ def _build_jurisdiction_summary(case: Case) -> dict[str, Any]:
             if limitation_days > 730:
                 failure = True
                 reasons.append(
-                    f"Filed {limitation_days} days after the earliest identified cause-of-action date {earliest_fact_date.isoformat()}, beyond the 2-year SCT limitation period."
+                    "Filed "
+                    f"{limitation_days} days after the earliest identified "
+                    f"cause-of-action date {earliest_fact_date.isoformat()}, "
+                    "beyond the 2-year SCT limitation period."
                 )
             elif limitation_days == 730:
                 warning = True
                 reasons.append(
-                    f"Filed exactly 730 days after the earliest identified cause-of-action date {earliest_fact_date.isoformat()}, so the limitation edge needs judge review."
+                    "Filed exactly 730 days after the earliest identified "
+                    f"cause-of-action date {earliest_fact_date.isoformat()}, "
+                    "so the limitation edge needs judge review."
                 )
             else:
                 reasons.append(
-                    f"Filed {limitation_days} days after the earliest identified cause-of-action date {earliest_fact_date.isoformat()}, within the 2-year SCT limitation period."
+                    "Filed "
+                    f"{limitation_days} days after the earliest identified "
+                    f"cause-of-action date {earliest_fact_date.isoformat()}, "
+                    "within the 2-year SCT limitation period."
                 )
 
     if case.domain == CaseDomain.traffic_violation:
@@ -230,16 +240,23 @@ def _build_jurisdiction_summary(case: Case) -> dict[str, Any]:
             if limitation_days > 365:
                 failure = True
                 reasons.append(
-                    f"Offence date {earliest_fact_date.isoformat()} exceeds the 12-month limitation period for this offence category."
+                    "Offence date "
+                    f"{earliest_fact_date.isoformat()} exceeds the 12-month "
+                    "limitation period for this offence category."
                 )
             elif limitation_days == 365:
                 warning = True
                 reasons.append(
-                    f"Offence date {earliest_fact_date.isoformat()} is exactly at the 12-month limitation boundary and needs judge review."
+                    "Offence date "
+                    f"{earliest_fact_date.isoformat()} is exactly at the "
+                    "12-month limitation boundary and needs judge review."
                 )
             else:
                 reasons.append(
-                    f"Filed {limitation_days} days after the earliest offence date {earliest_fact_date.isoformat()}, within the applicable limitation period."
+                    "Filed "
+                    f"{limitation_days} days after the earliest offence date "
+                    f"{earliest_fact_date.isoformat()}, within the applicable "
+                    "limitation period."
                 )
 
     if case.filed_date:

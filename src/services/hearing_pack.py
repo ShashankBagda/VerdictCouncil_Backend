@@ -60,7 +60,10 @@ def _case_summary_md(data: CaseReportData) -> str:
                 "## Decision History",
                 "",
                 *[
-                    f"- **{entry.get('created_at') or 'unknown'}:** {entry.get('recommended_outcome') or 'No outcome'}"
+                    (
+                        f"- **{entry.get('created_at') or 'unknown'}:** "
+                        f"{entry.get('recommended_outcome') or 'No outcome'}"
+                    )
                     + (
                         f" ({entry.get('amendment_reason')})"
                         if entry.get("amendment_reason")

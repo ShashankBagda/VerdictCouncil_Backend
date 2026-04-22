@@ -138,7 +138,10 @@ async def review_reopen_request(
                 db,
                 case_id=case_id,
                 job_type=PipelineJobType.case_pipeline,
-                payload={"resume_from_stage": "evidence-analysis", "resume_reason": "reopen_approved"},
+                payload={
+                    "resume_from_stage": "evidence-analysis",
+                    "resume_reason": "reopen_approved",
+                },
             )
 
     db.add(

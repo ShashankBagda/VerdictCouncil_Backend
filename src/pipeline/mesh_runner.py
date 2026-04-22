@@ -45,7 +45,6 @@ from src.pipeline._a2a_client import (
 )
 from src.pipeline.hooks import (
     HookContext,
-    HookResult,
     PipelineHook,
     default_hooks,
 )
@@ -53,7 +52,7 @@ from src.pipeline.runner import AGENT_ORDER  # preserve pipeline order
 from src.services.layer2_aggregator.a2a import parse_send_task_response
 from src.services.pipeline_events import publish_progress
 from src.shared.audit import append_audit_entry
-from src.shared.case_state import CaseState, CaseStatusEnum
+from src.shared.case_state import CaseState
 from src.shared.config import settings
 from src.shared.validation import (
     FIELD_OWNERSHIP,
@@ -166,7 +165,9 @@ class MeshPipelineRunner:
                 current_agent = agent_name
                 state = await self._invoke_agent_sequential(agent_name, state, run_id)
                 await self._checkpoint(state, run_id, agent_name)
-                state, halted = await self._run_after_agent_hooks(agent_name, state, ctx, run_id)
+                state, halted = await self._run_after_agent_hooks(
+                    agent_name, state, ctx, run_id
+                )
                 if halted:
                     return state
 
@@ -180,16 +181,17 @@ class MeshPipelineRunner:
                 current_agent = agent_name
                 state = await self._invoke_agent_sequential(agent_name, state, run_id)
                 await self._checkpoint(state, run_id, agent_name)
-                state, halted = await self._run_after_agent_hooks(agent_name, state, ctx, run_id)
+                state, halted = await self._run_after_agent_hooks(
+                    agent_name, state, ctx, run_id
+                )
                 if halted:
                     return state
         except TimeoutError as exc:
             # _invoke_l2_fanout re-raises TimeoutError without emitting its
             # own terminal; we preserve the specific halt reason here
             # instead of falling into the generic exception branch.
-            reason = (
-                "l2_barrier_timeout" if current_agent == "layer2-aggregator" else "agent_timeout"
-            )
+            is_l2 = current_agent == "layer2-aggregator"
+            reason = "l2_barrier_timeout" if is_l2 else "agent_timeout"
             await self._emit_terminal(
                 state,
                 reason=reason,

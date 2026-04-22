@@ -107,7 +107,6 @@ async def persist_case_state(
         "state": payload,
     }
 
-    last_transient_exc: BaseException | None = None
     for attempt in range(1, _CHECKPOINT_MAX_RETRIES + 1):
         try:
             await db.execute(_UPSERT_SQL, params)
@@ -120,7 +119,6 @@ async def persist_case_state(
                 await db.rollback()
             raise
         except (OperationalError, DBAPIError) as exc:
-            last_transient_exc = exc
             with contextlib.suppress(Exception):
                 await db.rollback()
             if attempt < _CHECKPOINT_MAX_RETRIES:

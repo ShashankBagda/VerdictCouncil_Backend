@@ -39,10 +39,20 @@ def _optional_text(value: Any) -> str | None:
 
 def _sort_key(item: dict[str, Any]) -> tuple[int, str]:
     priority_order = {"urgent": 0, "high": 1, "medium": 2, "low": 3}
-    return (priority_order.get(item.get("priority", "low"), 4), item.get("submitted_at") or "")
+    return (
+        priority_order.get(item.get("priority", "low"), 4),
+        item.get("submitted_at") or "",
+    )
 
 
-def _history_entry(action: str, actor: str, created_at: datetime | None, reason: str | None, *, assignee: str | None = None) -> dict[str, Any]:
+def _history_entry(
+    action: str,
+    actor: str,
+    created_at: datetime | None,
+    reason: str | None,
+    *,
+    assignee: str | None = None,
+) -> dict[str, Any]:
     return {
         "action": action,
         "reason": reason,
@@ -132,13 +142,19 @@ def _serialize_escalation_item(case: Case, current_user: User) -> dict[str, Any]
     }
 
 
-def _serialize_reopen_item(request_item: ReopenRequest, current_user: User) -> dict[str, Any] | None:
+def _serialize_reopen_item(
+    request_item: ReopenRequest, current_user: User
+) -> dict[str, Any] | None:
     latest_action = _latest_matching_log(
         list(request_item.case.audit_logs or []),
         action_prefix="senior_inbox_reopen_",
         request_id=str(request_item.id),
     )
-    assignee = _optional_text((latest_action.input_payload or {}).get("assignee")) if latest_action else None
+    assignee = (
+        _optional_text((latest_action.input_payload or {}).get("assignee"))
+        if latest_action
+        else None
+    )
     if latest_action is not None:
         last_action = latest_action.action.removeprefix("senior_inbox_reopen_")
         if last_action in {"approve", "reject", "request_more_info"}:
@@ -155,7 +171,10 @@ def _serialize_reopen_item(request_item: ReopenRequest, current_user: User) -> d
             request_item.justification,
         )
     ]
-    for log in sorted(case.audit_logs or [], key=lambda item: item.created_at.timestamp() if item.created_at else 0.0):
+    for log in sorted(
+        case.audit_logs or [],
+        key=lambda item: item.created_at.timestamp() if item.created_at else 0.0,
+    ):
         if not log.action.startswith("senior_inbox_reopen_"):
             continue
         if (log.input_payload or {}).get("request_id") != str(request_item.id):
@@ -180,7 +199,10 @@ def _serialize_reopen_item(request_item: ReopenRequest, current_user: User) -> d
         "submitted_at": request_item.created_at.isoformat() if request_item.created_at else None,
         "status": request_item.status.value,
         "preview": _optional_text(request_item.justification),
-        "case_title": ((_optional_text(case.title) if case else None) or f"Case {request_item.case_id}"),
+        "case_title": (
+            (_optional_text(case.title) if case else None)
+            or f"Case {request_item.case_id}"
+        ),
         "domain": case.domain.value if case and case.domain else None,
         "history": history,
         "assignee": assignee,
@@ -189,7 +211,10 @@ def _serialize_reopen_item(request_item: ReopenRequest, current_user: User) -> d
 
 def _collect_pending_amendments(case: Case, current_user: User) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
-    audit_logs = sorted(case.audit_logs or [], key=lambda item: item.created_at.timestamp() if item.created_at else 0.0)
+    audit_logs = sorted(
+        case.audit_logs or [],
+        key=lambda item: item.created_at.timestamp() if item.created_at else 0.0,
+    )
     for log in audit_logs:
         if log.action != "decision_amendment_request":
             continue
@@ -202,7 +227,11 @@ def _collect_pending_amendments(case: Case, current_user: User) -> list[dict[str
             action_prefix="senior_inbox_amendment_",
             request_id=request_id,
         )
-        assignee = _optional_text((latest_action.input_payload or {}).get("assignee")) if latest_action else None
+        assignee = (
+            _optional_text((latest_action.input_payload or {}).get("assignee"))
+            if latest_action
+            else None
+        )
         if latest_action is not None:
             last_action = latest_action.action.removeprefix("senior_inbox_amendment_")
             if last_action in {"approve", "reject", "request_more_info"}:
@@ -226,7 +255,10 @@ def _collect_pending_amendments(case: Case, current_user: User) -> list[dict[str
             history.append(
                 _history_entry(
                     review_log.action,
-                    str((review_log.input_payload or {}).get("senior_judge_id") or review_log.agent_name),
+                    str(
+                        (review_log.input_payload or {}).get("senior_judge_id")
+                        or review_log.agent_name
+                    ),
                     review_log.created_at,
                     (review_log.input_payload or {}).get("reason"),
                     assignee=(review_log.input_payload or {}).get("assignee"),
@@ -353,7 +385,10 @@ async def take_senior_inbox_action(
     item_type, raw_id = _parse_item_id(item_id)
     reviewed_at = datetime.now(UTC)
 
-    if body.action in {SeniorInboxAction.reject, SeniorInboxAction.request_more_info} and not _optional_text(body.reason):
+    if (
+        body.action in {SeniorInboxAction.reject, SeniorInboxAction.request_more_info}
+        and not _optional_text(body.reason)
+    ):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="A written reason is required for this action",
@@ -374,7 +409,10 @@ async def take_senior_inbox_action(
             )
         ).scalar_one_or_none()
         if case is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Escalation not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Escalation not found",
+            )
         if case.created_by == current_user.id and body.action == SeniorInboxAction.approve:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -392,7 +430,13 @@ async def take_senior_inbox_action(
                     "reason": body.reason,
                     "assignee": body.assignee,
                 },
-                output_payload={"status": "approved" if body.action == SeniorInboxAction.approve else "pending"},
+                output_payload={
+                    "status": (
+                        "approved"
+                        if body.action == SeniorInboxAction.approve
+                        else "pending"
+                    )
+                },
             )
         )
         await db.commit()
@@ -415,8 +459,14 @@ async def take_senior_inbox_action(
             )
         ).scalar_one_or_none()
         if request_item is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Reopen request not found")
-        if request_item.requested_by == current_user.id and body.action == SeniorInboxAction.approve:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Reopen request not found",
+            )
+        if (
+            request_item.requested_by == current_user.id
+            and body.action == SeniorInboxAction.approve
+        ):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Two-person rule: cannot approve your own reopen request",
@@ -436,7 +486,10 @@ async def take_senior_inbox_action(
                 db,
                 case_id=request_item.case_id,
                 job_type=PipelineJobType.case_pipeline,
-                payload={"resume_from_stage": "evidence-analysis", "resume_reason": "senior_reopen_approved"},
+                payload={
+                    "resume_from_stage": "evidence-analysis",
+                    "resume_reason": "senior_reopen_approved",
+                },
             )
             status_value = "approved"
         elif body.action == SeniorInboxAction.reject:
@@ -474,7 +527,10 @@ async def take_senior_inbox_action(
         all_cases = (
             (
                 await db.execute(
-                    select(Case).options(selectinload(Case.audit_logs), selectinload(Case.verdicts))
+                    select(Case).options(
+                        selectinload(Case.audit_logs),
+                        selectinload(Case.verdicts),
+                    )
                 )
             )
             .scalars()
@@ -493,10 +549,16 @@ async def take_senior_inbox_action(
             if matched_case is not None:
                 break
         if matched_case is None or request_log is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Amendment request not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Amendment request not found",
+            )
 
         payload = request_log.input_payload or {}
-        if str(payload.get("requested_by")) == str(current_user.id) and body.action == SeniorInboxAction.approve:
+        if (
+            str(payload.get("requested_by")) == str(current_user.id)
+            and body.action == SeniorInboxAction.approve
+        ):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Two-person rule: cannot approve your own amendment request",
@@ -561,4 +623,7 @@ async def take_senior_inbox_action(
             reviewed_at=reviewed_at,
         )
 
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unsupported senior inbox item")
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="Unsupported senior inbox item",
+    )
