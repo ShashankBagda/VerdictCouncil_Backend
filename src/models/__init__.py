@@ -16,6 +16,7 @@ from src.models.case import (
     Verdict,
     Witness,
 )
+from src.models.pipeline_job import PipelineJob, PipelineJobStatus, PipelineJobType
 from src.models.system_config import SystemConfig
 from src.models.user import PasswordResetToken, Session, User
 
@@ -40,4 +41,7 @@ __all__ = [
     "AuditLog",
     "AdminEvent",
     "SystemConfig",
+    "PipelineJob",
+    "PipelineJobStatus",
+    "PipelineJobType",
 ]
