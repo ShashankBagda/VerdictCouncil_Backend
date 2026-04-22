@@ -39,6 +39,12 @@ class AuditEntry(BaseModel):
 
 
 class CaseState(BaseModel):
+    # Schema version — incremented when the CaseState shape changes in a way
+    # that breaks round-trip with older checkpoints. The reader in
+    # `src/db/pipeline_state.py` compares this against CURRENT_SCHEMA_VERSION
+    # and fails loud on mismatch rather than silently defaulting.
+    schema_version: int = 1
+
     # Identity & Status
     case_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     run_id: str = Field(default_factory=lambda: str(uuid.uuid4()))

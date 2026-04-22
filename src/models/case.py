@@ -143,6 +143,11 @@ class Case(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     jurisdiction_valid: Mapped[bool | None] = mapped_column(Boolean)
     complexity: Mapped[CaseComplexity | None] = mapped_column(Enum(CaseComplexity))
     route: Mapped[CaseRoute | None] = mapped_column(Enum(CaseRoute))
+    # Anchor for What-If rehydration: the run_id of the most recent terminal
+    # pipeline run for this case. Written by persist_case_results at the end
+    # of a successful run; read by what_if/stability to load the real
+    # CaseState from pipeline_checkpoints rather than synthesizing an empty one.
+    latest_run_id: Mapped[str | None] = mapped_column(String(36))
     created_by: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
     )

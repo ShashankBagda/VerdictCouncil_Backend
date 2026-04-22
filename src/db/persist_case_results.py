@@ -118,6 +118,11 @@ async def _update_case_row(
         logger.warning("persist_case_results: Case %s not found, skipping row update", case_id)
         return
     case.status = _map_case_status(state.status.value)
+    # Anchor What-If rehydration at the terminal run_id. The mesh runner
+    # upserts a pipeline_checkpoints row for this (case_id, run_id); the
+    # what-if / stability endpoints read that row back via load_case_state.
+    if state.run_id:
+        case.latest_run_id = state.run_id
     complexity = (state.case_metadata or {}).get("complexity")
     if complexity in {"low", "medium", "high"}:
         from src.models.case import CaseComplexity
