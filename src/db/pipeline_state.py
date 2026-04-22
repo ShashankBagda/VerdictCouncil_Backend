@@ -138,8 +138,7 @@ async def persist_case_state(
             # Exhausted retries: log at error and swallow (non-fatal
             # contract — run continues without this checkpoint).
             logger.error(
-                "pipeline_checkpoint upsert exhausted retries "
-                "(case_id=%s run_id=%s agent=%s): %s",
+                "pipeline_checkpoint upsert exhausted retries (case_id=%s run_id=%s agent=%s): %s",
                 case_id,
                 run_id,
                 agent_name,
@@ -148,8 +147,7 @@ async def persist_case_state(
             return
         except Exception as exc:
             logger.error(
-                "pipeline_checkpoint upsert unknown failure "
-                "(case_id=%s run_id=%s agent=%s): %s",
+                "pipeline_checkpoint upsert unknown failure (case_id=%s run_id=%s agent=%s): %s",
                 case_id,
                 run_id,
                 agent_name,

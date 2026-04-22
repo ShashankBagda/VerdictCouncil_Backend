@@ -447,9 +447,7 @@ class TestRejectedCaseReview:
                 f"/api/v1/cases/{case.id}/rejection-review",
                 json={
                     "action": "override",
-                    "justification": (
-                        "Charge sheet confirms the offence was in 2026."
-                    ),
+                    "justification": ("Charge sheet confirms the offence was in 2026."),
                 },
             )
 
@@ -473,9 +471,7 @@ class TestRejectedCaseReview:
                 f"/api/v1/cases/{case.id}/rejection-review",
                 json={
                     "action": "close",
-                    "justification": (
-                        "No lawful basis to override the jurisdiction rejection."
-                    ),
+                    "justification": ("No lawful basis to override the jurisdiction rejection."),
                 },
             )
 

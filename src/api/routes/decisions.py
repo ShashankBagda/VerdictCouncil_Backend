@@ -178,8 +178,7 @@ async def submit_decision_amendment(
     base_verdict = _latest_verdict(case)
 
     can_apply_directly = (
-        current_user.role == UserRole.senior_judge
-        or recording_judge_id == current_user_id
+        current_user.role == UserRole.senior_judge or recording_judge_id == current_user_id
     )
 
     audit_payload = {

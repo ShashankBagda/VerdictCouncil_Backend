@@ -80,9 +80,7 @@ class InputGuardrailHook:
         )
         return HookResult(state=state)
 
-    async def after_agent(
-        self, agent_name: str, state: CaseState, ctx: HookContext
-    ) -> HookResult:
+    async def after_agent(self, agent_name: str, state: CaseState, ctx: HookContext) -> HookResult:
         return HookResult(state=state)
 
     async def after_run(self, state: CaseState, ctx: HookContext) -> HookResult:
@@ -95,9 +93,7 @@ class ComplexityEscalationHook:
     async def before_run(self, state: CaseState, ctx: HookContext) -> HookResult:
         return HookResult(state=state)
 
-    async def after_agent(
-        self, agent_name: str, state: CaseState, ctx: HookContext
-    ) -> HookResult:
+    async def after_agent(self, agent_name: str, state: CaseState, ctx: HookContext) -> HookResult:
         if agent_name != "complexity-routing":
             return HookResult(state=state)
         if state.status == CaseStatusEnum.escalated:
@@ -123,9 +119,7 @@ class GovernanceHaltHook:
     async def before_run(self, state: CaseState, ctx: HookContext) -> HookResult:
         return HookResult(state=state)
 
-    async def after_agent(
-        self, agent_name: str, state: CaseState, ctx: HookContext
-    ) -> HookResult:
+    async def after_agent(self, agent_name: str, state: CaseState, ctx: HookContext) -> HookResult:
         if agent_name != "governance-verdict":
             return HookResult(state=state)
         integrity = validate_output_integrity(state.model_dump())

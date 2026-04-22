@@ -78,9 +78,7 @@ class TestOutboxHelpers:
                 assert refreshed.dispatched_at is None
             finally:
                 await session.delete(refreshed)
-                await session.execute(
-                    text("DELETE FROM cases WHERE id = :id"), {"id": case.id}
-                )
+                await session.execute(text("DELETE FROM cases WHERE id = :id"), {"id": case.id})
                 await session.execute(
                     text("DELETE FROM users WHERE id = :id"), {"id": case.created_by}
                 )
@@ -112,9 +110,7 @@ class TestOutboxHelpers:
                 await session.execute(
                     text("DELETE FROM pipeline_jobs WHERE id = :id"), {"id": job.id}
                 )
-                await session.execute(
-                    text("DELETE FROM cases WHERE id = :id"), {"id": case.id}
-                )
+                await session.execute(text("DELETE FROM cases WHERE id = :id"), {"id": case.id})
                 await session.execute(
                     text("DELETE FROM users WHERE id = :id"), {"id": case.created_by}
                 )
@@ -149,9 +145,7 @@ class TestOutboxHelpers:
                     await session.execute(
                         text("DELETE FROM pipeline_jobs WHERE id = :id"), {"id": jid}
                     )
-                await session.execute(
-                    text("DELETE FROM cases WHERE id = :id"), {"id": case.id}
-                )
+                await session.execute(text("DELETE FROM cases WHERE id = :id"), {"id": case.id})
                 await session.execute(
                     text("DELETE FROM users WHERE id = :id"), {"id": case.created_by}
                 )
@@ -190,9 +184,7 @@ class TestOutboxHelpers:
                 await session.execute(
                     text("DELETE FROM pipeline_jobs WHERE id = :id"), {"id": job.id}
                 )
-                await session.execute(
-                    text("DELETE FROM cases WHERE id = :id"), {"id": case.id}
-                )
+                await session.execute(text("DELETE FROM cases WHERE id = :id"), {"id": case.id})
                 await session.execute(
                     text("DELETE FROM users WHERE id = :id"), {"id": case.created_by}
                 )
@@ -223,9 +215,7 @@ class TestOutboxHelpers:
                     await cleanup.execute(
                         text("DELETE FROM pipeline_jobs WHERE id = :id"), {"id": job.id}
                     )
-                    await cleanup.execute(
-                        text("DELETE FROM cases WHERE id = :id"), {"id": case.id}
-                    )
+                    await cleanup.execute(text("DELETE FROM cases WHERE id = :id"), {"id": case.id})
                     await cleanup.execute(
                         text("DELETE FROM users WHERE id = :id"), {"id": case.created_by}
                     )

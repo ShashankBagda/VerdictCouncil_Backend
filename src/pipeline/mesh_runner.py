@@ -165,9 +165,7 @@ class MeshPipelineRunner:
                 current_agent = agent_name
                 state = await self._invoke_agent_sequential(agent_name, state, run_id)
                 await self._checkpoint(state, run_id, agent_name)
-                state, halted = await self._run_after_agent_hooks(
-                    agent_name, state, ctx, run_id
-                )
+                state, halted = await self._run_after_agent_hooks(agent_name, state, ctx, run_id)
                 if halted:
                     return state
 
@@ -181,9 +179,7 @@ class MeshPipelineRunner:
                 current_agent = agent_name
                 state = await self._invoke_agent_sequential(agent_name, state, run_id)
                 await self._checkpoint(state, run_id, agent_name)
-                state, halted = await self._run_after_agent_hooks(
-                    agent_name, state, ctx, run_id
-                )
+                state, halted = await self._run_after_agent_hooks(agent_name, state, ctx, run_id)
                 if halted:
                     return state
         except TimeoutError as exc:

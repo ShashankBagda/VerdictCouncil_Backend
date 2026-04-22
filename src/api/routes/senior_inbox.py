@@ -200,8 +200,7 @@ def _serialize_reopen_item(
         "status": request_item.status.value,
         "preview": _optional_text(request_item.justification),
         "case_title": (
-            (_optional_text(case.title) if case else None)
-            or f"Case {request_item.case_id}"
+            (_optional_text(case.title) if case else None) or f"Case {request_item.case_id}"
         ),
         "domain": case.domain.value if case and case.domain else None,
         "history": history,
@@ -385,10 +384,10 @@ async def take_senior_inbox_action(
     item_type, raw_id = _parse_item_id(item_id)
     reviewed_at = datetime.now(UTC)
 
-    if (
-        body.action in {SeniorInboxAction.reject, SeniorInboxAction.request_more_info}
-        and not _optional_text(body.reason)
-    ):
+    if body.action in {
+        SeniorInboxAction.reject,
+        SeniorInboxAction.request_more_info,
+    } and not _optional_text(body.reason):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="A written reason is required for this action",
@@ -432,9 +431,7 @@ async def take_senior_inbox_action(
                 },
                 output_payload={
                     "status": (
-                        "approved"
-                        if body.action == SeniorInboxAction.approve
-                        else "pending"
+                        "approved" if body.action == SeniorInboxAction.approve else "pending"
                     )
                 },
             )
