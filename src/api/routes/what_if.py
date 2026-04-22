@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import UTC, datetime
 
@@ -30,6 +31,8 @@ from src.models.what_if import (
     WhatIfVerdict,
 )
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
 
@@ -44,11 +47,15 @@ async def _run_whatif_scenario(scenario_id: uuid.UUID) -> None:
     Imports are deferred to avoid circular dependencies and to create
     a fresh database session for the background task.
     """
-    from src.pipeline.runner import PipelineRunner
+    from src.db.pipeline_state import (
+        CheckpointCorruptError,
+        CheckpointSchemaMismatchError,
+        load_case_state,
+    )
+    from src.pipeline.mesh_runner_factory import get_mesh_runner
     from src.services.database import async_session
     from src.services.whatif_controller.controller import WhatIfController
     from src.services.whatif_controller.diff_engine import generate_diff
-    from src.shared.case_state import CaseState
 
     async with async_session() as db:
         try:
@@ -69,12 +76,46 @@ async def _run_whatif_scenario(scenario_id: uuid.UUID) -> None:
                 await db.commit()
                 return
 
-            case_state = CaseState(
-                case_id=str(case.id),
-                run_id=scenario.original_run_id,
-            )
+            # Hydrate the real terminal CaseState from the checkpoint. The
+            # legacy path constructed an empty CaseState(case_id, run_id),
+            # which is why every what-if used to diff garbage against garbage.
+            if not case.latest_run_id:
+                logger.error(
+                    "what-if scenario %s aborted: case %s has no latest_run_id "
+                    "(completed before backfill, or pipeline never finished)",
+                    scenario.id,
+                    case.id,
+                )
+                scenario.status = ScenarioStatus.failed
+                await db.commit()
+                return
 
-            controller = WhatIfController(PipelineRunner())
+            try:
+                case_state = await load_case_state(db, case_id=case.id, run_id=case.latest_run_id)
+            except (CheckpointSchemaMismatchError, CheckpointCorruptError) as exc:
+                logger.error(
+                    "what-if scenario %s aborted: checkpoint unreadable for case=%s run=%s: %s",
+                    scenario.id,
+                    case.id,
+                    case.latest_run_id,
+                    exc,
+                )
+                scenario.status = ScenarioStatus.failed
+                await db.commit()
+                return
+
+            if case_state is None:
+                logger.error(
+                    "what-if scenario %s aborted: no checkpoint row for case=%s run=%s",
+                    scenario.id,
+                    case.id,
+                    case.latest_run_id,
+                )
+                scenario.status = ScenarioStatus.failed
+                await db.commit()
+                return
+
+            controller = WhatIfController(await get_mesh_runner())
             modified_state = await controller.create_scenario(
                 case_state,
                 scenario.modification_type.value,
@@ -105,10 +146,14 @@ async def _run_whatif_scenario(scenario_id: uuid.UUID) -> None:
 
 async def _run_stability_computation(stability_id: uuid.UUID) -> None:
     """Background task that computes the stability score."""
-    from src.pipeline.runner import PipelineRunner
+    from src.db.pipeline_state import (
+        CheckpointCorruptError,
+        CheckpointSchemaMismatchError,
+        load_case_state,
+    )
+    from src.pipeline.mesh_runner_factory import get_mesh_runner
     from src.services.database import async_session
     from src.services.whatif_controller.controller import WhatIfController
-    from src.shared.case_state import CaseState
 
     async with async_session() as db:
         try:
@@ -122,12 +167,47 @@ async def _run_stability_computation(stability_id: uuid.UUID) -> None:
             stability.status = StabilityStatus.computing
             await db.commit()
 
-            case_state = CaseState(
-                case_id=str(stability.case_id),
-                run_id=stability.run_id,
-            )
+            case_result = await db.execute(select(Case).where(Case.id == stability.case_id))
+            case = case_result.scalar_one_or_none()
+            if not case or not case.latest_run_id:
+                logger.error(
+                    "stability %s aborted: case %s missing or has no latest_run_id",
+                    stability.id,
+                    stability.case_id,
+                )
+                stability.status = StabilityStatus.failed
+                await db.commit()
+                return
 
-            controller = WhatIfController(PipelineRunner())
+            try:
+                case_state = await load_case_state(db, case_id=case.id, run_id=case.latest_run_id)
+            except (CheckpointSchemaMismatchError, CheckpointCorruptError) as exc:
+                logger.error(
+                    "stability %s aborted: checkpoint unreadable for case=%s run=%s: %s",
+                    stability.id,
+                    case.id,
+                    case.latest_run_id,
+                    exc,
+                )
+                stability.status = StabilityStatus.failed
+                await db.commit()
+                return
+
+            if case_state is None:
+                logger.error(
+                    "stability %s aborted: no checkpoint for case=%s run=%s",
+                    stability.id,
+                    case.id,
+                    case.latest_run_id,
+                )
+                stability.status = StabilityStatus.failed
+                await db.commit()
+                return
+
+            # Anchor the stability row at the real terminal run_id.
+            stability.run_id = case.latest_run_id
+
+            controller = WhatIfController(await get_mesh_runner())
             score_result = await controller.compute_stability_score(
                 case_state, n=stability.perturbation_count
             )
@@ -191,9 +271,18 @@ async def submit_whatif_scenario(
             ),
         )
 
+    if not case.latest_run_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Case has no terminal pipeline run on record. What-if requires "
+                "a completed run to contest; re-run the pipeline first."
+            ),
+        )
+
     scenario = WhatIfScenario(
         case_id=case_id,
-        original_run_id=str(uuid.uuid4()),
+        original_run_id=case.latest_run_id,
         scenario_run_id=str(uuid.uuid4()),
         modification_type=body.modification_type,
         modification_description=body.description,

@@ -32,6 +32,7 @@ from uuid import UUID
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.db.pipeline_state import persist_case_state
 from src.models.audit import AuditLog
 from src.models.case import (
     Argument,
@@ -84,6 +85,20 @@ async def persist_case_results(
         logger.error("persist_case_results failed for case_id=%s: %s", case_id, exc)
         await db.rollback()
         raise
+
+    # Write the terminal CaseState to pipeline_checkpoints so
+    # What-If / stability endpoints can rehydrate it via load_case_state.
+    # The mesh runner already checkpoints per-hop; the legacy in-process
+    # runner doesn't, so this terminal write decouples what-if hydration
+    # from which runner produced the state.
+    if state.run_id:
+        await persist_case_state(
+            db,
+            case_id=case_id,
+            run_id=state.run_id,
+            agent_name="terminal",
+            state=state,
+        )
 
 
 # ---------------------------------------------------------------------------
