@@ -59,6 +59,13 @@ class Deliberation(BaseModel):
     uncertainty_flags: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class ExtractedFacts(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    facts: list[Any] = Field(default_factory=list)
+    timeline: list[Any] = Field(default_factory=list)
+
+
 class Witnesses(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -105,7 +112,7 @@ class CaseState(BaseModel):
     evidence_analysis: dict[str, Any] | None = None
 
     # Facts (written by Fact Reconstruction)
-    extracted_facts: dict[str, Any] | None = None
+    extracted_facts: ExtractedFacts | None = None
 
     # Witnesses (written by Witness Analysis)
     witnesses: Witnesses | None = None

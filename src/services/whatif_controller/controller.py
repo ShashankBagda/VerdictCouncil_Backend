@@ -121,14 +121,11 @@ class WhatIfController:
         fact_id = payload.get("fact_id")
         new_status = payload.get("new_status", "disputed")
 
-        facts = state.extracted_facts
-        if isinstance(facts, dict) and "facts" in facts:
-            for fact in facts["facts"]:
-                if isinstance(fact, dict) and fact.get("id") == fact_id:
-                    fact["status"] = new_status
-                    break
+        for fact in state.extracted_facts.facts:
+            if isinstance(fact, dict) and fact.get("id") == fact_id:
+                fact["status"] = new_status
+                break
 
-        state.extracted_facts = facts
         return state
 
     def _apply_evidence_exclusion(self, state: CaseState, payload: dict[str, Any]) -> CaseState:
@@ -292,8 +289,8 @@ class WhatIfController:
         perturbations: list[dict[str, Any]] = []
 
         # Fact toggles
-        if case_state.extracted_facts and isinstance(case_state.extracted_facts, dict):
-            facts = case_state.extracted_facts.get("facts", [])
+        if case_state.extracted_facts:
+            facts = case_state.extracted_facts.facts
             for fact in facts:
                 if isinstance(fact, dict) and fact.get("status") in ("agreed", "disputed"):
                     new_status = "disputed" if fact["status"] == "agreed" else "agreed"
