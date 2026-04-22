@@ -38,8 +38,8 @@ def _score_output(state: CaseState) -> dict:
 
     # Verdict quality
     verdict = state.verdict_recommendation
-    if isinstance(verdict, dict):
-        confidence = verdict.get("confidence_score")
+    if verdict is not None:
+        confidence = verdict.confidence_score
         scores["has_verdict"] = True
         scores["confidence_score"] = confidence
         scores["confidence_valid"] = isinstance(confidence, (int, float)) and 0 <= confidence <= 100
@@ -49,9 +49,9 @@ def _score_output(state: CaseState) -> dict:
 
     # Fairness check
     fairness = state.fairness_check
-    if isinstance(fairness, dict):
+    if fairness is not None:
         scores["has_fairness"] = True
-        scores["audit_passed_present"] = "audit_passed" in fairness
+        scores["audit_passed_present"] = True
     else:
         scores["has_fairness"] = False
         scores["audit_passed_present"] = False

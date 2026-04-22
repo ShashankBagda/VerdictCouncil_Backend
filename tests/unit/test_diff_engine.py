@@ -58,11 +58,18 @@ def _base_case_state() -> CaseState:
             "preliminary_conclusion": "Balance of evidence favours claimant.",
             "confidence_score": 80,
         },
-        fairness_check={"critical_issues_found": False, "issues": []},
+        fairness_check={
+            "critical_issues_found": False,
+            "audit_passed": True,
+            "issues": [],
+            "recommendations": [],
+        },
         verdict_recommendation={
             "recommendation_type": "guilty",
             "recommended_outcome": "Respondent is liable.",
             "confidence_score": 80,
+            "reasoning": "Balance of evidence favours claimant.",
+            "alternative_outcomes": [],
         },
     )
 
@@ -79,7 +86,9 @@ class TestVerdictChange:
 
         original = _base_case_state()
         modified = copy.deepcopy(original)
-        modified.verdict_recommendation["recommendation_type"] = "not_guilty"
+        modified.verdict_recommendation = modified.verdict_recommendation.model_copy(
+            update={"recommendation_type": "not_guilty"}
+        )
 
         diff = generate_diff(original, modified)
 
@@ -110,7 +119,9 @@ class TestConfidenceDelta:
 
         original = _base_case_state()
         modified = copy.deepcopy(original)
-        modified.verdict_recommendation["confidence_score"] = 65
+        modified.verdict_recommendation = modified.verdict_recommendation.model_copy(
+            update={"confidence_score": 65}
+        )
 
         diff = generate_diff(original, modified)
 

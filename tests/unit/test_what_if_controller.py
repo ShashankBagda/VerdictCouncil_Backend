@@ -71,11 +71,18 @@ def _populated_case_state() -> CaseState:
             "preliminary_conclusion": "Balance of evidence favours claimant.",
             "confidence_score": 80,
         },
-        fairness_check={"critical_issues_found": False, "issues": []},
+        fairness_check={
+            "critical_issues_found": False,
+            "audit_passed": True,
+            "issues": [],
+            "recommendations": [],
+        },
         verdict_recommendation={
             "recommendation_type": "liable",
             "recommended_outcome": "Respondent is liable for property damage.",
             "confidence_score": 80,
+            "reasoning": "Balance of evidence favours claimant.",
+            "alternative_outcomes": [],
         },
     )
 

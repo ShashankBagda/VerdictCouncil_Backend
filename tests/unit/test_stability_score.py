@@ -62,11 +62,18 @@ def _decided_case_state(verdict: str = "liable", confidence: int = 80) -> CaseSt
             "preliminary_conclusion": "Balance of evidence favours claimant.",
             "confidence_score": confidence,
         },
-        fairness_check={"critical_issues_found": False, "issues": []},
+        fairness_check={
+            "critical_issues_found": False,
+            "audit_passed": True,
+            "issues": [],
+            "recommendations": [],
+        },
         verdict_recommendation={
             "recommendation_type": verdict,
             "recommended_outcome": f"Verdict: {verdict}",
             "confidence_score": confidence,
+            "reasoning": "test",
+            "alternative_outcomes": [],
         },
     )
 
@@ -92,6 +99,8 @@ def _mock_runner_with_verdicts(verdicts: list[str]):
             "recommendation_type": v,
             "recommended_outcome": f"Verdict: {v}",
             "confidence_score": 75,
+            "reasoning": "test",
+            "alternative_outcomes": [],
         }
         return state
 

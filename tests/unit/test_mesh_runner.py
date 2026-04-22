@@ -644,7 +644,12 @@ async def test_terminal_event_emitted_on_governance_escalation(monkeypatch):
             return None
         dumped = state.model_dump(mode="json")
         if agent == "governance-verdict":
-            dumped["fairness_check"] = {"critical_issues_found": True, "issues": ["x"]}
+            dumped["fairness_check"] = {
+                "critical_issues_found": True,
+                "audit_passed": False,
+                "issues": ["x"],
+                "recommendations": [],
+            }
         return _send_task_response(envelope["id"], dumped)
 
     a2a.auto_resolver = resolver
