@@ -59,6 +59,15 @@ class Deliberation(BaseModel):
     uncertainty_flags: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class Witnesses(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    # Pipeline agent uses "witnesses" key; SAM layer2 uses "statements"
+    witnesses: list[Any] = Field(default_factory=list)
+    statements: list[Any] = Field(default_factory=list)
+    credibility: dict[str, Any] = Field(default_factory=dict)
+
+
 class AuditEntry(BaseModel):
     agent: str
     timestamp: datetime = Field(default_factory=datetime.utcnow)
@@ -99,7 +108,7 @@ class CaseState(BaseModel):
     extracted_facts: dict[str, Any] | None = None
 
     # Witnesses (written by Witness Analysis)
-    witnesses: dict[str, Any] | None = None
+    witnesses: Witnesses | None = None
 
     # Law (written by Legal Knowledge)
     legal_rules: list[dict[str, Any]] = Field(default_factory=list)

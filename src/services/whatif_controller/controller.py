@@ -167,14 +167,11 @@ class WhatIfController:
         witness_id = payload.get("witness_id")
         new_score = payload.get("new_credibility_score")
 
-        witnesses = state.witnesses
-        if isinstance(witnesses, dict) and "witnesses" in witnesses:
-            for witness in witnesses["witnesses"]:
-                if isinstance(witness, dict) and witness.get("id") == witness_id:
-                    witness["credibility_score"] = new_score
-                    break
+        for witness in state.witnesses.witnesses:
+            if isinstance(witness, dict) and witness.get("id") == witness_id:
+                witness["credibility_score"] = new_score
+                break
 
-        state.witnesses = witnesses
         return state
 
     def _apply_legal_interpretation(self, state: CaseState, payload: dict[str, Any]) -> CaseState:

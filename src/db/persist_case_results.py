@@ -195,8 +195,13 @@ def _insert_facts(db: AsyncSession, case_id: UUID, state: CaseState) -> None:
 
 
 def _insert_witnesses(db: AsyncSession, case_id: UUID, state: CaseState) -> None:
-    items = _items_from(state.witnesses, ("witnesses", "statements", "items"))
+    data = state.witnesses
+    if not data:
+        return
+    items = data.witnesses or data.statements
     for item in items:
+        if not isinstance(item, dict):
+            continue
         name = (item.get("name") or "").strip()
         if not name:
             continue

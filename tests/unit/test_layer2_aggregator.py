@@ -184,14 +184,13 @@ async def receive_agent_output(
 
     # All agents reported — merge
     raw = await redis.hgetall(key)
-    merged = base_state.model_copy(
-        update={
-            "evidence_analysis": json.loads(raw["evidence_analysis"]),
-            "extracted_facts": json.loads(raw["extracted_facts"]),
-            "witnesses": json.loads(raw["witnesses"]),
-            "status": CaseStatusEnum.processing,
-        }
-    )
+    # Use attribute assignment (not model_copy update) so validate_assignment
+    # coerces dicts to typed models (e.g. Witnesses).
+    merged = base_state.model_copy(deep=True)
+    merged.evidence_analysis = json.loads(raw["evidence_analysis"])
+    merged.extracted_facts = json.loads(raw["extracted_facts"])
+    merged.witnesses = json.loads(raw["witnesses"])
+    merged.status = CaseStatusEnum.processing
 
     await publisher.publish(downstream_topic, merged)
     await redis.delete(key)
@@ -246,7 +245,10 @@ class TestLayer2Aggregator:
         assert result is not None
         assert result.evidence_analysis == _evidence_output()
         assert result.extracted_facts == _facts_output()
-        assert result.witnesses == _witnesses_output()
+        _expected_w = _witnesses_output()
+        assert result.witnesses is not None
+        assert result.witnesses.statements == _expected_w["statements"]
+        assert result.witnesses.credibility == _expected_w["credibility"]
 
         # Publisher received exactly one message
         assert len(publisher.messages) == 1
@@ -272,7 +274,10 @@ class TestLayer2Aggregator:
         assert result is not None
         assert result.evidence_analysis == _evidence_output()
         assert result.extracted_facts == _facts_output()
-        assert result.witnesses == _witnesses_output()
+        _expected_w2 = _witnesses_output()
+        assert result.witnesses is not None
+        assert result.witnesses.statements == _expected_w2["statements"]
+        assert result.witnesses.credibility == _expected_w2["credibility"]
         assert len(publisher.messages) == 1
 
     # 3. Duplicate handling — overwrites, no double publish ----------------
