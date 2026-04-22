@@ -55,6 +55,11 @@ class Settings(BaseSettings):
     fastapi_host: str = "0.0.0.0"
     fastapi_port: int = 8000
     log_level: str = "INFO"
+    # Feature flag — when True, the live POST /process route runs the case
+    # via MeshPipelineRunner instead of the in-process PipelineRunner.
+    # Defaults False so the mesh path lands dark; flip on once the
+    # integration suite is green.
+    use_mesh_runner: bool = False
     precedent_cache_ttl_seconds: int = 86400
     pair_api_url: str = "https://search.pair.gov.sg/api/v1/search"
     pair_circuit_breaker_threshold: int = 3

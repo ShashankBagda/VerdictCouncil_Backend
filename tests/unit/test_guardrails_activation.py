@@ -7,7 +7,8 @@ These tests intentionally bypass the autouse `_skip_guardrail` fixture from
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
+from contextlib import asynccontextmanager
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -29,9 +30,21 @@ class _FakeRedis:
         return self.store.get(key)
 
 
+def _fake_session_factory():
+    factory = MagicMock(name="session_factory")
+
+    @asynccontextmanager
+    async def _cm():
+        yield AsyncMock(name="AsyncSession")
+
+    factory.side_effect = lambda: _cm()
+    return factory
+
+
 def _runner() -> MeshPipelineRunner:
     return MeshPipelineRunner(
         a2a_client=FakeA2AClient(),
+        session_factory=_fake_session_factory(),
         client=AsyncMock(),
         redis_client=_FakeRedis(),
         namespace="verdictcouncil",

@@ -17,6 +17,7 @@ import logging
 
 from src.pipeline._solace_a2a_client import SolaceA2AClient
 from src.pipeline.mesh_runner import MeshPipelineRunner
+from src.services.database import async_session
 from src.shared.config import settings
 
 logger = logging.getLogger(__name__)
@@ -51,9 +52,18 @@ async def get_a2a_client() -> SolaceA2AClient:
 
 
 async def get_mesh_runner() -> MeshPipelineRunner:
-    """Return a MeshPipelineRunner bound to the shared Solace client."""
+    """Return a MeshPipelineRunner bound to the shared Solace client.
+
+    Passes the process-wide `async_session` sessionmaker so each
+    checkpoint opens its own short-lived transaction — an AsyncSession
+    cannot span the 9 A2A hops of a full mesh run.
+    """
     client = await get_a2a_client()
-    return MeshPipelineRunner(a2a_client=client, namespace=settings.namespace)
+    return MeshPipelineRunner(
+        a2a_client=client,
+        session_factory=async_session,
+        namespace=settings.namespace,
+    )
 
 
 async def close_mesh_a2a_client() -> None:
