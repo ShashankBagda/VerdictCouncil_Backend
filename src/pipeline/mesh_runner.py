@@ -193,9 +193,7 @@ class MeshPipelineRunner:
             # own terminal; we preserve the specific halt reason here
             # instead of falling into the generic exception branch.
             reason = (
-                "l2_barrier_timeout"
-                if current_agent == "layer2-aggregator"
-                else "agent_timeout"
+                "l2_barrier_timeout" if current_agent == "layer2-aggregator" else "agent_timeout"
             )
             await self._emit_terminal(
                 state,
@@ -299,9 +297,7 @@ class MeshPipelineRunner:
                         return maybe_halted
         except TimeoutError as exc:
             reason = (
-                "l2_barrier_timeout"
-                if current_agent == "layer2-aggregator"
-                else "agent_timeout"
+                "l2_barrier_timeout" if current_agent == "layer2-aggregator" else "agent_timeout"
             )
             await self._emit_terminal(
                 state,

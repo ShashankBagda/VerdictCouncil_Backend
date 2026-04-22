@@ -356,9 +356,7 @@ class TestSSEStreamHeartbeatAndDisconnect:
 
         assert resp.status_code == 200
         body = resp.text
-        assert ": keepalive" in body, (
-            f"expected heartbeat comment in SSE body, got: {body!r}"
-        )
+        assert ": keepalive" in body, f"expected heartbeat comment in SSE body, got: {body!r}"
         assert "data: " in body
 
     async def test_watchdog_emits_synthetic_terminal_event(self, monkeypatch):
