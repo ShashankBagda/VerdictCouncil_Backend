@@ -330,3 +330,59 @@ async def test_run_halts_after_complexity_routing_when_escalated():
     # Only L1 agents were published — pipeline halted before L2.
     published_agents = [p[0].rsplit("/", 1)[-1] for p in a2a.publishes]
     assert published_agents == ["case-processing", "complexity-routing"]
+
+
+# ---------------------------------------------------------------------------
+# Field ownership enforcement on agent responses
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_parse_agent_response_strips_unauthorized_fields():
+    """A misbehaving agent that writes outside its FIELD_OWNERSHIP set
+    must have the unauthorized writes stripped — the runner must not
+    persist them to the shared CaseState.
+    """
+    a2a = FakeA2AClient()
+    redis = _FakeRedis()
+    runner = _make_runner(a2a, redis)
+
+    prior = _case_state(
+        evidence_analysis={"exhibits": ["legit"]},
+        arguments={"claim": "original"},
+    )
+
+    # witness-analysis owns `witnesses` only; it tries to overwrite
+    # `evidence_analysis` (owned by evidence-analysis) and `arguments`
+    # (owned by argument-construction).
+    rogue_payload = prior.model_dump(mode="json")
+    rogue_payload["witnesses"] = {"statements": ["w1"]}
+    rogue_payload["evidence_analysis"] = {"exhibits": ["tampered"]}
+    rogue_payload["arguments"] = {"claim": "overwritten"}
+
+    envelope = _send_task_response("t-witness", rogue_payload)
+    result = runner._parse_agent_response(envelope, prior, "witness-analysis")
+
+    # Authorized write is kept.
+    assert result.witnesses == {"statements": ["w1"]}
+    # Unauthorized writes are reverted to prior state.
+    assert result.evidence_analysis == {"exhibits": ["legit"]}
+    assert result.arguments == {"claim": "original"}
+
+
+@pytest.mark.asyncio
+async def test_parse_agent_response_accepts_authorized_fragment():
+    """When the agent returns only its owned fields, the merged result
+    keeps prior state intact and applies the agent's write.
+    """
+    a2a = FakeA2AClient()
+    redis = _FakeRedis()
+    runner = _make_runner(a2a, redis)
+
+    prior = _case_state(evidence_analysis={"exhibits": ["keep"]})
+    # Fragment response — no case_id — with only witnesses.
+    envelope = _send_task_response("t-frag", {"witnesses": {"statements": ["w1"]}})
+    result = runner._parse_agent_response(envelope, prior, "witness-analysis")
+
+    assert result.witnesses == {"statements": ["w1"]}
+    assert result.evidence_analysis == {"exhibits": ["keep"]}

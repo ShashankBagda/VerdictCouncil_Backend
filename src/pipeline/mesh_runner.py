@@ -4,7 +4,7 @@ Public surface mirrors `src/pipeline/runner.py::PipelineRunner` so the FastAPI
 routes, WhatIfController, and eval scripts can swap one for the other:
 
     runner = MeshPipelineRunner(a2a_client=...)
-    result = await runner.run(case_state, judge_vector_store_id=...)
+    result = await runner.run(case_state)
 
 Delegation model:
 
@@ -51,6 +51,11 @@ from src.services.pipeline_events import publish_progress
 from src.shared.audit import append_audit_entry
 from src.shared.case_state import CaseState, CaseStatusEnum
 from src.shared.config import settings
+from src.shared.validation import (
+    FIELD_OWNERSHIP,
+    FieldOwnershipError,
+    validate_field_ownership,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +130,6 @@ class MeshPipelineRunner:
     async def run(
         self,
         case_state: CaseState,
-        judge_vector_store_id: str | None = None,
         *,
         db: Any = None,
         run_id: str | None = None,
@@ -151,14 +155,11 @@ class MeshPipelineRunner:
         state = await self._invoke_l2_fanout(state, run_id)
         await self._checkpoint(db, state, run_id, "layer2-aggregator")
 
-        # L3 — sequential agents 6–9 with the post-L6 KB hook and the
-        # post-L9 output-integrity + fairness halts.
+        # L3 — sequential agents 6–9 with the post-L9 output-integrity +
+        # fairness halts.
         for agent_name in L3_AGENTS:
             state = await self._invoke_agent_sequential(agent_name, state, run_id)
             await self._checkpoint(db, state, run_id, agent_name)
-
-            if agent_name == "legal-knowledge" and judge_vector_store_id:
-                state = await self._apply_judge_kb_hook(state, judge_vector_store_id)
 
             if agent_name == "governance-verdict":
                 maybe_halted = self._apply_governance_halts(state)
@@ -177,7 +178,6 @@ class MeshPipelineRunner:
         self,
         case_state: CaseState,
         start_agent: str,
-        judge_vector_store_id: str | None = None,
         *,
         db: Any = None,
         run_id: str | None = None,
@@ -191,8 +191,8 @@ class MeshPipelineRunner:
             L3 agent      → L3[idx:] sequential
 
         Skips the input guardrail — the caller is re-running from a
-        mid-pipeline state, not raw input. All downstream hooks
-        (judge KB, escalation halt, governance halts) still fire.
+        mid-pipeline state, not raw input. Downstream hooks (escalation
+        halt, governance halts) still fire.
         """
         state = case_state
         run_id = run_id or uuid.uuid4().hex
@@ -222,9 +222,6 @@ class MeshPipelineRunner:
         for agent_name in L3_AGENTS[l3_start:]:
             state = await self._invoke_agent_sequential(agent_name, state, run_id)
             await self._checkpoint(db, state, run_id, agent_name)
-
-            if agent_name == "legal-knowledge" and judge_vector_store_id:
-                state = await self._apply_judge_kb_hook(state, judge_vector_store_id)
 
             if agent_name == "governance-verdict":
                 maybe_halted = self._apply_governance_halts(state)
@@ -258,23 +255,6 @@ class MeshPipelineRunner:
             input_payload={"method": result["method"]},
             output_payload={"reason": result["reason"]},
         )
-
-    async def _apply_judge_kb_hook(
-        self,
-        state: CaseState,
-        judge_vector_store_id: str,
-    ) -> CaseState:
-        try:
-            from src.services.knowledge_base import search_kb
-
-            query = state.case_metadata.get("description", "") if state.case_metadata else ""
-            if not query and state.extracted_facts:
-                query = str(state.extracted_facts)[:500]
-            kb_results = await search_kb(judge_vector_store_id, query, max_results=5)
-            return state.model_copy(update={"judge_kb_results": kb_results})
-        except Exception as exc:
-            logger.warning("Judge KB search failed: %s", exc)
-            return state
 
     def _apply_governance_halts(self, state: CaseState) -> CaseState | None:
         integrity = validate_output_integrity(state.model_dump())
@@ -467,17 +447,33 @@ class MeshPipelineRunner:
 
         Assumes agents return the full updated CaseState (dict) as a
         DataPart. If an agent returns a fragment instead, we fall back
-        to merging the fragment onto `prior_state`.
+        to merging the fragment onto `prior_state`. In both cases the
+        result is checked against `FIELD_OWNERSHIP`; unauthorized writes
+        are stripped rather than honored.
         """
         payload = parse_send_task_response(envelope)
         if not payload:
             raise RuntimeError(f"Empty/unparseable response from agent {agent_name!r}")
-        # If payload looks like a full CaseState (has case_id), validate directly.
-        if "case_id" in payload:
-            return CaseState.model_validate(payload)
-        # Otherwise treat as a fragment and merge.
-        merged = {**prior_state.model_dump(mode="json"), **payload}
-        return CaseState.model_validate(merged)
+
+        original_dict = prior_state.model_dump(mode="json")
+        merged_dict = payload if "case_id" in payload else {**original_dict, **payload}
+
+        try:
+            validate_field_ownership(agent_name, original_dict, merged_dict)
+        except FieldOwnershipError as exc:
+            logger.warning(
+                "Field ownership violation by '%s': %s. Stripping unauthorized fields.",
+                agent_name,
+                exc,
+            )
+            allowed = FIELD_OWNERSHIP.get(agent_name, set())
+            stripped = {**original_dict}
+            for key in allowed:
+                if key in payload:
+                    stripped[key] = payload[key]
+            merged_dict = stripped
+
+        return CaseState.model_validate(merged_dict)
 
     async def _emit_progress(
         self,
