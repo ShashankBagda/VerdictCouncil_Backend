@@ -1,7 +1,7 @@
 """Structured output schemas for each pipeline agent.
 
 Each agent has a Pydantic model defining the fields it writes to CaseState.
-Governance-verdict uses OpenAI's strict JSON schema mode (fully specified).
+Hearing-governance uses OpenAI's strict JSON schema mode (fully specified).
 Other agents use json_object mode with post-parse Pydantic validation because
 their outputs contain variable-structure dicts that can't be fully specified
 for strict mode (which requires additionalProperties: false everywhere).
@@ -14,21 +14,20 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.shared.case_state import FairnessCheck, VerdictRecommendation
+from src.shared.case_state import FairnessCheck
 
 logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Agent 9: governance-verdict (strict mode — fully specified)
+# Agent 9: hearing-governance (strict mode — fully specified)
 # ---------------------------------------------------------------------------
 
 
-class GovernanceVerdictOutput(BaseModel):
+class HearingGovernanceOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     fairness_check: FairnessCheck
-    verdict_recommendation: VerdictRecommendation
     status: str
 
 
@@ -92,17 +91,17 @@ class ArgumentConstructionOutput(BaseModel):
     arguments: dict[str, Any]
 
 
-class DeliberationOutput(BaseModel):
-    deliberation: dict[str, Any]
+class HearingAnalysisOutput(BaseModel):
+    hearing_analysis: dict[str, Any]
 
 
 # ---------------------------------------------------------------------------
 # Agent → Schema mappings
 # ---------------------------------------------------------------------------
 
-# Strict mode: only governance-verdict (fully specified, no dict[str, Any])
+# Strict mode: only hearing-governance (fully specified, no dict[str, Any])
 _STRICT_MODE_SCHEMAS: dict[str, type[BaseModel]] = {
-    "governance-verdict": GovernanceVerdictOutput,
+    "hearing-governance": HearingGovernanceOutput,
 }
 
 # Post-parse validation: all agents (allows dict[str, Any] fields)
@@ -114,8 +113,8 @@ AGENT_VALIDATION_SCHEMAS: dict[str, type[BaseModel]] = {
     "witness-analysis": WitnessAnalysisOutput,
     "legal-knowledge": LegalKnowledgeOutput,
     "argument-construction": ArgumentConstructionOutput,
-    "deliberation": DeliberationOutput,
-    "governance-verdict": GovernanceVerdictOutput,
+    "hearing-analysis": HearingAnalysisOutput,
+    "hearing-governance": HearingGovernanceOutput,
 }
 
 

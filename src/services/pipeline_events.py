@@ -3,7 +3,7 @@
 Reuses the Redis singleton from ``src.tools.search_precedents`` to avoid
 opening a second connection pool. Subscribers get an async generator
 that yields events until the case reaches a terminal status (the
-``governance-verdict`` agent completing or failing closes the stream).
+``hearing-governance`` agent completing or failing closes the stream).
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ def _channel(case_id: str | object) -> str:
 def _is_terminal_event(parsed: dict) -> bool:
     """Close the stream on either the happy path or any halt path.
 
-    - ``governance-verdict`` + ``completed``/``failed`` is the happy-path
+    - ``hearing-governance`` + ``completed``/``failed`` is the happy-path
       close signal left over from US-002.
     - ``pipeline`` + ``terminal`` is the run-level halt signal the mesh
       runner emits on L1 escalation, L2 barrier timeout, governance halt,
@@ -36,7 +36,7 @@ def _is_terminal_event(parsed: dict) -> bool:
     """
     agent = parsed.get("agent")
     phase = parsed.get("phase")
-    if agent == "governance-verdict" and phase in _GOVERNANCE_TERMINAL_PHASES:
+    if agent == "hearing-governance" and phase in _GOVERNANCE_TERMINAL_PHASES:
         return True
     return agent == "pipeline" and phase == "terminal"
 
@@ -55,7 +55,7 @@ async def publish_progress(event: PipelineProgressEvent) -> None:
 
 
 async def subscribe(case_id: str | object) -> AsyncGenerator[str, None]:
-    """Yield JSON-serialized events for a case until governance-verdict closes."""
+    """Yield JSON-serialized events for a case until hearing-governance closes."""
     r = await _get_redis_client()
     pubsub = r.pubsub()
     try:

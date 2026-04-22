@@ -20,10 +20,8 @@ from src.models.audit import AuditLog
 from src.models.case import (
     Case,
     CaseStatus,
-    RecommendationType,
     ReopenRequest,
     ReopenRequestStatus,
-    Verdict,
 )
 from src.models.user import User, UserRole
 
@@ -208,83 +206,6 @@ def _serialize_reopen_item(
     }
 
 
-def _collect_pending_amendments(case: Case, current_user: User) -> list[dict[str, Any]]:
-    items: list[dict[str, Any]] = []
-    audit_logs = sorted(
-        case.audit_logs or [],
-        key=lambda item: item.created_at.timestamp() if item.created_at else 0.0,
-    )
-    for log in audit_logs:
-        if log.action != "decision_amendment_request":
-            continue
-        payload = log.input_payload or {}
-        request_id = _optional_text(payload.get("request_id"))
-        if not request_id:
-            continue
-        latest_action = _latest_matching_log(
-            audit_logs,
-            action_prefix="senior_inbox_amendment_",
-            request_id=request_id,
-        )
-        assignee = (
-            _optional_text((latest_action.input_payload or {}).get("assignee"))
-            if latest_action
-            else None
-        )
-        if latest_action is not None:
-            last_action = latest_action.action.removeprefix("senior_inbox_amendment_")
-            if last_action in {"approve", "reject", "request_more_info"}:
-                continue
-            if last_action == "reassign" and assignee and assignee != current_user.email:
-                continue
-
-        history = [
-            _history_entry(
-                "decision_amendment_request",
-                str(payload.get("requested_by") or "judge"),
-                log.created_at,
-                payload.get("reason"),
-            )
-        ]
-        for review_log in audit_logs:
-            if not review_log.action.startswith("senior_inbox_amendment_"):
-                continue
-            if (review_log.input_payload or {}).get("request_id") != request_id:
-                continue
-            history.append(
-                _history_entry(
-                    review_log.action,
-                    str(
-                        (review_log.input_payload or {}).get("senior_judge_id")
-                        or review_log.agent_name
-                    ),
-                    review_log.created_at,
-                    (review_log.input_payload or {}).get("reason"),
-                    assignee=(review_log.input_payload or {}).get("assignee"),
-                )
-            )
-
-        items.append(
-            {
-                "id": f"amendment:{request_id}",
-                "case_id": str(case.id),
-                "item_type": "amendment",
-                "originating_judge": str(payload.get("requested_by") or case.created_by),
-                "reason": payload.get("reason") or "Decision amendment awaiting senior review.",
-                "priority": "medium",
-                "submitted_at": log.created_at.isoformat() if log.created_at else None,
-                "status": "pending",
-                "preview": _optional_text(payload.get("final_order")),
-                "case_title": _optional_text(case.title) or f"Case {case.id}",
-                "domain": case.domain.value if case.domain else None,
-                "history": history,
-                "requested_change": payload.get("final_order"),
-                "assignee": assignee,
-            }
-        )
-    return items
-
-
 def _parse_item_id(item_id: str) -> tuple[str, str]:
     item_type, _, raw_id = str(item_id).partition(":")
     if not item_type or not raw_id:
@@ -312,7 +233,6 @@ async def list_senior_inbox(
             await db.execute(
                 select(Case).options(
                     selectinload(Case.audit_logs),
-                    selectinload(Case.verdicts),
                 )
             )
         )
@@ -346,7 +266,6 @@ async def list_senior_inbox(
             for item in [_serialize_reopen_item(request_item, current_user)]
             if item is not None
         ],
-        *[item for case in all_cases for item in _collect_pending_amendments(case, current_user)],
     ]
 
     items.sort(key=_sort_key)
@@ -357,7 +276,6 @@ async def list_senior_inbox(
     counts = {
         "escalation": len([item for item in items if item["item_type"] == "escalation"]),
         "reopen": len([item for item in items if item["item_type"] == "reopen"]),
-        "amendment": len([item for item in items if item["item_type"] == "amendment"]),
     }
 
     return {
@@ -508,106 +426,6 @@ async def take_senior_inbox_action(
                     "assignee": body.assignee,
                 },
                 output_payload={"status": status_value},
-            )
-        )
-        await db.commit()
-        return SeniorInboxActionResponse(
-            item_id=item_id,
-            action=body.action,
-            status=status_value,
-            message="Senior inbox action recorded.",
-            assignee=body.assignee,
-            reviewed_at=reviewed_at,
-        )
-
-    if item_type == "amendment":
-        all_cases = (
-            (
-                await db.execute(
-                    select(Case).options(
-                        selectinload(Case.audit_logs),
-                        selectinload(Case.verdicts),
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
-        matched_case: Case | None = None
-        request_log: AuditLog | None = None
-        for case in all_cases:
-            for log in case.audit_logs or []:
-                if log.action != "decision_amendment_request":
-                    continue
-                if (log.input_payload or {}).get("request_id") == raw_id:
-                    matched_case = case
-                    request_log = log
-                    break
-            if matched_case is not None:
-                break
-        if matched_case is None or request_log is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Amendment request not found",
-            )
-
-        payload = request_log.input_payload or {}
-        if (
-            str(payload.get("requested_by")) == str(current_user.id)
-            and body.action == SeniorInboxAction.approve
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Two-person rule: cannot approve your own amendment request",
-            )
-
-        status_value = "pending"
-        verdict_id: str | None = None
-        if body.action == SeniorInboxAction.approve:
-            base_verdict = None
-            base_verdict_id = payload.get("base_verdict_id")
-            if base_verdict_id:
-                for verdict in matched_case.verdicts or []:
-                    if str(verdict.id) == str(base_verdict_id):
-                        base_verdict = verdict
-                        break
-            amended_verdict = Verdict(
-                case_id=matched_case.id,
-                recommendation_type=(
-                    base_verdict.recommendation_type
-                    if base_verdict
-                    else matched_case.verdicts[-1].recommendation_type
-                    if matched_case.verdicts
-                    else RecommendationType.manual_decision
-                ),
-                recommended_outcome=payload.get("final_order") or "",
-                sentence=base_verdict.sentence if base_verdict else None,
-                confidence_score=base_verdict.confidence_score if base_verdict else None,
-                alternative_outcomes=base_verdict.alternative_outcomes if base_verdict else None,
-                fairness_report=base_verdict.fairness_report if base_verdict else None,
-                amendment_of=base_verdict.id if base_verdict else None,
-                amendment_reason=f"{payload.get('amendment_type')}: {payload.get('reason')}",
-                amended_by=UUID(str(payload.get("requested_by"))),
-            )
-            db.add(amended_verdict)
-            await db.flush()
-            verdict_id = str(amended_verdict.id)
-            status_value = "approved"
-        elif body.action == SeniorInboxAction.reject:
-            status_value = "rejected"
-
-        db.add(
-            AuditLog(
-                case_id=matched_case.id,
-                agent_name="judge",
-                action=f"senior_inbox_amendment_{body.action.value}",
-                input_payload={
-                    "request_id": raw_id,
-                    "senior_judge_id": str(current_user.id),
-                    "reason": body.reason,
-                    "assignee": body.assignee,
-                },
-                output_payload={"status": status_value, "verdict_id": verdict_id},
             )
         )
         await db.commit()

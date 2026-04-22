@@ -36,8 +36,6 @@ class CaseStatus(str, enum.Enum):
     pending = "pending"
     processing = "processing"
     ready_for_review = "ready_for_review"
-    decided = "decided"
-    rejected = "rejected"
     escalated = "escalated"
     closed = "closed"
     failed = "failed"
@@ -104,16 +102,6 @@ class ArgumentSide(str, enum.Enum):
     respondent = "respondent"
 
 
-class RecommendationType(str, enum.Enum):
-    compensation = "compensation"
-    repair = "repair"
-    dismiss = "dismiss"
-    guilty = "guilty"
-    not_guilty = "not_guilty"
-    reduced = "reduced"
-    manual_decision = "manual_decision"
-
-
 class ReopenRequestStatus(str, enum.Enum):
     pending = "pending"
     approved = "approved"
@@ -174,16 +162,13 @@ class Case(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     arguments: Mapped[list[Argument]] = relationship(
         back_populates="case", cascade="all, delete-orphan"
     )
-    deliberations: Mapped[list[Deliberation]] = relationship(
+    hearing_analyses: Mapped[list[HearingAnalysis]] = relationship(
         back_populates="case", cascade="all, delete-orphan"
     )
     hearing_notes: Mapped[list[HearingNote]] = relationship(
         back_populates="case", cascade="all, delete-orphan"
     )
     reopen_requests: Mapped[list[ReopenRequest]] = relationship(
-        back_populates="case", cascade="all, delete-orphan"
-    )
-    verdicts: Mapped[list[Verdict]] = relationship(
         back_populates="case", cascade="all, delete-orphan"
     )
     audit_logs: Mapped[list[AuditLog]] = relationship(
@@ -329,8 +314,8 @@ class Argument(UUIDPrimaryKeyMixin, Base):
     case: Mapped[Case] = relationship(back_populates="arguments")
 
 
-class Deliberation(UUIDPrimaryKeyMixin, Base):
-    __tablename__ = "deliberations"
+class HearingAnalysis(UUIDPrimaryKeyMixin, Base):
+    __tablename__ = "hearing_analyses"
 
     case_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("cases.id", ondelete="CASCADE"), nullable=False
@@ -340,31 +325,7 @@ class Deliberation(UUIDPrimaryKeyMixin, Base):
     uncertainty_flags: Mapped[dict | None] = mapped_column(JSONB)
     confidence_score: Mapped[int | None] = mapped_column(Integer)
 
-    case: Mapped[Case] = relationship(back_populates="deliberations")
-
-
-class Verdict(UUIDPrimaryKeyMixin, Base):
-    __tablename__ = "verdicts"
-
-    case_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("cases.id", ondelete="CASCADE"), nullable=False
-    )
-    recommendation_type: Mapped[RecommendationType] = mapped_column(
-        Enum(RecommendationType), nullable=False
-    )
-    recommended_outcome: Mapped[str] = mapped_column(Text, nullable=False)
-    sentence: Mapped[dict | None] = mapped_column(JSONB)
-    confidence_score: Mapped[int | None] = mapped_column(Integer)
-    alternative_outcomes: Mapped[dict | None] = mapped_column(JSONB)
-    fairness_report: Mapped[dict | None] = mapped_column(JSONB)
-    amendment_of: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("verdicts.id")
-    )
-    amendment_reason: Mapped[str | None] = mapped_column(Text)
-    amended_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
-
-    case: Mapped[Case] = relationship(back_populates="verdicts")
-    amended_by_user: Mapped[User | None] = relationship(foreign_keys=[amended_by])
+    case: Mapped[Case] = relationship(back_populates="hearing_analyses")
 
 
 class HearingNote(UUIDPrimaryKeyMixin, Base):

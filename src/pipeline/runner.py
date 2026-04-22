@@ -33,8 +33,8 @@ AGENT_ORDER: list[str] = [
     "witness-analysis",
     "legal-knowledge",
     "argument-construction",
-    "deliberation",
-    "governance-verdict",
+    "hearing-analysis",
+    "hearing-governance",
 ]
 
 # Maps each agent to the tool function names it can invoke
@@ -46,8 +46,8 @@ AGENT_TOOLS: dict[str, list[str]] = {
     "witness-analysis": ["generate_questions"],
     "legal-knowledge": ["search_precedents"],
     "argument-construction": ["confidence_calc"],
-    "deliberation": [],
-    "governance-verdict": ["confidence_calc"],
+    "hearing-analysis": [],
+    "hearing-governance": [],
 }
 
 # Maps model tier names to settings attribute names
@@ -216,9 +216,8 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
         "function": {
             "name": "confidence_calc",
             "description": (
-                "Calculate weighted confidence score for verdict recommendation "
-                "based on evidence strength, rule relevance, precedent similarity, "
-                "and witness credibility."
+                "Calculate a weighted confidence score for case analysis components "
+                "based on evidence strength, precedent alignment, and argument completeness."
             ),
             "parameters": {
                 "type": "object",
@@ -324,9 +323,8 @@ def _load_yaml_with_includes(config_path: Path) -> dict:
 
 # Required keys for critical agent output fields
 _REQUIRED_KEYS: dict[str, dict[str, list[str]]] = {
-    "governance-verdict": {
+    "hearing-governance": {
         "fairness_check": ["critical_issues_found", "audit_passed"],
-        "verdict_recommendation": ["confidence_score"],
     },
 }
 
@@ -641,7 +639,7 @@ class PipelineRunner:
 
         Halt conditions:
         - After Agent 2 (complexity-routing): if status == "escalated"
-        - After Agent 9 (governance-verdict) phase 1: if fairness_check
+        - After Agent 9 (hearing-governance) phase 1: if fairness_check
           has critical_issues_found == True
         """
         from src.pipeline.observability import pipeline_run  # lazy: avoids linter removal
@@ -668,12 +666,12 @@ class PipelineRunner:
 
                 # Halt after Agent 9 if fairness check found critical issues
                 if (
-                    agent_name == "governance-verdict"
+                    agent_name == "hearing-governance"
                     and state.fairness_check
                     and state.fairness_check.critical_issues_found
                 ):
                     logger.warning(
-                        "Pipeline halted at governance-verdict: "
+                        "Pipeline halted at hearing-governance: "
                         "critical fairness issues detected (case_id=%s)",
                         state.case_id,
                     )

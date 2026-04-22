@@ -58,8 +58,7 @@ def _make_case(created_by: uuid.UUID, **overrides) -> MagicMock:
         "legal_rules": [],
         "precedents": [],
         "arguments": [],
-        "deliberations": [],
-        "verdicts": [],
+        "hearing_analyses": [],
         "reopen_requests": [],
         "audit_logs": [],
     }
@@ -245,7 +244,7 @@ class TestGetCaseDetail:
         assert data["id"] == str(case.id)
         assert data["domain"] == "traffic_violation"
         assert data["title"] == case.title
-        assert "decision_history" in data
+        assert "hearing_analyses" in data
 
     async def test_get_case_not_found(self):
         """GET /api/v1/cases/{nonexistent_id} returns 404."""
@@ -363,11 +362,11 @@ class TestProcessCase:
         assert resp.status_code == 404
 
     async def test_process_case_rejects_non_startable_status(self):
-        """Decided / closed / processing cases return 409 from the atomic flip."""
+        """Ready-for-review / closed / processing cases return 409 from the atomic flip."""
         user = _make_user()
         mock_db = _build_mock_session()
 
-        case = _make_case(user.id, documents=[self._doc()], status=CaseStatus.decided)
+        case = _make_case(user.id, documents=[self._doc()], status=CaseStatus.ready_for_review)
         mock_db.execute.side_effect = [
             _mock_scalar_result(case),
             _mock_scalar_result(None),
@@ -421,65 +420,6 @@ class TestProcessCase:
         assert resp.status_code == 202
 
 
-class TestRejectedCaseReview:
-    async def test_override_rejected_case_restarts_processing(self):
-        user = _make_user()
-        rejection_log = MagicMock()
-        rejection_log.created_at = datetime.now(UTC)
-        rejection_log.input_payload = {}
-        rejection_log.output_payload = {
-            "jurisdiction_issues": [
-                "Offence date 2025-03-15 exceeds the 12-month limitation "
-                "period for this offence category."
-            ]
-        }
-        rejection_log.action = "case_processing_rejected"
-        case = _make_case(user.id, status=CaseStatus.rejected, audit_logs=[rejection_log])
-
-        mock_db = _build_mock_session()
-        mock_db.execute.return_value = _mock_scalar_result(case)
-
-        app = _app_with_overrides(mock_db, user)
-        transport = ASGITransport(app=app)
-
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            resp = await client.post(
-                f"/api/v1/cases/{case.id}/rejection-review",
-                json={
-                    "action": "override",
-                    "justification": ("Charge sheet confirms the offence was in 2026."),
-                },
-            )
-
-        assert resp.status_code == 200
-        assert resp.json()["status"] == "processing"
-        assert resp.json()["resumed_from_stage"] == "case-processing"
-        mock_db.commit.assert_awaited()
-
-    async def test_close_rejected_case_archives_it(self):
-        user = _make_user()
-        case = _make_case(user.id, status=CaseStatus.rejected, audit_logs=[])
-
-        mock_db = _build_mock_session()
-        mock_db.execute.return_value = _mock_scalar_result(case)
-
-        app = _app_with_overrides(mock_db, user)
-        transport = ASGITransport(app=app)
-
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            resp = await client.post(
-                f"/api/v1/cases/{case.id}/rejection-review",
-                json={
-                    "action": "close",
-                    "justification": ("No lawful basis to override the jurisdiction rejection."),
-                },
-            )
-
-        assert resp.status_code == 200
-        assert resp.json()["status"] == "closed"
-        mock_db.add.assert_called_once()
-
-
 class TestCors:
     async def test_preflight_allows_vite_origin(self):
         """OPTIONS preflight from the Vite dev origin is permitted."""
@@ -531,7 +471,6 @@ class TestGetCaseResponseShape:
             "route",
             "created_by",
             "pipeline_progress",
-            "decision_history",
             "parties",
             "documents",
             "evidence",
@@ -540,8 +479,7 @@ class TestGetCaseResponseShape:
             "legal_rules",
             "precedents",
             "arguments",
-            "deliberations",
-            "verdicts",
+            "hearing_analyses",
             "audit_logs",
         }
         assert expected_keys.issubset(data.keys()), f"Missing keys: {expected_keys - data.keys()}"
@@ -556,8 +494,7 @@ class TestGetCaseResponseShape:
             "legal_rules",
             "precedents",
             "arguments",
-            "deliberations",
-            "verdicts",
+            "hearing_analyses",
             "audit_logs",
         ]:
             assert isinstance(data[key], list), f"{key} should be a list"

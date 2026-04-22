@@ -30,7 +30,6 @@ from src.models.case import (
     Fact,
     FactConfidence,
     FactStatus,
-    Verdict,
 )
 from src.models.user import User, UserRole
 
@@ -189,8 +188,7 @@ async def get_evidence_gaps(
     response_model=FairnessAuditResponse,
     operation_id="get_fairness_audit",
     summary="Get fairness & bias audit results for a case",
-    description="Surfaces the governance agent's fairness check output and the verdict-level "
-    "fairness report. Requires judge role.",
+    description="Surfaces the governance agent's fairness check output. Requires judge role.",
     responses={
         403: {"model": ErrorResponse, "description": "Insufficient permissions"},
         404: {"model": ErrorResponse, "description": "Case not found"},
@@ -205,19 +203,12 @@ async def get_fairness_audit(
     if case_result.scalar_one_or_none() is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
 
-    # Most recent verdict fairness_report
-    verdict_result = await db.execute(
-        select(Verdict).where(Verdict.case_id == case_id).order_by(Verdict.id.desc()).limit(1)
-    )
-    verdict = verdict_result.scalar_one_or_none()
-    verdict_fairness_report = verdict.fairness_report if verdict else None
-
     # Governance audit log entries
     audit_result = await db.execute(
         select(AuditLog)
         .where(
             AuditLog.case_id == case_id,
-            AuditLog.agent_name == "governance-verdict",
+            AuditLog.agent_name == "hearing-governance",
         )
         .limit(50)
     )
@@ -233,11 +224,10 @@ async def get_fairness_audit(
         for entry in audit_entries
     ]
 
-    has_fairness_data = verdict_fairness_report is not None or len(governance_checks) > 0
+    has_fairness_data = len(governance_checks) > 0
 
     return FairnessAuditResponse(
         case_id=case_id,
-        verdict_fairness_report=verdict_fairness_report,
         governance_checks=governance_checks,
         has_fairness_data=has_fairness_data,
     )

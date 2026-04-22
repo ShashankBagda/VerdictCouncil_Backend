@@ -83,13 +83,13 @@ class WhatIfScenario(UUIDPrimaryKeyMixin, Base):
     # Relationships
     case: Mapped[Case] = relationship()
     created_by_user: Mapped[User] = relationship()
-    verdict: Mapped[WhatIfVerdict | None] = relationship(
+    result: Mapped[WhatIfResult | None] = relationship(
         back_populates="scenario", uselist=False, cascade="all, delete-orphan"
     )
 
 
-class WhatIfVerdict(UUIDPrimaryKeyMixin, Base):
-    __tablename__ = "what_if_verdicts"
+class WhatIfResult(UUIDPrimaryKeyMixin, Base):
+    __tablename__ = "what_if_results"
 
     scenario_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -97,16 +97,16 @@ class WhatIfVerdict(UUIDPrimaryKeyMixin, Base):
         unique=True,
         nullable=False,
     )
-    original_verdict: Mapped[dict | None] = mapped_column(JSONB)
-    modified_verdict: Mapped[dict | None] = mapped_column(JSONB)
+    original_analysis: Mapped[dict | None] = mapped_column(JSONB)
+    modified_analysis: Mapped[dict | None] = mapped_column(JSONB)
     diff_view: Mapped[dict | None] = mapped_column(JSONB)
-    verdict_changed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    analysis_changed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
     # Relationships
-    scenario: Mapped[WhatIfScenario] = relationship(back_populates="verdict")
+    scenario: Mapped[WhatIfScenario] = relationship(back_populates="result")
 
 
 class StabilityScore(UUIDPrimaryKeyMixin, Base):

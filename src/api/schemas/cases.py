@@ -18,7 +18,6 @@ from src.models.case import (
     FactStatus,
     PartyRole,
     PrecedentSource,
-    RecommendationType,
 )
 
 KNOWN_TRAFFIC_OFFENCE_CODES = {
@@ -84,14 +83,6 @@ class CaseJurisdictionResponse(BaseModel):
 class CaseProgressResponse(BaseModel):
     pipeline_progress_percent: int = Field(..., ge=0, le=100)
     current_agent: str | None = Field(None)
-
-
-class CaseDecisionRecordResponse(BaseModel):
-    decision_type: str = Field(..., description="accept, modify, reject, or amendment type")
-    reason: str | None = Field(None)
-    final_order: str | None = Field(None)
-    recorded_at: datetime | None = Field(None)
-    recorded_by: str | None = Field(None)
 
 
 class PartyResponse(BaseModel):
@@ -197,7 +188,7 @@ class ArgumentResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class DeliberationResponse(BaseModel):
+class HearingAnalysisResponse(BaseModel):
     id: UUID
     reasoning_chain: dict[str, Any] | None = Field(None, description="Structured reasoning chain")
     preliminary_conclusion: str | None = Field(None, description="Preliminary conclusion")
@@ -205,25 +196,6 @@ class DeliberationResponse(BaseModel):
         None, description="Uncertainty flags and pivot factors"
     )
     confidence_score: int | None = Field(None, description="Confidence score (0-100)")
-
-    model_config = {"from_attributes": True}
-
-
-class VerdictResponse(BaseModel):
-    id: UUID
-    recommendation_type: RecommendationType = Field(..., description="Type of recommendation")
-    recommended_outcome: str = Field(..., description="Recommended outcome text")
-    sentence: dict[str, Any] | None = Field(None, description="Traffic sentence details")
-    confidence_score: int | None = Field(None, description="Confidence score (0-100)")
-    alternative_outcomes: dict[str, Any] | None = Field(
-        None, description="Alternative outcomes and pivot factors"
-    )
-    fairness_report: dict[str, Any] | None = Field(
-        None, description="Structured fairness and bias audit"
-    )
-    amendment_of: UUID | None = Field(None, description="Previous verdict in the amendment chain")
-    amendment_reason: str | None = Field(None, description="Reason for the amendment")
-    amended_by: UUID | None = Field(None, description="Judge who amended the verdict")
 
     model_config = {"from_attributes": True}
 
@@ -269,13 +241,8 @@ class CaseResponse(BaseModel):
     accused_name: str | None = Field(None)
     document_count: int = Field(0, description="Number of documents attached")
     pipeline_progress: CaseProgressResponse = Field(..., description="Pipeline progress summary")
-    outcome_summary: str | None = Field(None, description="Latest recommendation or decision")
     escalation_reason: str | None = Field(None, description="Why the case was escalated")
     reopen_state: str | None = Field(None, description="Pending or latest reopen-request state")
-    amendment_state: str | None = Field(None, description="Current amendment status")
-    latest_decision: CaseDecisionRecordResponse | None = Field(
-        None, description="Most recent judge decision record"
-    )
 
 
 class CaseListResponse(BaseModel):
@@ -305,12 +272,8 @@ class CaseDetailResponse(CaseResponse):
     arguments: list[ArgumentResponse] = Field(
         default_factory=list, description="Constructed arguments"
     )
-    deliberations: list[DeliberationResponse] = Field(
-        default_factory=list, description="AI deliberations"
-    )
-    verdicts: list[VerdictResponse] = Field(default_factory=list, description="Generated verdicts")
-    decision_history: list[CaseDecisionRecordResponse] = Field(
-        default_factory=list, description="Recorded judge decisions and amendments"
+    hearing_analyses: list[HearingAnalysisResponse] = Field(
+        default_factory=list, description="AI hearing analyses"
     )
     audit_logs: list[AuditLogSummary] = Field(
         default_factory=list, description="Audit trail entries"

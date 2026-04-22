@@ -17,12 +17,11 @@ def _base_case_state() -> CaseState:
     Field values match the keys expected by diff_engine internals:
     - evidence_analysis uses "evidence_items" (not "items")
     - extracted_facts uses "status" on each fact (not "disputed")
-    - verdict_recommendation uses "recommendation_type", "recommended_outcome", "confidence_score"
-    - deliberation uses "preliminary_conclusion" and "confidence_score"
+    - hearing_analysis uses "preliminary_conclusion" and "confidence_score"
     """
     return CaseState(
         domain=CaseDomainEnum.small_claims,
-        status=CaseStatusEnum.decided,
+        status=CaseStatusEnum.ready_for_review,
         parties=[
             {"name": "Alice Tan", "role": "claimant"},
             {"name": "Bob Lee", "role": "respondent"},
@@ -54,7 +53,7 @@ def _base_case_state() -> CaseState:
             "prosecution": {"overall_strength": 0.8},
             "defense": {"overall_strength": 0.4},
         },
-        deliberation={
+        hearing_analysis={
             "preliminary_conclusion": "Balance of evidence favours claimant.",
             "confidence_score": 80,
         },
@@ -64,47 +63,40 @@ def _base_case_state() -> CaseState:
             "issues": [],
             "recommendations": [],
         },
-        verdict_recommendation={
-            "recommendation_type": "guilty",
-            "recommended_outcome": "Respondent is liable.",
-            "confidence_score": 80,
-            "reasoning": "Balance of evidence favours claimant.",
-            "alternative_outcomes": [],
-        },
     )
 
 
 # ------------------------------------------------------------------ #
-# Verdict change detection
+# Analysis change detection
 # ------------------------------------------------------------------ #
 
 
 class TestVerdictChange:
     def test_verdict_changed_detected(self):
-        """Different verdicts should yield verdict_changed=True."""
+        """Different hearing analyses should yield analysis_changed=True."""
         from src.services.whatif_controller.diff_engine import generate_diff
 
         original = _base_case_state()
         modified = copy.deepcopy(original)
-        modified.verdict_recommendation = modified.verdict_recommendation.model_copy(
-            update={"recommendation_type": "not_guilty"}
+        modified.hearing_analysis = modified.hearing_analysis.model_copy(
+            update={"preliminary_conclusion": "Balance of evidence does not favour claimant."}
         )
 
         diff = generate_diff(original, modified)
 
-        assert diff["verdict_changed"] is True
+        assert diff["analysis_changed"] is True
 
     def test_verdict_unchanged(self):
-        """Same verdict should yield verdict_changed=False."""
+        """Same hearing analysis should yield analysis_changed=False."""
         from src.services.whatif_controller.diff_engine import generate_diff
 
         original = _base_case_state()
         modified = copy.deepcopy(original)
-        # Verdict stays "guilty"
+        # Analysis stays the same
 
         diff = generate_diff(original, modified)
 
-        assert diff["verdict_changed"] is False
+        assert diff["analysis_changed"] is False
 
 
 # ------------------------------------------------------------------ #
@@ -119,7 +111,7 @@ class TestConfidenceDelta:
 
         original = _base_case_state()
         modified = copy.deepcopy(original)
-        modified.verdict_recommendation = modified.verdict_recommendation.model_copy(
+        modified.hearing_analysis = modified.hearing_analysis.model_copy(
             update={"confidence_score": 65}
         )
 

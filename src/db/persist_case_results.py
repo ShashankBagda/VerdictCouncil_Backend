@@ -15,10 +15,8 @@ Design notes:
   ``statements`` vs ``witnesses``). Helpers normalize by looking for the
   first list-of-dicts under a set of candidate keys, falling back to an
   empty list so a partial pipeline still persists what it has.
-- **Fairness + judge KB** collapse into JSONB on the ``Verdict`` row
-  (fairness) and the ``Case.description`` metadata is left untouched
-  (no JSONB column on ``Case``; judge KB results are intentionally not
-  persisted to a dedicated table yet).
+- **Judge KB** results are intentionally not persisted to a dedicated
+  table yet.
 """
 
 from __future__ import annotations
@@ -39,18 +37,16 @@ from src.models.case import (
     ArgumentSide,
     Case,
     CaseStatus,
-    Deliberation,
     Evidence,
     EvidenceStrength,
     EvidenceType,
     Fact,
     FactConfidence,
     FactStatus,
+    HearingAnalysis,
     LegalRule,
     Precedent,
     PrecedentSource,
-    RecommendationType,
-    Verdict,
     Witness,
 )
 from src.shared.case_state import CaseState
@@ -76,8 +72,7 @@ async def persist_case_results(
         _insert_legal_rules(db, case_id, state)
         _insert_precedents(db, case_id, state)
         _insert_arguments(db, case_id, state)
-        _insert_deliberation(db, case_id, state)
-        _insert_verdict(db, case_id, state)
+        _insert_hearing_analysis(db, case_id, state)
         _insert_audit_log(db, case_id, state)
         await _update_case_row(db, case_id, state)
         await db.commit()
@@ -115,8 +110,7 @@ async def _clear_child_rows(db: AsyncSession, case_id: UUID) -> None:
         LegalRule,
         Precedent,
         Argument,
-        Deliberation,
-        Verdict,
+        HearingAnalysis,
         AuditLog,
     ):
         await db.execute(delete(model).where(model.case_id == case_id))
@@ -303,38 +297,17 @@ def _insert_arguments(db: AsyncSession, case_id: UUID, state: CaseState) -> None
             )
 
 
-def _insert_deliberation(db: AsyncSession, case_id: UUID, state: CaseState) -> None:
-    data = state.deliberation
+def _insert_hearing_analysis(db: AsyncSession, case_id: UUID, state: CaseState) -> None:
+    data = state.hearing_analysis
     if not data:
         return
     db.add(
-        Deliberation(
+        HearingAnalysis(
             case_id=case_id,
             reasoning_chain=_as_jsonb(data.reasoning_chain),
             preliminary_conclusion=data.preliminary_conclusion,
             uncertainty_flags=_as_jsonb(data.uncertainty_flags),
             confidence_score=data.confidence_score,
-        )
-    )
-
-
-def _insert_verdict(db: AsyncSession, case_id: UUID, state: CaseState) -> None:
-    verdict = state.verdict_recommendation
-    if not verdict:
-        return
-    rec_type = _coerce_enum(verdict.recommendation_type, RecommendationType)
-    outcome = verdict.recommended_outcome.strip()
-    if rec_type is None or not outcome:
-        return
-    db.add(
-        Verdict(
-            case_id=case_id,
-            recommendation_type=rec_type,
-            recommended_outcome=outcome,
-            sentence=None,
-            confidence_score=verdict.confidence_score,
-            alternative_outcomes=_as_jsonb(verdict.alternative_outcomes),
-            fairness_report=_as_jsonb(state.fairness_check),
         )
     )
 

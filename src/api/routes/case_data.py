@@ -18,13 +18,12 @@ from sqlalchemy import select
 from src.api.deps import CurrentUser, DBSession
 from src.api.schemas.cases import (
     ArgumentResponse,
-    DeliberationResponse,
+    HearingAnalysisResponse,
     DocumentResponse,
     EvidenceResponse,
     FactResponse,
     LegalRuleResponse,
     PrecedentResponse,
-    VerdictResponse,
     WitnessResponse,
 )
 from src.api.schemas.common import ErrorResponse
@@ -34,13 +33,12 @@ from src.models.case import (
     Argument,
     Case,
     CaseStatus,
-    Deliberation,
+    HearingAnalysis,
     Document,
     Evidence,
     Fact,
     LegalRule,
     Precedent,
-    Verdict,
     Witness,
 )
 from src.models.user import UserRole
@@ -58,8 +56,8 @@ PIPELINE_AGENTS = [
     "witness-analysis",
     "legal-knowledge",
     "argument-construction",
-    "deliberation",
-    "governance-verdict",
+    "hearing-analysis",
+    "hearing-governance",
 ]
 
 AGENT_LABELS = {
@@ -70,8 +68,8 @@ AGENT_LABELS = {
     "witness-analysis": "Witness Analysis",
     "legal-knowledge": "Legal Knowledge",
     "argument-construction": "Argument Construction",
-    "deliberation": "Deliberation",
-    "governance-verdict": "Governance & Verdict",
+    "hearing-analysis": "Hearing Analysis",
+    "hearing-governance": "Hearing Governance",
 }
 
 SUPPLEMENTARY_RETRIGGERED_STAGES = PIPELINE_AGENTS[2:]
@@ -145,7 +143,7 @@ def _derive_agent_status(case: Case, audit_logs: list[AuditLog]) -> list[dict[st
         )
 
     # If case is in a terminal state, mark all pending agents accordingly
-    if case.status in (CaseStatus.ready_for_review, CaseStatus.decided, CaseStatus.closed):
+    if case.status in (CaseStatus.ready_for_review, CaseStatus.closed):
         for a in agents:
             if a["status"] == "pending":
                 a["status"] = "completed"
@@ -173,7 +171,7 @@ def _compute_progress(agents: list[dict]) -> int:
 def _derive_overall_status(case: Case, agents: list[dict]) -> str:
     if case.status == CaseStatus.failed:
         return "failed"
-    if case.status in (CaseStatus.ready_for_review, CaseStatus.decided, CaseStatus.closed):
+    if case.status in (CaseStatus.ready_for_review, CaseStatus.closed):
         return "completed"
     if any(a["status"] == "failed" for a in agents):
         return "failed"
@@ -502,34 +500,17 @@ async def get_case_arguments(
 
 
 @router.get(
-    "/{case_id}/deliberation",
-    response_model=list[DeliberationResponse],
-    operation_id="get_case_deliberation",
-    summary="Get AI deliberation for a case",
+    "/{case_id}/hearing-analysis",
+    response_model=list[HearingAnalysisResponse],
+    operation_id="get_case_hearing_analysis",
+    summary="Get AI hearing analysis for a case",
     responses={404: {"model": ErrorResponse}},
 )
-async def get_case_deliberation(
+async def get_case_hearing_analysis(
     case_id: UUID,
     db: DBSession,
     current_user: CurrentUser,
-) -> list[Deliberation]:
+) -> list[HearingAnalysis]:
     await _get_case_or_404(case_id, db, current_user)
-    result = await db.execute(select(Deliberation).where(Deliberation.case_id == case_id))
-    return list(result.scalars().all())
-
-
-@router.get(
-    "/{case_id}/verdict",
-    response_model=list[VerdictResponse],
-    operation_id="get_case_verdict",
-    summary="Get generated verdicts for a case",
-    responses={404: {"model": ErrorResponse}},
-)
-async def get_case_verdict(
-    case_id: UUID,
-    db: DBSession,
-    current_user: CurrentUser,
-) -> list[Verdict]:
-    await _get_case_or_404(case_id, db, current_user)
-    result = await db.execute(select(Verdict).where(Verdict.case_id == case_id))
+    result = await db.execute(select(HearingAnalysis).where(HearingAnalysis.case_id == case_id))
     return list(result.scalars().all())

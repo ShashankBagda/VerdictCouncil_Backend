@@ -325,8 +325,8 @@ async def test_full_pipeline_runs_all_nine_agents_via_mesh():
         *L2_AGENTS,
         "legal-knowledge",
         "argument-construction",
-        "deliberation",
-        "governance-verdict",
+        "hearing-analysis",
+        "hearing-governance",
     ]
     # Order matters for L1/L3, not within L2 (parallel)
     assert agents_published[:2] == expected[:2]
@@ -600,11 +600,11 @@ async def test_terminal_event_emitted_on_complexity_escalation(monkeypatch):
         "reason": "complexity_escalation",
         "stopped_at": "complexity-routing",
     }
-    # governance-verdict/failed is NOT emitted for this halt — plan M1/codex.
+    # hearing-governance/failed is NOT emitted for this halt — plan M1/codex.
     bad = [
         c.args[0]
         for c in publish_mock.await_args_list
-        if c.args and c.args[0].agent == "governance-verdict" and c.args[0].phase == "failed"
+        if c.args and c.args[0].agent == "hearing-governance" and c.args[0].phase == "failed"
     ]
     assert bad == []
 
@@ -612,7 +612,7 @@ async def test_terminal_event_emitted_on_complexity_escalation(monkeypatch):
 @pytest.mark.asyncio
 async def test_terminal_event_emitted_on_governance_escalation(monkeypatch):
     """A critical fairness issue flips status to escalated and must emit a
-    terminal event attributed to governance-verdict.
+    terminal event attributed to hearing-governance.
     """
     publish_mock = AsyncMock(return_value=None)
     monkeypatch.setattr("src.pipeline.mesh_runner.publish_progress", publish_mock)
@@ -643,7 +643,7 @@ async def test_terminal_event_emitted_on_governance_escalation(monkeypatch):
                 return _send_task_response(f"layer2-{case_id}-{rid}", merged)
             return None
         dumped = state.model_dump(mode="json")
-        if agent == "governance-verdict":
+        if agent == "hearing-governance":
             dumped["fairness_check"] = {
                 "critical_issues_found": True,
                 "audit_passed": False,
@@ -661,7 +661,7 @@ async def test_terminal_event_emitted_on_governance_escalation(monkeypatch):
     assert len(terminals) == 1
     assert terminals[0].detail == {
         "reason": "governance_halt",
-        "stopped_at": "governance-verdict",
+        "stopped_at": "hearing-governance",
     }
 
 

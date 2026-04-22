@@ -22,18 +22,16 @@ from src.models.case import (
     ArgumentSide,
     Case,
     CaseStatus,
-    Deliberation,
     Evidence,
     EvidenceStrength,
     EvidenceType,
     Fact,
     FactConfidence,
     FactStatus,
+    HearingAnalysis,
     LegalRule,
     Precedent,
     PrecedentSource,
-    RecommendationType,
-    Verdict,
     Witness,
 )
 from src.shared.case_state import AuditEntry, CaseState, CaseStatusEnum
@@ -99,17 +97,17 @@ def _added_of(session: _RecordingSession, model: type) -> list[Any]:
 async def test_commits_and_clears_all_child_tables_first():
     case_id = uuid4()
     case = _case(case_id)
-    state = CaseState(case_id=str(case_id), status=CaseStatusEnum.decided)
+    state = CaseState(case_id=str(case_id), status=CaseStatusEnum.ready_for_review)
 
     session = _RecordingSession(case=case)
     await persist_case_results(session, case_id, state)  # type: ignore[arg-type]
 
     assert session.committed is True
     assert session.rolled_back is False
-    # 9 child-table clears (Evidence, Fact, Witness, LegalRule, Precedent,
-    # Argument, Deliberation, Verdict, AuditLog) + 1 terminal
-    # pipeline_checkpoints upsert for what-if rehydration = 10.
-    assert len(session.executed) == 10
+    # 8 child-table clears (Evidence, Fact, Witness, LegalRule, Precedent,
+    # Argument, HearingAnalysis, AuditLog) + 1 terminal
+    # pipeline_checkpoints upsert for what-if rehydration = 9.
+    assert len(session.executed) == 9
 
 
 @pytest.mark.asyncio
@@ -259,21 +257,14 @@ async def test_arguments_grouped_by_side():
 
 
 @pytest.mark.asyncio
-async def test_deliberation_and_verdict_single_row_each():
+async def test_hearing_analysis_single_row():
     case_id = uuid4()
     state = CaseState(
         case_id=str(case_id),
-        deliberation={
+        hearing_analysis={
             "reasoning_chain": [{"step": 1, "claim": "Acted negligently"}],
             "preliminary_conclusion": "Guilty",
             "confidence_score": 82,
-        },
-        verdict_recommendation={
-            "recommendation_type": "guilty",
-            "recommended_outcome": "Fine $500",
-            "confidence_score": 85,
-            "reasoning": "Evidence supports guilty verdict.",
-            "alternative_outcomes": [{"outcome": "Warning", "reasoning": "mitigation"}],
         },
         fairness_check={
             "critical_issues_found": False,
@@ -286,19 +277,10 @@ async def test_deliberation_and_verdict_single_row_each():
     session = _RecordingSession(case=_case(case_id))
     await persist_case_results(session, case_id, state)  # type: ignore[arg-type]
 
-    deliberations = _added_of(session, Deliberation)
-    verdicts = _added_of(session, Verdict)
-    assert len(deliberations) == 1
-    assert deliberations[0].confidence_score == 82
-    assert len(verdicts) == 1
-    assert verdicts[0].recommendation_type == RecommendationType.guilty
-    assert verdicts[0].recommended_outcome == "Fine $500"
-    assert verdicts[0].fairness_report == {
-        "critical_issues_found": False,
-        "audit_passed": True,
-        "issues": [],
-        "recommendations": [],
-    }
+    hearing_analyses = _added_of(session, HearingAnalysis)
+    assert len(hearing_analyses) == 1
+    assert hearing_analyses[0].confidence_score == 82
+    assert hearing_analyses[0].preliminary_conclusion == "Guilty"
 
 
 @pytest.mark.asyncio
@@ -313,14 +295,14 @@ async def test_audit_entries_persist_one_row_each():
                 model="gpt-5.4-nano",
                 token_usage={"prompt": 500, "completion": 200},
             ),
-            AuditEntry(agent="governance-verdict", action="emit_verdict"),
+            AuditEntry(agent="hearing-governance", action="governance_check"),
         ],
     )
     session = _RecordingSession(case=_case(case_id))
     await persist_case_results(session, case_id, state)  # type: ignore[arg-type]
 
     logs = _added_of(session, AuditLog)
-    assert [a.agent_name for a in logs] == ["case-processing", "governance-verdict"]
+    assert [a.agent_name for a in logs] == ["case-processing", "hearing-governance"]
     assert logs[0].token_usage == {"prompt": 500, "completion": 200}
 
 
@@ -357,7 +339,7 @@ async def test_writes_latest_run_id_to_case_row():
     state = CaseState(
         case_id=str(case_id),
         run_id="run-abc-123",
-        status=CaseStatusEnum.decided,
+        status=CaseStatusEnum.ready_for_review,
     )
 
     session = _RecordingSession(case=case)

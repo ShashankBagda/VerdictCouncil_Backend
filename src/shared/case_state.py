@@ -12,8 +12,6 @@ class CaseStatusEnum(str, Enum):
     pending = "pending"
     processing = "processing"
     ready_for_review = "ready_for_review"
-    decided = "decided"
-    rejected = "rejected"
     escalated = "escalated"
     closed = "closed"
     failed = "failed"
@@ -22,13 +20,6 @@ class CaseStatusEnum(str, Enum):
 class CaseDomainEnum(str, Enum):
     small_claims = "small_claims"
     traffic_violation = "traffic_violation"
-
-
-class AlternativeOutcome(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    outcome: str
-    reasoning: str
 
 
 class FairnessCheck(BaseModel):
@@ -40,17 +31,7 @@ class FairnessCheck(BaseModel):
     recommendations: list[str]
 
 
-class VerdictRecommendation(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    recommendation_type: str
-    recommended_outcome: str
-    confidence_score: int
-    reasoning: str
-    alternative_outcomes: list[AlternativeOutcome]
-
-
-class Deliberation(BaseModel):
+class HearingAnalysis(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     preliminary_conclusion: str | None = None
@@ -103,7 +84,7 @@ class CaseState(BaseModel):
     # that breaks round-trip with older checkpoints. The reader in
     # `src/db/pipeline_state.py` compares this against CURRENT_SCHEMA_VERSION
     # and fails loud on mismatch rather than silently defaulting.
-    schema_version: int = 1
+    schema_version: int = 2
 
     # Identity & Status
     case_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -134,15 +115,11 @@ class CaseState(BaseModel):
     # Arguments (written by Argument Construction)
     arguments: dict[str, Any] | None = None
 
-    # Deliberation (written by Deliberation)
-    deliberation: Deliberation | None = None
+    # Hearing Analysis (written by Hearing Analysis)
+    hearing_analysis: HearingAnalysis | None = None
 
-    # Governance (written by Governance & Verdict)
+    # Governance (written by Hearing Governance)
     fairness_check: FairnessCheck | None = None
-    verdict_recommendation: VerdictRecommendation | None = None
-
-    # Judge decision (written externally)
-    judge_decision: dict[str, Any] | None = None
 
     # Audit (append-only)
     audit_log: list[AuditEntry] = Field(default_factory=list)

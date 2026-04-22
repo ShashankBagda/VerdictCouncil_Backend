@@ -38,7 +38,5 @@ class TestCaseState:
         assert state.evidence_analysis is None
         assert state.extracted_facts is None
         assert state.witnesses is None
-        assert state.deliberation is None
+        assert state.hearing_analysis is None
         assert state.fairness_check is None
-        assert state.verdict_recommendation is None
-        assert state.judge_decision is None

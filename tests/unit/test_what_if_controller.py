@@ -18,7 +18,7 @@ def _populated_case_state() -> CaseState:
     """Return a CaseState with realistic populated fields."""
     return CaseState(
         domain=CaseDomainEnum.small_claims,
-        status=CaseStatusEnum.decided,
+        status=CaseStatusEnum.ready_for_review,
         parties=[
             {"name": "Alice Tan", "role": "claimant"},
             {"name": "Bob Lee", "role": "respondent"},
@@ -67,7 +67,7 @@ def _populated_case_state() -> CaseState:
             "prosecution": {"overall_strength": 0.8},
             "defense": {"overall_strength": 0.4},
         },
-        deliberation={
+        hearing_analysis={
             "preliminary_conclusion": "Balance of evidence favours claimant.",
             "confidence_score": 80,
         },
@@ -76,13 +76,6 @@ def _populated_case_state() -> CaseState:
             "audit_passed": True,
             "issues": [],
             "recommendations": [],
-        },
-        verdict_recommendation={
-            "recommendation_type": "liable",
-            "recommended_outcome": "Respondent is liable for property damage.",
-            "confidence_score": 80,
-            "reasoning": "Balance of evidence favours claimant.",
-            "alternative_outcomes": [],
         },
     )
 

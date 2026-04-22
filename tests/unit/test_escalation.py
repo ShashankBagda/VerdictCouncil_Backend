@@ -192,66 +192,6 @@ async def test_escalation_action_return_to_pipeline():
     assert case.status == CaseStatus.processing
 
 
-async def test_escalation_action_manual_decision():
-    case_id = uuid.uuid4()
-    user = _make_user()
-    case = _make_case(id=case_id)
-
-    mock_db = _build_mock_session()
-    mock_db.execute.return_value = _scalar_one_or_none_result(case)
-
-    app = _app_with_overrides(mock_db, user)
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.post(
-            f"/api/v1/escalated-cases/{case_id}/action",
-            json={"action": "manual_decision", "final_order": "The claimant is awarded $500."},
-        )
-
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["new_status"] == "decided"
-    assert case.status == CaseStatus.decided
-
-
-async def test_escalation_action_reject():
-    case_id = uuid.uuid4()
-    user = _make_user()
-    case = _make_case(id=case_id)
-
-    mock_db = _build_mock_session()
-    mock_db.execute.return_value = _scalar_one_or_none_result(case)
-
-    app = _app_with_overrides(mock_db, user)
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.post(
-            f"/api/v1/escalated-cases/{case_id}/action",
-            json={"action": "reject"},
-        )
-
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["new_status"] == "rejected"
-    assert case.status == CaseStatus.rejected
-
-
-async def test_escalation_action_manual_decision_without_final_order():
-    case_id = uuid.uuid4()
-    user = _make_user()
-    case = _make_case(id=case_id)
-
-    mock_db = _build_mock_session()
-    mock_db.execute.return_value = _scalar_one_or_none_result(case)
-
-    app = _app_with_overrides(mock_db, user)
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.post(
-            f"/api/v1/escalated-cases/{case_id}/action",
-            json={"action": "manual_decision"},
-        )
-
-    assert resp.status_code == 422
-
-
 async def test_escalation_action_case_not_found():
     case_id = uuid.uuid4()
     user = _make_user()
@@ -263,7 +203,7 @@ async def test_escalation_action_case_not_found():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         resp = await ac.post(
             f"/api/v1/escalated-cases/{case_id}/action",
-            json={"action": "reject"},
+            json={"action": "close"},
         )
 
     assert resp.status_code == 404
@@ -282,7 +222,7 @@ async def test_escalation_action_case_not_escalated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         resp = await ac.post(
             f"/api/v1/escalated-cases/{case_id}/action",
-            json={"action": "reject"},
+            json={"action": "close"},
         )
 
     assert resp.status_code == 400
@@ -298,7 +238,7 @@ async def test_escalation_action_non_judge_forbidden():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         resp = await ac.post(
             f"/api/v1/escalated-cases/{case_id}/action",
-            json={"action": "reject"},
+            json={"action": "close"},
         )
 
     assert resp.status_code == 403

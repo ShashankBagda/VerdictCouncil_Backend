@@ -43,10 +43,10 @@ async def create_reopen_request(
     if not case:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
 
-    if case.status not in (CaseStatus.decided, CaseStatus.rejected, CaseStatus.closed):
+    if case.status == CaseStatus.processing:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only decided/rejected/closed cases can be reopened",
+            detail="Case is currently being processed, wait for it to complete before requesting re-analysis.",
         )
 
     request_item = ReopenRequest(

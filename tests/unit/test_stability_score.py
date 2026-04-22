@@ -16,17 +16,16 @@ from src.shared.case_state import CaseDomainEnum, CaseState, CaseStatusEnum
 
 
 def _decided_case_state(verdict: str = "liable", confidence: int = 80) -> CaseState:
-    """Return a decided CaseState with the given verdict and confidence.
+    """Return a completed CaseState with the given analysis conclusion and confidence.
 
     Uses field keys matching the actual implementation:
     - evidence_analysis -> "evidence_items"
     - extracted_facts -> facts with "status" field
-    - verdict_recommendation -> "recommendation_type", "recommended_outcome", "confidence_score"
-    - deliberation -> "preliminary_conclusion", "confidence_score"
+    - hearing_analysis -> "preliminary_conclusion", "confidence_score"
     """
     return CaseState(
         domain=CaseDomainEnum.small_claims,
-        status=CaseStatusEnum.decided,
+        status=CaseStatusEnum.ready_for_review,
         parties=[
             {"name": "Alice Tan", "role": "claimant"},
             {"name": "Bob Lee", "role": "respondent"},
@@ -58,8 +57,8 @@ def _decided_case_state(verdict: str = "liable", confidence: int = 80) -> CaseSt
             "prosecution": {"overall_strength": 0.8},
             "defense": {"overall_strength": 0.4},
         },
-        deliberation={
-            "preliminary_conclusion": "Balance of evidence favours claimant.",
+        hearing_analysis={
+            "preliminary_conclusion": verdict,
             "confidence_score": confidence,
         },
         fairness_check={
@@ -67,13 +66,6 @@ def _decided_case_state(verdict: str = "liable", confidence: int = 80) -> CaseSt
             "audit_passed": True,
             "issues": [],
             "recommendations": [],
-        },
-        verdict_recommendation={
-            "recommendation_type": verdict,
-            "recommended_outcome": f"Verdict: {verdict}",
-            "confidence_score": confidence,
-            "reasoning": "test",
-            "alternative_outcomes": [],
         },
     )
 
@@ -95,12 +87,12 @@ def _mock_runner_with_verdicts(verdicts: list[str]):
             v = verdicts[verdict_idx[0] % len(verdicts)]
             verdict_idx[0] += 1
         state = copy.deepcopy(state)
-        state.verdict_recommendation = {
-            "recommendation_type": v,
-            "recommended_outcome": f"Verdict: {v}",
-            "confidence_score": 75,
-            "reasoning": "test",
-            "alternative_outcomes": [],
+        original_confidence = (
+            state.hearing_analysis.confidence_score if state.hearing_analysis else 80
+        )
+        state.hearing_analysis = {
+            "preliminary_conclusion": v,
+            "confidence_score": original_confidence,
         }
         return state
 

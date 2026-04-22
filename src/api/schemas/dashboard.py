@@ -8,7 +8,7 @@ class DashboardStats(BaseModel):
 
     total_cases: int = Field(..., description="Total number of cases in the system", examples=[42])
     by_status: dict[str, int] = Field(
-        ..., description="Case count grouped by status", examples=[{"pending": 10, "decided": 25}]
+        ..., description="Case count grouped by status", examples=[{"pending": 10, "ready_for_review": 5, "closed": 3}]
     )
     by_domain: dict[str, int] = Field(
         ...,
@@ -17,9 +17,6 @@ class DashboardStats(BaseModel):
     )
     escalation_rate_percent: float = Field(
         ..., description="Percentage of cases currently escalated"
-    )
-    average_verdict_confidence: float | None = Field(
-        None, description="Average governance-verdict confidence score"
     )
     average_processing_time_seconds: float | None = Field(
         None, description="Average pipeline processing time when available"

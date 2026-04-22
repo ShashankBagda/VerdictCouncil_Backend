@@ -27,8 +27,8 @@ from src.models.what_if import (
     StabilityClassification,
     StabilityScore,
     StabilityStatus,
+    WhatIfResult,
     WhatIfScenario,
-    WhatIfVerdict,
 )
 
 logger = logging.getLogger(__name__)
@@ -124,14 +124,14 @@ async def _run_whatif_scenario(scenario_id: uuid.UUID) -> None:
 
             diff = generate_diff(case_state, modified_state)
 
-            verdict_record = WhatIfVerdict(
+            result_record = WhatIfResult(
                 scenario_id=scenario.id,
-                original_verdict=diff["original_verdict"],
-                modified_verdict=diff["modified_verdict"],
+                original_analysis=diff["original_verdict"],
+                modified_analysis=diff["modified_verdict"],
                 diff_view=diff,
-                verdict_changed=diff["verdict_changed"],
+                analysis_changed=diff["verdict_changed"],
             )
-            db.add(verdict_record)
+            db.add(result_record)
 
             scenario.scenario_run_id = modified_state.run_id
             scenario.status = ScenarioStatus.completed
@@ -237,9 +237,9 @@ async def _run_stability_computation(stability_id: uuid.UUID) -> None:
     status_code=status.HTTP_202_ACCEPTED,
     operation_id="submit_whatif_scenario",
     summary="Submit a what-if scenario",
-    description="Submit a hypothetical modification for a case to test verdict stability. "
+    description="Submit a hypothetical modification for a case to test analysis stability. "
     "The scenario runs asynchronously in the background. "
-    "Case must be in `ready_for_review` or `decided` status.",
+    "Case must be in `ready_for_review` status.",
     responses={
         400: {"model": ErrorResponse, "description": "Case not in valid status"},
         403: {"model": ErrorResponse, "description": "Insufficient permissions (judge only)"},
@@ -261,11 +261,11 @@ async def submit_whatif_scenario(
             detail="Case not found",
         )
 
-    if case.status not in (CaseStatus.ready_for_review, CaseStatus.decided):
+    if case.status != CaseStatus.ready_for_review:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
-                f"Case must be in 'ready_for_review' or 'decided' status. "
+                f"Case must be in 'ready_for_review' status. "
                 f"Current status: '{case.status.value}'"
             ),
         )
@@ -332,7 +332,7 @@ async def get_whatif_result(
 ) -> WhatIfResultResponse:
     result = await db.execute(
         select(WhatIfScenario)
-        .options(selectinload(WhatIfScenario.verdict))
+        .options(selectinload(WhatIfScenario.result))
         .where(
             WhatIfScenario.id == scenario_id,
             WhatIfScenario.case_id == case_id,
@@ -358,11 +358,11 @@ async def get_whatif_result(
         completed_at=scenario.completed_at,
     )
 
-    if scenario.verdict:
-        response.original_verdict = scenario.verdict.original_verdict
-        response.modified_verdict = scenario.verdict.modified_verdict
-        response.diff_view = scenario.verdict.diff_view
-        response.verdict_changed = scenario.verdict.verdict_changed
+    if scenario.result:
+        response.original_verdict = scenario.result.original_analysis
+        response.modified_verdict = scenario.result.modified_analysis
+        response.diff_view = scenario.result.diff_view
+        response.verdict_changed = scenario.result.analysis_changed
 
     return response
 

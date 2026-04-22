@@ -18,7 +18,7 @@ from src.api.schemas.escalation import (
     EscalationActionResponse,
 )
 from src.models.audit import AuditLog
-from src.models.case import Case, CaseStatus, RecommendationType, Verdict
+from src.models.case import Case, CaseStatus
 from src.models.user import User, UserRole
 
 router = APIRouter()
@@ -153,8 +153,7 @@ async def list_escalated_cases(
     summary="Take action on an escalated case",
     description=(
         "Available actions: `add_notes` (stays escalated), `return_to_pipeline` (-> processing), "
-        "`manual_decision` (-> decided, requires `final_order`), `reject` (-> rejected). "
-        "Requires judge role."
+        "`close` (-> closed). Requires judge role."
     ),
     responses={
         400: {"model": ErrorResponse, "description": "Case is not in escalated status"},
@@ -180,35 +179,18 @@ async def take_escalation_action(
             detail=f"Case is not in escalated status (current: {case.status.value})",
         )
 
-    if body.action == EscalationAction.manual_decision and not body.final_order:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="final_order is required for manual_decision action",
-        )
-
     previous_status = case.status
 
     status_map = {
         EscalationAction.add_notes: CaseStatus.escalated,
         EscalationAction.return_to_pipeline: CaseStatus.processing,
-        EscalationAction.manual_decision: CaseStatus.decided,
-        EscalationAction.reject: CaseStatus.rejected,
+        EscalationAction.close: CaseStatus.closed,
     }
     case.status = status_map[body.action]
 
     input_payload: dict = {"action": body.action.value, "judge_id": str(current_user.id)}
     if body.notes:
         input_payload["notes"] = body.notes
-    if body.final_order:
-        input_payload["final_order"] = body.final_order
-
-    if body.action == EscalationAction.manual_decision and body.final_order:
-        verdict = Verdict(
-            case_id=case_id,
-            recommendation_type=RecommendationType.manual_decision,
-            recommended_outcome=body.final_order,
-        )
-        db.add(verdict)
 
     audit = AuditLog(
         case_id=case_id,
@@ -225,8 +207,7 @@ async def take_escalation_action(
         EscalationAction.return_to_pipeline: (
             "Case status set to processing. Pipeline will pick it up on next poll."
         ),
-        EscalationAction.manual_decision: "Manual decision recorded. Case marked as decided.",
-        EscalationAction.reject: "Case has been rejected.",
+        EscalationAction.close: "Case has been closed.",
     }
 
     return EscalationActionResponse(

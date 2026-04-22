@@ -4,16 +4,15 @@ from src.models.base import Base
 from src.models.case import (
     Argument,
     Case,
-    Deliberation,
     Document,
     Evidence,
     Fact,
+    HearingAnalysis,
     HearingNote,
     LegalRule,
     Party,
     Precedent,
     ReopenRequest,
-    Verdict,
     Witness,
 )
 from src.models.pipeline_job import PipelineJob, PipelineJobStatus, PipelineJobType
@@ -35,8 +34,7 @@ __all__ = [
     "LegalRule",
     "Precedent",
     "Argument",
-    "Deliberation",
-    "Verdict",
+    "HearingAnalysis",
     "ReopenRequest",
     "AuditLog",
     "AdminEvent",

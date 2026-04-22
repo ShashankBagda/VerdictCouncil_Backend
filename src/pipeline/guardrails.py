@@ -3,7 +3,7 @@
 Layered approach:
 1. Fast regex scan via sanitization.py (catches known patterns)
 2. Lightweight LLM call for ambiguous cases (only if regex passes)
-3. Output integrity check after governance-verdict
+3. Output integrity check after hearing-governance
 """
 
 from __future__ import annotations
@@ -97,7 +97,7 @@ async def check_input_injection(
 
 
 def validate_output_integrity(agent_output: dict[str, Any]) -> dict[str, Any]:
-    """Check governance-verdict output for integrity issues.
+    """Check hearing-governance output for integrity issues.
 
     Returns dict with keys:
     - passed: bool
@@ -105,23 +105,12 @@ def validate_output_integrity(agent_output: dict[str, Any]) -> dict[str, Any]:
     """
     issues: list[str] = []
 
-    # Check verdict_recommendation has required fields
-    verdict = agent_output.get("verdict_recommendation")
-    if isinstance(verdict, dict):
-        confidence = verdict.get("confidence_score")
-        if confidence is not None and not (0 <= confidence <= 100):
-            issues.append(f"Confidence score out of range: {confidence}")
-
-        if not verdict.get("recommended_outcome"):
-            issues.append("Missing recommended_outcome in verdict")
-
-        if not verdict.get("reasoning"):
-            issues.append("Missing reasoning in verdict recommendation")
-
-    # Check fairness_check structure
+    # Check fairness_check completeness
     fairness = agent_output.get("fairness_check")
-    if isinstance(fairness, dict) and "audit_passed" not in fairness:
-        issues.append("Missing audit_passed in fairness_check")
+    if not isinstance(fairness, dict):
+        issues.append("Missing fairness_check in hearing-governance output")
+    elif "audit_passed" not in fairness:
+        issues.append("fairness_check missing audit_passed field")
 
     return {
         "passed": len(issues) == 0,

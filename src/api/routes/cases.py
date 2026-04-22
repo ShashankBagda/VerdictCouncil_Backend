@@ -21,7 +21,6 @@ from src.api.schemas.cases import (
     CaseResponse,
 )
 from src.api.schemas.common import ErrorResponse, MessageResponse, ValidationErrorResponse
-from src.api.schemas.workflows import RejectionReviewRequest, RejectionReviewResponse
 from src.models.audit import AuditLog
 from src.models.case import (
     Case,
@@ -30,7 +29,6 @@ from src.models.case import (
     CaseStatus,
     Fact,
     Party,
-    Verdict,
 )
 from src.models.user import User, UserRole
 from src.services.case_report_data import build_case_report_data
@@ -59,20 +57,18 @@ PIPELINE_AGENT_ORDER = [
     "witness-analysis",
     "legal-knowledge",
     "argument-construction",
-    "deliberation",
-    "governance-verdict",
+    "hearing-analysis",
+    "hearing-governance",
 ]
 
 
 def _status_group(status_value: CaseStatus) -> str:
     if status_value in {CaseStatus.pending, CaseStatus.processing, CaseStatus.failed_retryable}:
         return "processing"
-    if status_value in {CaseStatus.ready_for_review, CaseStatus.decided}:
+    if status_value == CaseStatus.ready_for_review:
         return "completed"
     if status_value == CaseStatus.escalated:
         return "escalated"
-    if status_value == CaseStatus.rejected:
-        return "rejected"
     if status_value == CaseStatus.closed:
         return "closed"
     if status_value == CaseStatus.failed:
@@ -83,7 +79,7 @@ def _status_group(status_value: CaseStatus) -> str:
 def _map_status_filter(status_filter: str) -> list[CaseStatus]:
     raw = status_filter.strip().lower()
     if raw == "completed":
-        return [CaseStatus.ready_for_review, CaseStatus.decided]
+        return [CaseStatus.ready_for_review]
     if raw == "processing":
         return [CaseStatus.pending, CaseStatus.processing, CaseStatus.failed_retryable]
     try:
@@ -123,38 +119,6 @@ def _party_role_lookup(parties: list[Party]) -> dict[str, str]:
     for party in parties:
         lookup[party.role.value] = party.name
     return lookup
-
-
-def _extract_decision_history(audit_logs: list[AuditLog]) -> list[dict[str, Any]]:
-    history: list[dict[str, Any]] = []
-    for log in sorted(
-        audit_logs, key=lambda item: item.created_at.timestamp() if item.created_at else 0.0
-    ):
-        if log.agent_name != "judge":
-            continue
-        if not (log.action.startswith("decision_") or log.action == "decision_amendment_apply"):
-            continue
-        payload = log.input_payload or {}
-        decision_type = log.action.removeprefix("decision_")
-        if log.action == "decision_amendment_apply":
-            decision_type = payload.get("amendment_type") or "amendment"
-        history.append(
-            {
-                "decision_type": decision_type,
-                "reason": payload.get("notes"),
-                "final_order": payload.get("final_order") or payload.get("proposed_final_order"),
-                "recorded_at": log.created_at,
-                "recorded_by": payload.get("judge_id") or payload.get("requested_by"),
-            }
-        )
-    return history
-
-
-def _extract_latest_verdict(case: Case) -> Verdict | None:
-    verdicts = list(case.verdicts or [])
-    if not verdicts:
-        return None
-    return verdicts[-1]
 
 
 def _extract_escalation_reason(case: Case) -> str | None:
@@ -281,25 +245,6 @@ def _build_jurisdiction_summary(case: Case) -> dict[str, Any]:
     return {"status": status_value, "valid": valid, "reasons": reasons}
 
 
-def _extract_rejection_reason(case: Case) -> str | None:
-    for log in sorted(
-        case.audit_logs or [],
-        key=lambda item: item.created_at.timestamp() if item.created_at else 0.0,
-        reverse=True,
-    ):
-        for payload in (log.output_payload or {}, log.input_payload or {}):
-            issues = payload.get("jurisdiction_issues")
-            if isinstance(issues, list) and issues:
-                first_issue = issues[0]
-                if isinstance(first_issue, str) and first_issue.strip():
-                    return first_issue
-            for key in ("reason", "detail", "message"):
-                value = payload.get(key)
-                if isinstance(value, str) and value.strip():
-                    return value
-    summary = _build_jurisdiction_summary(case)
-    return summary["reasons"][0] if summary["reasons"] else None
-
 
 def _build_pipeline_progress(case: Case) -> dict[str, Any]:
     completed_agents: set[str] = set()
@@ -323,7 +268,7 @@ def _build_pipeline_progress(case: Case) -> dict[str, Any]:
         running_agent = agent_id
         break
 
-    if case.status in {CaseStatus.ready_for_review, CaseStatus.decided, CaseStatus.closed}:
+    if case.status in {CaseStatus.ready_for_review, CaseStatus.closed}:
         return {"pipeline_progress_percent": 100, "current_agent": None}
 
     if case.status == CaseStatus.failed:
@@ -347,19 +292,9 @@ def _build_pipeline_progress(case: Case) -> dict[str, Any]:
 
 def _serialize_case_summary(case: Case) -> dict[str, Any]:
     role_lookup = _party_role_lookup(case.parties or [])
-    decision_history = _extract_decision_history(case.audit_logs or [])
-    latest_decision = decision_history[-1] if decision_history else None
-    latest_verdict = _extract_latest_verdict(case)
     description = case.description or case.title or ""
     summary_snippet = description[:157] + "..." if len(description) > 160 else description
 
-    outcome_summary = None
-    if latest_decision and latest_decision.get("final_order"):
-        outcome_summary = latest_decision["final_order"]
-    elif latest_verdict is not None:
-        outcome_summary = latest_verdict.recommended_outcome
-
-    amendment_state = "amended" if any(v.amendment_of for v in case.verdicts or []) else None
     reopen_requests = list(case.reopen_requests or [])
     reopen_state = reopen_requests[-1].status.value if reopen_requests else None
 
@@ -390,11 +325,8 @@ def _serialize_case_summary(case: Case) -> dict[str, Any]:
         "accused_name": role_lookup.get("accused"),
         "document_count": len(case.documents or []),
         "pipeline_progress": _build_pipeline_progress(case),
-        "outcome_summary": outcome_summary,
         "escalation_reason": _extract_escalation_reason(case),
         "reopen_state": reopen_state,
-        "amendment_state": amendment_state,
-        "latest_decision": latest_decision,
     }
 
 
@@ -418,9 +350,7 @@ def _serialize_case_detail(case: Case) -> dict[str, Any]:
             "legal_rules": list(case.legal_rules or []),
             "precedents": list(case.precedents or []),
             "arguments": list(case.arguments or []),
-            "deliberations": list(case.deliberations or []),
-            "verdicts": list(case.verdicts or []),
-            "decision_history": _extract_decision_history(case.audit_logs or []),
+            "hearing_analyses": list(case.hearing_analyses or []),
             "audit_logs": list(case.audit_logs or []),
         }
     )
@@ -498,7 +428,6 @@ async def list_cases(
     domain: CaseDomain | None = None,
     search: str | None = Query(None),
     complexity: str | None = Query(None),
-    outcome: str | None = Query(None),
     filed_from: date | None = Query(None),
     filed_to: date | None = Query(None),
     sort_by: str = Query("created_at"),
@@ -528,9 +457,6 @@ async def list_cases(
         query = query.where(Case.filed_date >= filed_from)
     if filed_to:
         query = query.where(Case.filed_date <= filed_to)
-    if outcome:
-        pattern = f"%{outcome.strip()}%"
-        query = query.where(Case.verdicts.any(Verdict.recommended_outcome.ilike(pattern)))
     if search and search.strip():
         pattern = f"%{search.strip()}%"
         query = query.where(
@@ -560,7 +486,6 @@ async def list_cases(
         selectinload(Case.parties),
         selectinload(Case.documents),
         selectinload(Case.facts),
-        selectinload(Case.verdicts),
         selectinload(Case.reopen_requests),
         selectinload(Case.audit_logs),
     )
@@ -604,8 +529,7 @@ async def get_case(
             selectinload(Case.legal_rules),
             selectinload(Case.precedents),
             selectinload(Case.arguments),
-            selectinload(Case.deliberations),
-            selectinload(Case.verdicts),
+            selectinload(Case.hearing_analyses),
             selectinload(Case.reopen_requests),
             selectinload(Case.audit_logs),
         )
@@ -622,82 +546,6 @@ async def get_case(
         )
 
     return _serialize_case_detail(case)
-
-
-@router.post(
-    "/{case_id}/rejection-review",
-    response_model=RejectionReviewResponse,
-    operation_id="review_rejected_case",
-    summary="Override or close a rejected case",
-    responses={
-        400: {"model": ErrorResponse, "description": "Case is not rejected"},
-        404: {"model": ErrorResponse, "description": "Case not found"},
-    },
-)
-async def review_rejected_case(
-    case_id: UUID,
-    body: RejectionReviewRequest,
-    db: DBSession,
-    current_user: User = require_role(UserRole.judge, UserRole.senior_judge),
-) -> RejectionReviewResponse:
-    result = await db.execute(
-        select(Case)
-        .where(Case.id == case_id)
-        .options(selectinload(Case.audit_logs))
-        .with_for_update()
-    )
-    case = result.scalar_one_or_none()
-    if not case:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
-    if case.status != CaseStatus.rejected:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only rejected cases can be reviewed through this endpoint",
-        )
-
-    rejection_reason = _extract_rejection_reason(case)
-    if body.action.value == "override":
-        case.status = CaseStatus.processing
-    else:
-        case.status = CaseStatus.closed
-
-    db.add(
-        AuditLog(
-            case_id=case_id,
-            agent_name="judge",
-            action=f"rejection_{body.action.value}",
-            input_payload={
-                "justification": body.justification,
-                "judge_id": str(current_user.id),
-                "rejection_reason": rejection_reason,
-            },
-            output_payload={"new_status": case.status.value},
-        )
-    )
-
-    if body.action.value == "override":
-        from src.models.pipeline_job import PipelineJobType
-        from src.workers.outbox import enqueue_outbox_job
-
-        await enqueue_outbox_job(
-            db,
-            case_id=case_id,
-            job_type=PipelineJobType.case_pipeline,
-            payload={"resume_from_stage": "case-processing", "resume_reason": "rejection_override"},
-        )
-
-    await db.commit()
-
-    return RejectionReviewResponse(
-        case_id=case_id,
-        action=body.action,
-        status=case.status,
-        rejection_reason=rejection_reason,
-        resumed_from_stage="case-processing" if body.action.value == "override" else None,
-        message="Rejected case returned to processing."
-        if body.action.value == "override"
-        else "Rejected case closed and archived.",
-    )
 
 
 @router.get(

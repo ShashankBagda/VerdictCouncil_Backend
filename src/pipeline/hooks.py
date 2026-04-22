@@ -120,7 +120,7 @@ class GovernanceHaltHook:
         return HookResult(state=state)
 
     async def after_agent(self, agent_name: str, state: CaseState, ctx: HookContext) -> HookResult:
-        if agent_name != "governance-verdict":
+        if agent_name != "hearing-governance":
             return HookResult(state=state)
         integrity = validate_output_integrity(state.model_dump())
         if not integrity["passed"]:
@@ -140,7 +140,7 @@ class GovernanceHaltHook:
                 state=state,
                 halt=True,
                 reason="governance_halt",
-                stopped_at="governance-verdict",
+                stopped_at="hearing-governance",
             )
         if state.fairness_check and state.fairness_check.critical_issues_found:
             logger.warning(
@@ -152,7 +152,7 @@ class GovernanceHaltHook:
                 state=state,
                 halt=True,
                 reason="governance_halt",
-                stopped_at="governance-verdict",
+                stopped_at="hearing-governance",
             )
         return HookResult(state=state)
 

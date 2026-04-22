@@ -136,7 +136,7 @@ async def test_pipeline_halts_on_escalation():
 # ------------------------------------------------------------------ #
 @pytest.mark.asyncio
 async def test_pipeline_halts_on_fairness_issues():
-    """Pipeline stops at governance-verdict if critical_issues_found is True."""
+    """Pipeline stops at hearing-governance if critical_issues_found is True."""
     client = AsyncMock()
 
     call_count = 0
@@ -144,7 +144,7 @@ async def test_pipeline_halts_on_fairness_issues():
     async def mock_create(**kwargs):
         nonlocal call_count
         call_count += 1
-        # Last agent (governance-verdict) returns fairness issue
+        # Last agent (hearing-governance) returns fairness issue
         if call_count == len(AGENT_ORDER):
             return _make_chat_response(
                 {

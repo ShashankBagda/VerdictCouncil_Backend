@@ -2,12 +2,12 @@
 
 Layout produced by ``assemble_pack``::
 
-    manifest.json      # HearingPackManifest (metadata + file list)
-    case_summary.md    # Markdown summary (description + status + verdict)
-    evidence.json      # All evidence rows
-    facts.json         # All facts
-    arguments.md       # Pretty-printed arguments (one block per side)
-    verdict.json       # Verdict + fairness_report
+    manifest.json           # HearingPackManifest (metadata + file list)
+    case_summary.md         # Markdown summary (description + status)
+    evidence.json           # All evidence rows
+    facts.json              # All facts
+    arguments.md            # Pretty-printed arguments (one block per side)
+    fairness_governance.json # Fairness & governance check report
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ _FILES = [
     "evidence.json",
     "facts.json",
     "arguments.md",
-    "verdict.json",
+    "fairness_governance.json",
 ]
 
 
@@ -43,14 +43,13 @@ def _case_summary_md(data: CaseReportData) -> str:
         data.description or "_No description provided._",
         "",
     ]
-    if data.verdict:
+    if data.fairness_report:
         lines.extend(
             [
-                "## Verdict",
+                "## Fairness & Governance Check",
                 "",
-                f"- **Recommendation:** {data.verdict.get('recommendation_type')}",
-                f"- **Outcome:** {data.verdict.get('recommended_outcome')}",
-                f"- **Confidence:** {data.verdict.get('confidence_score')}",
+                f"- **Status:** {data.fairness_report.get('status')}",
+                f"- **Summary:** {data.fairness_report.get('summary')}",
                 "",
             ]
         )
@@ -111,8 +110,7 @@ def _build_manifest(data: CaseReportData) -> HearingPackManifest:
 def assemble_pack(data: CaseReportData) -> bytes:
     """Produce the in-memory zip bytes for a case's hearing pack."""
     manifest = _build_manifest(data)
-    verdict_payload = {
-        "verdict": data.verdict,
+    fairness_governance_payload = {
         "fairness_report": data.fairness_report,
         "decision_history": data.decision_history,
     }
@@ -124,5 +122,5 @@ def assemble_pack(data: CaseReportData) -> bytes:
         zf.writestr("evidence.json", json.dumps(data.evidence, indent=2, default=str))
         zf.writestr("facts.json", json.dumps(data.facts, indent=2, default=str))
         zf.writestr("arguments.md", _arguments_md(data))
-        zf.writestr("verdict.json", json.dumps(verdict_payload, indent=2, default=str))
+        zf.writestr("fairness_governance.json", json.dumps(fairness_governance_payload, indent=2, default=str))
     return buf.getvalue()

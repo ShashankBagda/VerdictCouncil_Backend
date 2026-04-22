@@ -15,18 +15,12 @@ from src.models.case import CaseDomain, CaseStatus
 class EscalationAction(str, enum.Enum):
     add_notes = "add_notes"
     return_to_pipeline = "return_to_pipeline"
-    manual_decision = "manual_decision"
-    reject = "reject"
+    close = "close"
 
 
 class EscalationActionRequest(BaseModel):
     action: EscalationAction = Field(..., description="Action to take on the escalated case")
     notes: str | None = Field(None, description="Judge's review notes", max_length=2000)
-    final_order: str | None = Field(
-        None,
-        description="Final order text — required when action is manual_decision",
-        max_length=5000,
-    )
 
 
 class WorkflowHistoryEntryResponse(BaseModel):

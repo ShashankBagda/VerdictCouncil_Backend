@@ -16,8 +16,8 @@ AGENT_NAMES = [
     "witness-analysis",
     "legal-knowledge",
     "argument-construction",
-    "deliberation",
-    "governance-verdict",
+    "hearing-analysis",
+    "hearing-governance",
 ]
 
 # Expected model anchors per agent (based on model_tier mapping)
@@ -29,8 +29,8 @@ EXPECTED_MODELS = {
     "witness-analysis": "gpt5_mini_model",  # efficient
     "legal-knowledge": "gpt5_model",  # strong
     "argument-construction": "gpt54_model",  # frontier
-    "deliberation": "gpt54_model",  # frontier
-    "governance-verdict": "gpt54_model",  # frontier
+    "hearing-analysis": "gpt54_model",  # frontier
+    "hearing-governance": "gpt54_model",  # frontier
 }
 
 

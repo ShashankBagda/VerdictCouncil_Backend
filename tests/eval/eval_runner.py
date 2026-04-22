@@ -27,25 +27,20 @@ def _score_output(state: CaseState) -> dict:
         "legal_rules",
         "precedents",
         "arguments",
-        "deliberation",
+        "hearing_analysis",
         "fairness_check",
-        "verdict_recommendation",
     ]
     populated = sum(1 for f in expected_fields if getattr(state, f, None))
     scores["completeness"] = populated / len(expected_fields)
     scores["populated_fields"] = populated
     scores["total_fields"] = len(expected_fields)
 
-    # Verdict quality
-    verdict = state.verdict_recommendation
-    if verdict is not None:
-        confidence = verdict.confidence_score
-        scores["has_verdict"] = True
-        scores["confidence_score"] = confidence
-        scores["confidence_valid"] = isinstance(confidence, (int, float)) and 0 <= confidence <= 100
+    # Hearing analysis quality
+    hearing_analysis = state.hearing_analysis
+    if hearing_analysis is not None:
+        scores["has_hearing_analysis"] = True
     else:
-        scores["has_verdict"] = False
-        scores["confidence_valid"] = False
+        scores["has_hearing_analysis"] = False
 
     # Fairness check
     fairness = state.fairness_check
@@ -56,9 +51,11 @@ def _score_output(state: CaseState) -> dict:
         scores["has_fairness"] = False
         scores["audit_passed_present"] = False
 
-    # Overall pass: completeness >= 70%, has verdict, has fairness
+    # Overall pass: completeness >= 70%, has hearing analysis, has fairness
     scores["passed"] = (
-        scores["completeness"] >= 0.7 and scores["has_verdict"] and scores["has_fairness"]
+        scores["completeness"] >= 0.7
+        and scores["has_hearing_analysis"]
+        and scores["has_fairness"]
     )
 
     return scores
@@ -95,12 +92,11 @@ class TestPipelineEval:
             f"  Completeness: {scores['completeness']:.0%} "
             f"({scores['populated_fields']}/{scores['total_fields']})"
         )
-        print(f"  Has verdict: {scores['has_verdict']}")
-        print(f"  Confidence valid: {scores['confidence_valid']}")
+        print(f"  Has hearing analysis: {scores['has_hearing_analysis']}")
         print(f"  Has fairness: {scores['has_fairness']}")
         print(f"  Audit passed present: {scores['audit_passed_present']}")
         print(f"  PASSED: {scores['passed']}")
 
         assert scores["completeness"] >= 0.7, f"Completeness too low: {scores['completeness']:.0%}"
-        assert scores["has_verdict"], "No verdict_recommendation produced"
+        assert scores["has_hearing_analysis"], "No hearing_analysis produced"
         assert scores["has_fairness"], "No fairness_check produced"
