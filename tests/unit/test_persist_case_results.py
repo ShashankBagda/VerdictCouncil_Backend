@@ -296,6 +296,8 @@ async def test_deliberation_and_verdict_single_row_each():
     assert verdicts[0].fairness_report == {
         "critical_issues_found": False,
         "audit_passed": True,
+        "issues": [],
+        "recommendations": [],
     }
 
 

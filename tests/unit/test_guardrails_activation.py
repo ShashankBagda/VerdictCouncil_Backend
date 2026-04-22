@@ -14,6 +14,7 @@ import pytest
 
 from src.pipeline._a2a_client import FakeA2AClient
 from src.pipeline.guardrails import check_input_injection
+from src.pipeline.hooks import HookContext, InputGuardrailHook
 from src.pipeline.mesh_runner import MeshPipelineRunner
 from src.shared.case_state import CaseState, CaseStatusEnum
 
@@ -86,7 +87,7 @@ async def test_check_input_injection_blocks_system_tag():
 
 
 # ---------------------------------------------------------------------
-# _apply_input_guardrail: malicious description is sanitized + audited
+# InputGuardrailHook: malicious description is sanitized + audited
 # ---------------------------------------------------------------------
 
 
@@ -94,7 +95,7 @@ async def test_check_input_injection_blocks_system_tag():
 async def test_apply_input_guardrail_replaces_description_and_audits():
     """A blocked input must not reach downstream agents verbatim.
 
-    The runner should (a) overwrite `case_metadata.description` with the
+    The hook should (a) overwrite `case_metadata.description` with the
     sanitized text and (b) append an audit entry tagging the
     `guardrails/input_injection_blocked` event for forensic traceability.
     """
@@ -107,9 +108,11 @@ async def test_apply_input_guardrail_replaces_description_and_audits():
         },
         status=CaseStatusEnum.pending,
     )
-    runner = _runner()
+    hook = InputGuardrailHook(client=AsyncMock())
+    ctx = HookContext(is_resume=False, run_id="test-run", case_id="test-case")
 
-    sanitized_state = await runner._apply_input_guardrail(state)
+    hook_result = await hook.before_run(state, ctx)
+    sanitized_state = hook_result.state
 
     description = sanitized_state.case_metadata["description"]
     assert "[INST]" not in description
@@ -123,9 +126,10 @@ async def test_apply_input_guardrail_passes_clean_input_unchanged():
     """Benign input must flow through without sanitization or audit noise."""
     original = "Traffic case involving red-light violation on 2026-01-15."
     state = CaseState(case_metadata={"description": original}, status=CaseStatusEnum.pending)
-    runner = _runner()
+    hook = InputGuardrailHook(client=AsyncMock())
+    ctx = HookContext(is_resume=False, run_id="test-run", case_id="test-case")
 
-    result = await runner._apply_input_guardrail(state)
+    hook_result = await hook.before_run(state, ctx)
 
-    assert result.case_metadata["description"] == original
-    assert all(e.action != "input_injection_blocked" for e in result.audit_log)
+    assert hook_result.state.case_metadata["description"] == original
+    assert all(e.action != "input_injection_blocked" for e in hook_result.state.audit_log)
