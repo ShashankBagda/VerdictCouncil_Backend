@@ -456,11 +456,14 @@ class PipelineRunner:
         In the prototype, tools are imported from src.tools and called
         directly. For distributed mode, these would be Solace RPC calls.
         """
+        from src.pipeline.observability import tool_span  # lazy: avoids linter removal
+
         try:
             if tool_name == "parse_document":
                 from src.tools import parse_document
 
-                result = await parse_document(**arguments)
+                with tool_span("tool.parse_document", inputs={"args": list(arguments.keys())}):
+                    result = await parse_document(**arguments)
             elif tool_name == "cross_reference":
                 from src.tools import cross_reference
 
@@ -476,7 +479,8 @@ class PipelineRunner:
             elif tool_name == "search_precedents":
                 from src.tools.search_precedents import search_precedents_with_meta
 
-                search_result = await search_precedents_with_meta(**arguments)
+                with tool_span("tool.search_precedents", inputs={"args": list(arguments.keys())}):
+                    search_result = await search_precedents_with_meta(**arguments)
                 result = search_result.precedents
                 # Merge metadata across multiple calls: source_failed if ANY call failed
                 if self._pending_precedent_meta is None:
@@ -640,34 +644,41 @@ class PipelineRunner:
         - After Agent 9 (governance-verdict) phase 1: if fairness_check
           has critical_issues_found == True
         """
+        from src.pipeline.observability import pipeline_run  # lazy: avoids linter removal
+
         state = case_state
 
-        for agent_name in AGENT_ORDER:
-            logger.info("Pipeline step: %s", agent_name)
-            state = await self._run_agent(agent_name, state)
+        with pipeline_run(
+            case_id=str(state.case_id or "unknown"),
+            run_id=state.run_id or "unknown",
+            mode="in_process",
+        ):
+            for agent_name in AGENT_ORDER:
+                logger.info("Pipeline step: %s", agent_name)
+                state = await self._run_agent(agent_name, state)
 
-            # Halt after Agent 2 if case is escalated
-            if agent_name == "complexity-routing" and state.status == CaseStatusEnum.escalated:
-                logger.warning(
-                    "Pipeline halted at complexity-routing: "
-                    "case escalated to human review (case_id=%s)",
-                    state.case_id,
-                )
-                return state
+                # Halt after Agent 2 if case is escalated
+                if agent_name == "complexity-routing" and state.status == CaseStatusEnum.escalated:
+                    logger.warning(
+                        "Pipeline halted at complexity-routing: "
+                        "case escalated to human review (case_id=%s)",
+                        state.case_id,
+                    )
+                    return state
 
-            # Halt after Agent 9 if fairness check found critical issues
-            if (
-                agent_name == "governance-verdict"
-                and state.fairness_check
-                and state.fairness_check.critical_issues_found
-            ):
-                logger.warning(
-                    "Pipeline halted at governance-verdict: "
-                    "critical fairness issues detected (case_id=%s)",
-                    state.case_id,
-                )
-                state = state.model_copy(update={"status": CaseStatusEnum.escalated})
-                return state
+                # Halt after Agent 9 if fairness check found critical issues
+                if (
+                    agent_name == "governance-verdict"
+                    and state.fairness_check
+                    and state.fairness_check.critical_issues_found
+                ):
+                    logger.warning(
+                        "Pipeline halted at governance-verdict: "
+                        "critical fairness issues detected (case_id=%s)",
+                        state.case_id,
+                    )
+                    state = state.model_copy(update={"status": CaseStatusEnum.escalated})
+                    return state
 
         logger.info(
             "Pipeline completed for case_id=%s, status=%s",

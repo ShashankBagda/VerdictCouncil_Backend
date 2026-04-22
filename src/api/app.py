@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
@@ -5,6 +7,7 @@ from starlette.routing import Route
 
 from src.api.middleware.metrics import MetricsMiddleware, metrics_endpoint
 from src.api.middleware.rate_limit import RateLimitMiddleware
+from src.pipeline.observability import configure_mlflow
 from src.shared.config import settings
 
 OPENAPI_TAGS = [
@@ -117,8 +120,15 @@ def _custom_openapi(app: FastAPI) -> dict:
     return schema
 
 
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    configure_mlflow()
+    yield
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
+        lifespan=_lifespan,
         title="VerdictCouncil API",
         version="0.1.0",
         summary="Judicial AI decision-support system with 9-agent pipeline",

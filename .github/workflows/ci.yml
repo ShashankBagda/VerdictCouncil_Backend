@@ -27,7 +27,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e ".[dev]"
-      - run: pytest tests/ -v --tb=short --cov=src --cov-report=term-missing
+      - run: pytest tests/ -v --tb=short --cov=src --cov-report=term-missing --cov-fail-under=65
         env:
           OPENAI_API_KEY: ""
 
@@ -62,7 +62,6 @@ jobs:
       - run: pip-audit
         continue-on-error: true
       - run: bandit -r src/ -ll
-        continue-on-error: true
 
   docker:
     runs-on: ubuntu-latest
