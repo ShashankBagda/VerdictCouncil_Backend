@@ -341,6 +341,23 @@ async def test_case_row_status_and_metadata_sync():
 
 
 @pytest.mark.asyncio
+async def test_writes_latest_run_id_to_case_row():
+    """persist_case_results anchors what-if rehydration at state.run_id."""
+    case_id = uuid4()
+    case = _case(case_id)
+    state = CaseState(
+        case_id=str(case_id),
+        run_id="run-abc-123",
+        status=CaseStatusEnum.decided,
+    )
+
+    session = _RecordingSession(case=case)
+    await persist_case_results(session, case_id, state)  # type: ignore[arg-type]
+
+    assert case.latest_run_id == "run-abc-123"
+
+
+@pytest.mark.asyncio
 async def test_rolls_back_on_failure():
     case_id = uuid4()
     state = CaseState(case_id=str(case_id))
