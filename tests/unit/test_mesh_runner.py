@@ -128,7 +128,7 @@ def _skip_guardrail(monkeypatch):
     async def _noop(_text, _client):
         return {"blocked": False, "method": "", "reason": "", "sanitized_text": ""}
 
-    monkeypatch.setattr("src.pipeline.mesh_runner.check_input_injection", _noop)
+    monkeypatch.setattr("src.pipeline.hooks.check_input_injection", _noop)
 
 
 # ---------------------------------------------------------------------------
