@@ -139,18 +139,15 @@ class WhatIfController:
         evidence_id = payload.get("evidence_id")
         exclude = payload.get("exclude", True)
 
-        analysis = state.evidence_analysis
-        if isinstance(analysis, dict) and "evidence_items" in analysis:
-            for item in analysis["evidence_items"]:
-                if isinstance(item, dict) and item.get("id") == evidence_id:
-                    item["excluded"] = exclude
-                    if exclude:
-                        item["exclusion_reason"] = payload.get(
-                            "reason", "Excluded by judge via what-if scenario"
-                        )
-                    break
+        for item in state.evidence_analysis.evidence_items:
+            if isinstance(item, dict) and item.get("id") == evidence_id:
+                item["excluded"] = exclude
+                if exclude:
+                    item["exclusion_reason"] = payload.get(
+                        "reason", "Excluded by judge via what-if scenario"
+                    )
+                break
 
-        state.evidence_analysis = analysis
         return state
 
     def _apply_witness_credibility(self, state: CaseState, payload: dict[str, Any]) -> CaseState:
@@ -309,8 +306,8 @@ class WhatIfController:
                     )
 
         # Evidence exclusions
-        if case_state.evidence_analysis and isinstance(case_state.evidence_analysis, dict):
-            evidence_items = case_state.evidence_analysis.get("evidence_items", [])
+        if case_state.evidence_analysis:
+            evidence_items = case_state.evidence_analysis.evidence_items
             for item in evidence_items:
                 if isinstance(item, dict) and not item.get("excluded", False):
                     perturbations.append(

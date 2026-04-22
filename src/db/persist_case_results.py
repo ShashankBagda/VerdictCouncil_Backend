@@ -159,8 +159,12 @@ async def _update_case_row(
 
 
 def _insert_evidence(db: AsyncSession, case_id: UUID, state: CaseState) -> None:
-    items = _items_from(state.evidence_analysis, ("evidence_items", "items", "evidence"))
-    for item in items:
+    data = state.evidence_analysis
+    if not data:
+        return
+    for item in data.evidence_items:
+        if not isinstance(item, dict):
+            continue
         ev_type = _coerce_enum(item.get("evidence_type"), EvidenceType)
         if ev_type is None:
             continue

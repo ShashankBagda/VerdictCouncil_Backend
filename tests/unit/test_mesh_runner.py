@@ -250,7 +250,7 @@ async def test_l2_fanout_publishes_three_parallel_with_aggregator_reply_to():
     assert meta_key in redis.store
 
     # Merged state returned with L2 fields populated
-    assert result.evidence_analysis == {"exhibits": []}
+    assert result.evidence_analysis is not None and result.evidence_analysis.exhibits == []
     assert result.extracted_facts is not None and result.extracted_facts.timeline == []
     assert result.witnesses is not None and result.witnesses.statements == []
 
@@ -392,7 +392,7 @@ async def test_parse_agent_response_strips_unauthorized_fields():
     # Authorized write is kept.
     assert result.witnesses is not None and result.witnesses.statements == ["w1"]
     # Unauthorized writes are reverted to prior state.
-    assert result.evidence_analysis == {"exhibits": ["legit"]}
+    assert result.evidence_analysis is not None and result.evidence_analysis.exhibits == ["legit"]
     assert result.arguments == {"claim": "original"}
 
 
@@ -411,7 +411,7 @@ async def test_parse_agent_response_accepts_authorized_fragment():
     result = runner._parse_agent_response(envelope, prior, "witness-analysis")
 
     assert result.witnesses is not None and result.witnesses.statements == ["w1"]
-    assert result.evidence_analysis == {"exhibits": ["keep"]}
+    assert result.evidence_analysis is not None and result.evidence_analysis.exhibits == ["keep"]
 
 
 # ---------------------------------------------------------------------------
