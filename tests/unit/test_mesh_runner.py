@@ -335,7 +335,15 @@ async def test_full_pipeline_runs_all_nine_agents_via_mesh():
 
 
 @pytest.mark.asyncio
-async def test_run_halts_after_complexity_routing_when_escalated():
+async def test_complexity_routing_escalated_status_forced_to_processing():
+    """ComplexityEscalationHook no longer halts the pipeline.
+
+    When complexity-routing sets status=escalated, the hook forces it
+    back to processing so the pipeline continues past L1 agents. The
+    escalation halt was removed in favour of the 4-gate HITL review model.
+    We patch the L2 barrier timeout to fail fast (0.05s) so the test
+    completes without running the full mesh.
+    """
     a2a = FakeA2AClient()
     redis = _FakeRedis()
     state = _case_state()
@@ -345,17 +353,27 @@ async def test_run_halts_after_complexity_routing_when_escalated():
         dumped = state.model_dump(mode="json")
         if agent == "complexity-routing":
             dumped["status"] = CaseStatusEnum.escalated.value
+        # L2 fanout agents: never return so L2 barrier times out fast
+        if agent in L2_AGENTS:
+            return None
         return _send_task_response(envelope["id"], dumped)
 
     a2a.auto_resolver = resolver
 
     runner = _make_runner(a2a, redis)
-    result = await runner.run(state)
+    with (
+        patch("src.pipeline.mesh_runner.L2_BARRIER_TIMEOUT_SECONDS", 0.05),
+        pytest.raises(asyncio.TimeoutError),
+    ):
+        await runner.run(state)
 
-    assert result.status == CaseStatusEnum.escalated
-    # Only L1 agents were published — pipeline halted before L2.
+    # Both L1 agents ran and L2 was reached — pipeline was NOT halted by the
+    # complexity-routing escalation.  If the old halt code were still active,
+    # no L2 agent topic would ever be published.
     published_agents = [p[0].rsplit("/", 1)[-1] for p in a2a.publishes]
-    assert published_agents == ["case-processing", "complexity-routing"]
+    assert "case-processing" in published_agents
+    assert "complexity-routing" in published_agents
+    assert any(a in published_agents for a in L2_AGENTS)
 
 
 # ---------------------------------------------------------------------------
@@ -571,9 +589,11 @@ def _terminal_events(mock_publish: AsyncMock) -> list:
 
 
 @pytest.mark.asyncio
-async def test_terminal_event_emitted_on_complexity_escalation(monkeypatch):
-    """L1 halt at complexity-routing emits ('pipeline', 'terminal') before
-    returning — the per-agent 'failed' wire misattribution is gone.
+async def test_complexity_escalation_no_longer_halts_mesh_pipeline(monkeypatch):
+    """ComplexityEscalationHook now forces escalated → processing and does NOT
+    halt — the pipeline continues past L1 into L2. The old 'complexity_escalation'
+    terminal event is no longer emitted.  We patch the L2 barrier timeout to
+    bail out fast so the test doesn't block on the incomplete L2 resolver.
     """
     publish_mock = AsyncMock(return_value=None)
     monkeypatch.setattr("src.pipeline.mesh_runner.publish_progress", publish_mock)
@@ -587,32 +607,34 @@ async def test_terminal_event_emitted_on_complexity_escalation(monkeypatch):
         dumped = state.model_dump(mode="json")
         if agent == "complexity-routing":
             dumped["status"] = CaseStatusEnum.escalated.value
+        if agent in L2_AGENTS:
+            return None  # L2 never resolves → barrier times out
         return _send_task_response(envelope["id"], dumped)
 
     a2a.auto_resolver = resolver
     runner = _make_runner(a2a, redis)
-    await runner.run(state)
+    with (
+        patch("src.pipeline.mesh_runner.L2_BARRIER_TIMEOUT_SECONDS", 0.05),
+        pytest.raises(asyncio.TimeoutError),
+    ):
+        await runner.run(state)
 
+    # Hook forces escalated → processing and does NOT halt; both L1 agents ran.
+    # Pipeline reached L2 (confirmed by L2 agent publishes), not halted at L1.
+    published_agents = [p[0].rsplit("/", 1)[-1] for p in a2a.publishes]
+    assert "complexity-routing" in published_agents
+    assert any(a in published_agents for a in L2_AGENTS)
+
+    # The old 'complexity_escalation' terminal reason is gone.
     terminals = _terminal_events(publish_mock)
-    assert len(terminals) == 1
-    event = terminals[0]
-    assert event.detail == {
-        "reason": "complexity_escalation",
-        "stopped_at": "complexity-routing",
-    }
-    # hearing-governance/failed is NOT emitted for this halt — plan M1/codex.
-    bad = [
-        c.args[0]
-        for c in publish_mock.await_args_list
-        if c.args and c.args[0].agent == "hearing-governance" and c.args[0].phase == "failed"
-    ]
-    assert bad == []
+    assert not any(t.detail.get("reason") == "complexity_escalation" for t in terminals)
 
 
 @pytest.mark.asyncio
-async def test_terminal_event_emitted_on_governance_escalation(monkeypatch):
-    """A critical fairness issue flips status to escalated and must emit a
-    terminal event attributed to hearing-governance.
+async def test_governance_critical_issues_no_longer_halt_mesh_pipeline(monkeypatch):
+    """GovernanceHaltHook now just logs fairness issues; it does NOT halt the
+    pipeline or set status=escalated. Pipeline completes normally even when
+    critical_issues_found is True — the judge sees the flags at gate 4.
     """
     publish_mock = AsyncMock(return_value=None)
     monkeypatch.setattr("src.pipeline.mesh_runner.publish_progress", publish_mock)
@@ -656,13 +678,14 @@ async def test_terminal_event_emitted_on_governance_escalation(monkeypatch):
     runner = _make_runner(a2a, redis)
     result = await runner.run(state)
 
-    assert result.status == CaseStatusEnum.escalated
+    # Pipeline completes; fairness flags are captured but do not halt.
+    assert result.fairness_check is not None
+    assert result.fairness_check.critical_issues_found is True
+    assert result.status != CaseStatusEnum.escalated
+
+    # No 'governance_halt' terminal event — the old halt is gone.
     terminals = _terminal_events(publish_mock)
-    assert len(terminals) == 1
-    assert terminals[0].detail == {
-        "reason": "governance_halt",
-        "stopped_at": "hearing-governance",
-    }
+    assert not any(t.detail.get("reason") == "governance_halt" for t in terminals)
 
 
 @pytest.mark.asyncio
@@ -757,10 +780,10 @@ async def test_terminal_event_emitted_on_l2_barrier_timeout(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_run_from_emits_terminal_on_complexity_escalation(monkeypatch):
-    """What-If re-entry at complexity-routing must also emit a terminal
-    event when that agent escalates — otherwise a scenario SSE stream
-    would hang on the halt path.
+async def test_run_from_complexity_escalation_hook_forces_processing(monkeypatch):
+    """What-If re-entry at complexity-routing: hook forces escalated → processing
+    and the pipeline continues into L2. The old 'complexity_escalation' terminal
+    is no longer emitted. L2 barrier times out fast so the test stays quick.
     """
     publish_mock = AsyncMock(return_value=None)
     monkeypatch.setattr("src.pipeline.mesh_runner.publish_progress", publish_mock)
@@ -774,12 +797,22 @@ async def test_run_from_emits_terminal_on_complexity_escalation(monkeypatch):
         dumped = state.model_dump(mode="json")
         if agent == "complexity-routing":
             dumped["status"] = CaseStatusEnum.escalated.value
+        if agent in L2_AGENTS:
+            return None  # L2 never resolves → barrier times out
         return _send_task_response(envelope["id"], dumped)
 
     a2a.auto_resolver = resolver
     runner = _make_runner(a2a, redis)
-    await runner.run_from(state, start_agent="complexity-routing")
+    with (
+        patch("src.pipeline.mesh_runner.L2_BARRIER_TIMEOUT_SECONDS", 0.05),
+        pytest.raises(asyncio.TimeoutError),
+    ):
+        await runner.run_from(state, start_agent="complexity-routing")
+
+    # Hook forced processing and pipeline continued past complexity-routing into L2.
+    published_agents = [p[0].rsplit("/", 1)[-1] for p in a2a.publishes]
+    assert "complexity-routing" in published_agents
+    assert any(a in published_agents for a in L2_AGENTS)
 
     terminals = _terminal_events(publish_mock)
-    assert len(terminals) == 1
-    assert terminals[0].detail["reason"] == "complexity_escalation"
+    assert not any(t.detail.get("reason") == "complexity_escalation" for t in terminals)

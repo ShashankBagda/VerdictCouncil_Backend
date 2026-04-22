@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.pipeline.runner import AGENT_ORDER, PipelineRunner
+from src.pipeline.runner import PipelineRunner
 from src.shared.case_state import CaseDomainEnum, CaseState, CaseStatusEnum
 
 
@@ -78,11 +78,15 @@ def _agent_config(model_tier: str = "lightweight"):
 
 
 # ------------------------------------------------------------------ #
-# Full pipeline runs all 9 agents sequentially
+# run() executes gate 1 agents only (2-agent intake gate)
 # ------------------------------------------------------------------ #
 @pytest.mark.asyncio
-async def test_full_pipeline_runs_all_agents():
-    """Pipeline calls each agent in AGENT_ORDER and returns final state."""
+async def test_run_executes_gate1_agents():
+    """run() only executes gate 1 (case-processing + complexity-routing).
+
+    Subsequent gates are advanced by the judge via the gate advance endpoint
+    and run through run_gate_job. The final state is awaiting_review_gate1.
+    """
     client = AsyncMock()
     # Each agent returns an empty JSON (no fields modified)
     client.chat.completions.create = AsyncMock(return_value=_make_chat_response({}))
@@ -93,16 +97,20 @@ async def test_full_pipeline_runs_all_agents():
         result = await runner.run(_minimal_state())
 
     assert isinstance(result, CaseState)
-    # Should have been called once per agent
-    assert client.chat.completions.create.call_count == len(AGENT_ORDER)
+    # Gate 1 has 2 agents: case-processing + complexity-routing
+    assert client.chat.completions.create.call_count == 2
+    assert result.status.value == "awaiting_review_gate1"
 
 
 # ------------------------------------------------------------------ #
-# Pipeline halts when complexity-routing sets escalated status
+# Complexity-routing escalation is intercepted by the hook
 # ------------------------------------------------------------------ #
 @pytest.mark.asyncio
-async def test_pipeline_halts_on_escalation():
-    """Pipeline stops after complexity-routing if status is escalated."""
+async def test_complexity_routing_escalation_forced_to_processing():
+    """When complexity-routing returns status=escalated, ComplexityEscalationHook
+    forces it back to processing — the pipeline does NOT halt.  Gate 1 completes
+    and returns awaiting_review_gate1.
+    """
     client = AsyncMock()
 
     call_count = 0
@@ -110,13 +118,11 @@ async def test_pipeline_halts_on_escalation():
     async def mock_create(**kwargs):
         nonlocal call_count
         call_count += 1
-        # Agent 1 (case-processing) returns normal
         if call_count == 1:
             return _make_chat_response({})
-        # Agent 2 (complexity-routing) sets escalated status
+        # Agent 2 (complexity-routing) tries to set escalated
         if call_count == 2:
             return _make_chat_response({"status": "escalated"})
-        # Should not be reached
         return _make_chat_response({})
 
     client.chat.completions.create = AsyncMock(side_effect=mock_create)
@@ -126,26 +132,30 @@ async def test_pipeline_halts_on_escalation():
     with patch.object(runner, "_load_agent_config", return_value=_agent_config()):
         result = await runner.run(_minimal_state())
 
-    assert result.status == CaseStatusEnum.escalated
-    # Only 2 agents should have been called
+    # Hook intercepted escalated → processing; gate 1 completed normally.
+    assert result.status != CaseStatusEnum.escalated
+    assert result.status.value == "awaiting_review_gate1"
+    # Both gate-1 agents ran
     assert call_count == 2
 
 
 # ------------------------------------------------------------------ #
-# Pipeline halts on critical fairness issues
+# Governance fairness issues are surfaced to judge, not a halt
 # ------------------------------------------------------------------ #
 @pytest.mark.asyncio
-async def test_pipeline_halts_on_fairness_issues():
-    """Pipeline stops at hearing-governance if critical_issues_found is True."""
+async def test_governance_fairness_issues_captured_without_halt():
+    """GovernanceHaltHook no longer halts. Critical fairness issues from
+    hearing-governance are surfaced to the judge at gate 4 review; the
+    pipeline completes normally and status is NOT set to escalated.
+    """
     client = AsyncMock()
 
-    call_count = 0
+    call_count = [0]
 
     async def mock_create(**kwargs):
-        nonlocal call_count
-        call_count += 1
-        # Last agent (hearing-governance) returns fairness issue
-        if call_count == len(AGENT_ORDER):
+        call_count[0] += 1
+        if call_count[0] == 1:
+            # hearing-governance (the only gate-4 agent) returns fairness issue
             return _make_chat_response(
                 {
                     "fairness_check": {
@@ -162,10 +172,14 @@ async def test_pipeline_halts_on_fairness_issues():
 
     runner = PipelineRunner(client=client)
 
+    state = _minimal_state()
     with patch.object(runner, "_load_agent_config", return_value=_agent_config()):
-        result = await runner.run(_minimal_state())
+        result = await runner.run_gate(state, "gate4")
 
-    assert result.status == CaseStatusEnum.escalated
+    # GovernanceHaltHook logs but does not halt; status is gate-4 pause.
+    assert result.status != CaseStatusEnum.escalated
+    assert result.status.value == "awaiting_review_gate4"
+    assert result.fairness_check is not None
     assert result.fairness_check.critical_issues_found is True
 
 

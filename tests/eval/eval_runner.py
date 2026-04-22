@@ -53,9 +53,7 @@ def _score_output(state: CaseState) -> dict:
 
     # Overall pass: completeness >= 70%, has hearing analysis, has fairness
     scores["passed"] = (
-        scores["completeness"] >= 0.7
-        and scores["has_hearing_analysis"]
-        and scores["has_fairness"]
+        scores["completeness"] >= 0.7 and scores["has_hearing_analysis"] and scores["has_fairness"]
     )
 
     return scores
