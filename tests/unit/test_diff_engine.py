@@ -142,7 +142,7 @@ class TestFactChanges:
         modified = copy.deepcopy(original)
 
         # Toggle fact f-2 from "disputed" to "agreed"
-        for fact in modified.extracted_facts["facts"]:
+        for fact in modified.extracted_facts.facts:
             if fact["id"] == "f-2":
                 fact["status"] = "agreed"
 

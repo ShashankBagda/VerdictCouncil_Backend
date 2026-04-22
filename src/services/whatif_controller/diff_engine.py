@@ -201,11 +201,14 @@ def _get_confidence(state: CaseState) -> int:
 
 def _get_facts_map(state: CaseState) -> dict[str, dict]:
     """Build a fact_id -> fact dict from CaseState."""
-    if not state.extracted_facts or not isinstance(state.extracted_facts, dict):
+    if not state.extracted_facts:
         return {}
 
-    facts = state.extracted_facts.get("facts", [])
-    return {f.get("id", str(i)): f for i, f in enumerate(facts) if isinstance(f, dict)}
+    return {
+        f.get("id", str(i)): f
+        for i, f in enumerate(state.extracted_facts.facts)
+        if isinstance(f, dict)
+    }
 
 
 def _get_evidence_map(state: CaseState) -> dict[str, dict]:

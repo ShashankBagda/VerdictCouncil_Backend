@@ -176,8 +176,12 @@ def _insert_evidence(db: AsyncSession, case_id: UUID, state: CaseState) -> None:
 
 
 def _insert_facts(db: AsyncSession, case_id: UUID, state: CaseState) -> None:
-    items = _items_from(state.extracted_facts, ("facts", "items", "timeline"))
-    for item in items:
+    data = state.extracted_facts
+    if not data:
+        return
+    for item in data.facts:
+        if not isinstance(item, dict):
+            continue
         description = (item.get("description") or "").strip()
         if not description:
             continue

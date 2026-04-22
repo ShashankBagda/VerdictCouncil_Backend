@@ -251,7 +251,7 @@ async def test_l2_fanout_publishes_three_parallel_with_aggregator_reply_to():
 
     # Merged state returned with L2 fields populated
     assert result.evidence_analysis == {"exhibits": []}
-    assert result.extracted_facts == {"timeline": []}
+    assert result.extracted_facts is not None and result.extracted_facts.timeline == []
     assert result.witnesses is not None and result.witnesses.statements == []
 
 

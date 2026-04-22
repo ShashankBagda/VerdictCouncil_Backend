@@ -244,7 +244,9 @@ class TestLayer2Aggregator:
         # Merge should have been triggered on the third call
         assert result is not None
         assert result.evidence_analysis == _evidence_output()
-        assert result.extracted_facts == _facts_output()
+        _expected_f = _facts_output()
+        assert result.extracted_facts is not None
+        assert result.extracted_facts.timeline == _expected_f["timeline"]
         _expected_w = _witnesses_output()
         assert result.witnesses is not None
         assert result.witnesses.statements == _expected_w["statements"]
@@ -273,7 +275,9 @@ class TestLayer2Aggregator:
 
         assert result is not None
         assert result.evidence_analysis == _evidence_output()
-        assert result.extracted_facts == _facts_output()
+        _expected_f2 = _facts_output()
+        assert result.extracted_facts is not None
+        assert result.extracted_facts.timeline == _expected_f2["timeline"]
         _expected_w2 = _witnesses_output()
         assert result.witnesses is not None
         assert result.witnesses.statements == _expected_w2["statements"]
