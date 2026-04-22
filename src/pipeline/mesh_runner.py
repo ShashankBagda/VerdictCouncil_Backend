@@ -30,12 +30,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import uuid
 from datetime import UTC, datetime
-from typing import Any
 
 import redis.asyncio as redis
 from openai import AsyncOpenAI
+from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
 
 from src.api.schemas.pipeline_events import PipelineProgressEvent
 from src.db.pipeline_state import persist_case_state
@@ -110,12 +109,14 @@ class MeshPipelineRunner:
         self,
         a2a_client: A2AClient,
         *,
+        session_factory: async_sessionmaker[AsyncSession],
         client: AsyncOpenAI | None = None,
         redis_client: redis.Redis | None = None,
         namespace: str = "verdictcouncil",
         agent_timeout_seconds: float = DEFAULT_AGENT_TIMEOUT_SECONDS,
     ) -> None:
         self._a2a = a2a_client
+        self._session_factory = session_factory
         self._client = client or AsyncOpenAI(api_key=settings.openai_api_key)
         self._redis = redis_client or redis.Redis.from_url(
             settings.redis_url, decode_responses=False
@@ -131,39 +132,46 @@ class MeshPipelineRunner:
         self,
         case_state: CaseState,
         *,
-        db: Any = None,
         run_id: str | None = None,
     ) -> CaseState:
-        """Run the full 9-agent pipeline over the mesh."""
+        """Run the full 9-agent pipeline over the mesh.
+
+        `run_id` invariant: if provided, must equal `case_state.run_id` —
+        the runner never mints a fresh id or mutates `state.run_id`. This
+        keeps `latest_run_id` persistence (Phase 2.2) aligned with the
+        checkpoint chain.
+        """
+        run_id = self._resolve_run_id(case_state, run_id)
         state = case_state
-        run_id = run_id or uuid.uuid4().hex
 
         state = await self._apply_input_guardrail(state)
 
         # L1 — sequential agents 1 & 2 with the escalation halt after 2.
         for agent_name in L1_AGENTS:
             state = await self._invoke_agent_sequential(agent_name, state, run_id)
-            await self._checkpoint(db, state, run_id, agent_name)
+            await self._checkpoint(state, run_id, agent_name)
             if agent_name == "complexity-routing" and state.status == CaseStatusEnum.escalated:
                 logger.warning(
                     "Mesh pipeline halted at complexity-routing: escalated (case_id=%s)",
                     state.case_id,
                 )
+                assert state.run_id == run_id, "run_id invariant broken on escalation halt"
                 return state
 
         # L2 — parallel fan-out via the aggregator.
         state = await self._invoke_l2_fanout(state, run_id)
-        await self._checkpoint(db, state, run_id, "layer2-aggregator")
+        await self._checkpoint(state, run_id, "layer2-aggregator")
 
         # L3 — sequential agents 6–9 with the post-L9 output-integrity +
         # fairness halts.
         for agent_name in L3_AGENTS:
             state = await self._invoke_agent_sequential(agent_name, state, run_id)
-            await self._checkpoint(db, state, run_id, agent_name)
+            await self._checkpoint(state, run_id, agent_name)
 
             if agent_name == "governance-verdict":
                 maybe_halted = self._apply_governance_halts(state)
                 if maybe_halted is not None:
+                    assert maybe_halted.run_id == run_id, "run_id invariant broken on halt"
                     return maybe_halted
 
         logger.info(
@@ -172,6 +180,7 @@ class MeshPipelineRunner:
             run_id,
             state.status,
         )
+        assert state.run_id == run_id, "run_id invariant broken at run() exit"
         return state
 
     async def run_from(
@@ -179,7 +188,6 @@ class MeshPipelineRunner:
         case_state: CaseState,
         start_agent: str,
         *,
-        db: Any = None,
         run_id: str | None = None,
     ) -> CaseState:
         """Re-enter the mesh pipeline at `start_agent` and run downstream.
@@ -193,23 +201,26 @@ class MeshPipelineRunner:
         Skips the input guardrail — the caller is re-running from a
         mid-pipeline state, not raw input. Downstream hooks (escalation
         halt, governance halts) still fire.
+
+        `run_id` invariant: if provided, must equal `case_state.run_id`.
         """
+        run_id = self._resolve_run_id(case_state, run_id)
         state = case_state
-        run_id = run_id or uuid.uuid4().hex
 
         if start_agent in L1_AGENTS:
             l1_start = L1_AGENTS.index(start_agent)
             for agent_name in L1_AGENTS[l1_start:]:
                 state = await self._invoke_agent_sequential(agent_name, state, run_id)
-                await self._checkpoint(db, state, run_id, agent_name)
+                await self._checkpoint(state, run_id, agent_name)
                 if agent_name == "complexity-routing" and state.status == CaseStatusEnum.escalated:
+                    assert state.run_id == run_id, "run_id invariant broken on escalation halt"
                     return state
             state = await self._invoke_l2_fanout(state, run_id)
-            await self._checkpoint(db, state, run_id, AGGREGATOR_NAME)
+            await self._checkpoint(state, run_id, AGGREGATOR_NAME)
             l3_start = 0
         elif start_agent in L2_AGENTS:
             state = await self._invoke_l2_fanout(state, run_id)
-            await self._checkpoint(db, state, run_id, AGGREGATOR_NAME)
+            await self._checkpoint(state, run_id, AGGREGATOR_NAME)
             l3_start = 0
         elif start_agent in L3_AGENTS:
             l3_start = L3_AGENTS.index(start_agent)
@@ -221,13 +232,15 @@ class MeshPipelineRunner:
 
         for agent_name in L3_AGENTS[l3_start:]:
             state = await self._invoke_agent_sequential(agent_name, state, run_id)
-            await self._checkpoint(db, state, run_id, agent_name)
+            await self._checkpoint(state, run_id, agent_name)
 
             if agent_name == "governance-verdict":
                 maybe_halted = self._apply_governance_halts(state)
                 if maybe_halted is not None:
+                    assert maybe_halted.run_id == run_id, "run_id invariant broken on halt"
                     return maybe_halted
 
+        assert state.run_id == run_id, "run_id invariant broken at run_from() exit"
         return state
 
     # ------------------------------------------------------------------
@@ -473,7 +486,22 @@ class MeshPipelineRunner:
                     stripped[key] = payload[key]
             merged_dict = stripped
 
-        return CaseState.model_validate(merged_dict)
+        parsed = CaseState.model_validate(merged_dict)
+        # Emit the audit entry downstream consumers filter on.
+        # `routes/judge.py:367` and `routes/case_data.py:93` both require
+        # `action="agent_response"` with a populated `output_payload`.
+        # Mirror the shape at `src/pipeline/runner.py:615-627` — mesh has
+        # no tool-call log or token accounting, so those are None.
+        return append_audit_entry(
+            parsed,
+            agent=agent_name,
+            action="agent_response",
+            input_payload={"state_keys": list(original_dict.keys())},
+            output_payload=payload,
+            tool_calls=None,
+            token_usage=None,
+            model=None,
+        )
 
     async def _emit_progress(
         self,
@@ -504,17 +532,40 @@ class MeshPipelineRunner:
 
     async def _checkpoint(
         self,
-        db: Any,
         state: CaseState,
         run_id: str,
         agent_name: str,
     ) -> None:
-        if db is None:
-            return
-        await persist_case_state(
-            db,
-            case_id=state.case_id,
-            run_id=run_id,
-            agent_name=agent_name,
-            state=state,
-        )
+        """Persist a per-agent checkpoint via a short-lived session.
+
+        An AsyncSession cannot span the full 9-agent mesh run (9 network
+        hops, minutes of wall clock). Each checkpoint opens its own
+        transaction via `self._session_factory` so the connection pool
+        is never held across an A2A await.
+        """
+        async with self._session_factory() as session:
+            await persist_case_state(
+                session,
+                case_id=state.case_id,
+                run_id=run_id,
+                agent_name=agent_name,
+                state=state,
+            )
+
+    @staticmethod
+    def _resolve_run_id(state: CaseState, run_id: str | None) -> str:
+        """Enforce the `run_id` invariant.
+
+        Rules:
+        - If caller passes `run_id=None`, default to `state.run_id`.
+        - If caller passes a mismatched `run_id`, raise ValueError —
+          the caller must hand in a coherent (state, run_id) pair.
+        The runner never mints a fresh id or mutates `state.run_id`.
+        """
+        effective = run_id if run_id is not None else state.run_id
+        if state.run_id != effective:
+            raise ValueError(
+                f"run_id invariant violated: state.run_id={state.run_id!r} "
+                f"but run_id arg={effective!r}. Callers must pass a coherent pair."
+            )
+        return effective
