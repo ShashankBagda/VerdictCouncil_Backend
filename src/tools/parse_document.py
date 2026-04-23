@@ -51,25 +51,30 @@ async def _extract_via_openai(
         model=settings.openai_model_lightweight,
         input=[
             {
-                "type": "input_file",
-                "file_id": file_id,
-            },
-            {
-                "type": "input_text",
-                "text": (
-                    "Extract all text content from this document. "
-                    "Preserve paragraph structure and formatting. "
-                    "If the document contains tables, extract each table as a "
-                    "JSON array of rows. "
-                    f"{table_instruction} "
-                    f"{ocr_instruction} "
-                    "Return JSON with keys: "
-                    "text (full document text), "
-                    "pages (list of objects with page_number, text, and tables), "
-                    "tables (flat list of all tables, each with page_number and rows), "
-                    "page_count, word_count."
-                ),
-            },
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_file",
+                        "file_id": file_id,
+                    },
+                    {
+                        "type": "input_text",
+                        "text": (
+                            "Extract all text content from this document. "
+                            "Preserve paragraph structure and formatting. "
+                            "If the document contains tables, extract each table as a "
+                            "JSON array of rows. "
+                            f"{table_instruction} "
+                            f"{ocr_instruction} "
+                            "Return JSON with keys: "
+                            "text (full document text), "
+                            "pages (list of objects with page_number, text, and tables), "
+                            "tables (flat list of all tables, each with page_number and rows), "
+                            "page_count, word_count."
+                        ),
+                    },
+                ],
+            }
         ],
         text={"format": {"type": "json_object"}},
     )
