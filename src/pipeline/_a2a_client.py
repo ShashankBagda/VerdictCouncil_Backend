@@ -67,6 +67,7 @@ class A2AClient(Protocol):
         topic: str,
         envelope: dict,
         reply_to: str | None = None,
+        status_topic: str | None = None,
     ) -> str: ...
 
     async def await_response(self, task_id: str, timeout: float) -> dict: ...
@@ -87,6 +88,9 @@ class FakeA2AClient:
 
     def __init__(self) -> None:
         self.publishes: list[tuple[str, dict, str | None]] = []
+        # Parallel log that includes the optional status_topic — kept
+        # separate so existing tests that unpack 3-tuples keep passing.
+        self.publishes_with_status: list[tuple[str, dict, str | None, str | None]] = []
         self._pending: dict[str, asyncio.Future[dict]] = {}
         self._delivered: dict[str, dict] = {}
         self.auto_resolver = None  # callable | None
@@ -106,8 +110,10 @@ class FakeA2AClient:
         topic: str,
         envelope: dict,
         reply_to: str | None = None,
+        status_topic: str | None = None,
     ) -> str:
         self.publishes.append((topic, envelope, reply_to))
+        self.publishes_with_status.append((topic, envelope, reply_to, status_topic))
         payload_hash = hashlib.sha256(
             json.dumps(envelope, sort_keys=True).encode("utf-8")
         ).hexdigest()

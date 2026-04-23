@@ -78,7 +78,7 @@ class Settings(BaseSettings):
 
     # MLflow tracing (LLMSecOps observability)
     mlflow_enabled: bool = False
-    mlflow_tracking_uri: str = "http://localhost:9999"
+    mlflow_tracking_uri: str = "http://localhost:5001"
     mlflow_experiment: str = "verdictcouncil-pipeline"
 
     # OpenAI Models

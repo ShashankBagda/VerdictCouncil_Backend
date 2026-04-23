@@ -101,6 +101,18 @@ def _response_topic(namespace: str, delegating: str, task_id: str) -> str:
     return f"{namespace}/a2a/v1/agent/response/{delegating}/{task_id}"
 
 
+def _case_status_topic(namespace: str, case_id: str, task_id: str) -> str:
+    """Per-case status topic used by SAM agents to publish LLM/tool telemetry.
+
+    The SSE endpoint subscribes on `{namespace}/case/{case_id}/status/>`
+    and forwards translated events to the frontend's /case/<id>/building
+    view. Agents only publish here when we set the `a2aStatusTopic`
+    user property on the A2A request; otherwise they fall back to SAM's
+    default gateway-status topic.
+    """
+    return f"{namespace}/case/{case_id}/status/{task_id}"
+
+
 class MeshPipelineRunner:
     """Distributed replacement for the sequential `PipelineRunner`.
 
@@ -350,6 +362,7 @@ class MeshPipelineRunner:
     ) -> CaseState:
         task_id = new_task_id(f"{agent_name}-{run_id[:8]}")
         reply_to = _response_topic(self._namespace, MESH_RUNNER_NAME, task_id)
+        status_topic = _case_status_topic(self._namespace, str(state.case_id), task_id)
         envelope = build_send_task_request(
             task_id=task_id,
             session_id=run_id,
@@ -362,28 +375,70 @@ class MeshPipelineRunner:
         )
         request_topic = _request_topic(self._namespace, agent_name)
 
-        await self._emit_progress(agent_name, state, "started")
-        try:
-            payload_hash = await self._a2a.publish(request_topic, envelope, reply_to=reply_to)
-            response = await self._a2a.await_response(task_id, timeout=self._agent_timeout)
-        except Exception as exc:
-            await self._emit_progress(agent_name, state, "failed", error=str(exc)[:500])
-            raise
+        # Nest the agent invocation inside an MLflow run so the UI has a
+        # per-agent artifact to link to. Agent-side LLM calls happen in a
+        # separate SAM process — those traces live under their own
+        # OpenAI-autologged runs and are only loosely joined to this
+        # wrapper by case_id/run_id/agent_name tags. A yielded None means
+        # MLflow is disabled; the ids just stay None through _emit_progress.
+        from src.pipeline.observability import agent_run
 
-        state = append_audit_entry(
-            state,
-            agent="a2a",
-            action="agent_request_published",
-            input_payload={
-                "topic": request_topic,
-                "task_id": task_id,
-                "agent": agent_name,
-                "payload_sha256": payload_hash,
-            },
-        )
-        updated = self._parse_agent_response(response, state, agent_name)
-        await self._emit_progress(agent_name, updated, "completed")
-        return updated
+        mlflow_run_id: str | None = None
+        mlflow_experiment_id: str | None = None
+        with agent_run(
+            agent_name=agent_name, case_id=str(state.case_id), run_id=run_id
+        ) as ml_handle:
+            if ml_handle is not None:
+                mlflow_run_id, mlflow_experiment_id = ml_handle
+
+            await self._emit_progress(
+                agent_name,
+                state,
+                "started",
+                mlflow_run_id=mlflow_run_id,
+                mlflow_experiment_id=mlflow_experiment_id,
+            )
+            try:
+                payload_hash = await self._a2a.publish(
+                    request_topic,
+                    envelope,
+                    reply_to=reply_to,
+                    status_topic=status_topic,
+                )
+                response = await self._a2a.await_response(
+                    task_id, timeout=self._agent_timeout
+                )
+            except Exception as exc:
+                await self._emit_progress(
+                    agent_name,
+                    state,
+                    "failed",
+                    error=str(exc)[:500],
+                    mlflow_run_id=mlflow_run_id,
+                    mlflow_experiment_id=mlflow_experiment_id,
+                )
+                raise
+
+            state = append_audit_entry(
+                state,
+                agent="a2a",
+                action="agent_request_published",
+                input_payload={
+                    "topic": request_topic,
+                    "task_id": task_id,
+                    "agent": agent_name,
+                    "payload_sha256": payload_hash,
+                },
+            )
+            updated = self._parse_agent_response(response, state, agent_name)
+            await self._emit_progress(
+                agent_name,
+                updated,
+                "completed",
+                mlflow_run_id=mlflow_run_id,
+                mlflow_experiment_id=mlflow_experiment_id,
+            )
+            return updated
 
     # ------------------------------------------------------------------
     # Agent invocation — L2 parallel fan-out via the aggregator
@@ -559,6 +614,8 @@ class MeshPipelineRunner:
         phase: str,
         *,
         error: str | None = None,
+        mlflow_run_id: str | None = None,
+        mlflow_experiment_id: str | None = None,
     ) -> None:
         try:
             step = AGENT_ORDER.index(agent_name) + 1
@@ -572,6 +629,8 @@ class MeshPipelineRunner:
             total=len(AGENT_ORDER),
             ts=datetime.now(UTC),
             error=error,
+            mlflow_run_id=mlflow_run_id,
+            mlflow_experiment_id=mlflow_experiment_id,
         )
         await publish_progress(event)
 
