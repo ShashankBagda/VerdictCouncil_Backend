@@ -1,4 +1,4 @@
-"""Fallback precedent search using OpenAI vector store.
+"""Precedent search using OpenAI vector store.
 
 Used when the PAIR Search API circuit breaker is open.
 Queries a curated vector store of Singapore higher court decisions
@@ -10,11 +10,12 @@ import logging
 from openai import AsyncOpenAI
 
 from src.shared.config import settings
+from src.tools.exceptions import DegradableToolError
 
 logger = logging.getLogger(__name__)
 
 
-class VectorStoreError(Exception):
+class VectorStoreError(DegradableToolError):
     """Raised when vector store search encounters an unrecoverable error."""
 
 
@@ -22,18 +23,38 @@ async def vector_store_search(
     query: str,
     domain: str = "small_claims",
     max_results: int = 5,
+    *,
+    vector_store_id: str | None = None,
+    allow_global_fallback: bool = False,
 ) -> list[dict]:
-    """Query OpenAI vector store for precedent cases.
+    """Query an OpenAI vector store for precedent cases.
+
+    Fail-closed semantics:
+    - vector_store_id provided → use it.
+    - vector_store_id=None + allow_global_fallback=True + global id configured → use global, log WARN.
+    - vector_store_id=None + allow_global_fallback=False → raise VectorStoreError immediately.
+    - All other None combinations → raise VectorStoreError.
 
     Returns results in the same format as PAIR API search results,
     tagged with source: "vector_store_fallback".
-
-    Returns empty list if vector store ID is not configured or
-    if the API call fails.
     """
-    if not settings.openai_vector_store_id:
-        logger.warning("OPENAI_VECTOR_STORE_ID not configured; cannot use vector store fallback")
-        raise VectorStoreError("Vector store not configured")
+    effective_id = vector_store_id
+
+    if effective_id is None:
+        if allow_global_fallback and settings.openai_vector_store_id:
+            logger.warning(
+                "Domain not provisioned; falling back to global vector store. "
+                "query=%s domain=%s",
+                query[:80],
+                domain,
+            )
+            effective_id = settings.openai_vector_store_id
+        else:
+            if not settings.openai_vector_store_id:
+                raise VectorStoreError("Vector store not configured")
+            raise VectorStoreError(
+                "No domain vector store id provided and allow_global_fallback is False"
+            )
 
     try:
         client = AsyncOpenAI(api_key=settings.openai_api_key)
@@ -44,7 +65,7 @@ async def vector_store_search(
             tools=[
                 {
                     "type": "file_search",
-                    "vector_store_ids": [settings.openai_vector_store_id],
+                    "vector_store_ids": [effective_id],
                     "max_num_results": max_results,
                 }
             ],
@@ -67,12 +88,14 @@ async def vector_store_search(
                     )
 
         logger.info(
-            "Vector store fallback returned %d results for query: %s",
+            "Vector store search returned %d results for query: %s",
             len(results),
             query[:80],
         )
         return results
 
+    except VectorStoreError:
+        raise
     except Exception as exc:
-        logger.warning("Vector store fallback failed: %s", exc)
+        logger.warning("Vector store search failed: %s", exc)
         raise VectorStoreError(str(exc)) from exc

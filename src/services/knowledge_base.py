@@ -1,4 +1,4 @@
-"""Per-judge knowledge base service using OpenAI Vector Stores."""
+"""Per-judge and per-domain knowledge base service using OpenAI Vector Stores."""
 
 import logging
 
@@ -146,3 +146,52 @@ async def delete_kb_file(vector_store_id: str, file_id: str) -> bool:
     await client.files.delete(file_id)
     logger.info("Deleted file %s from vector store %s", file_id, vector_store_id)
     return True
+
+
+# ---------------------------------------------------------------------------
+# Per-domain vector store wrappers
+# ---------------------------------------------------------------------------
+
+
+async def create_domain_vector_store(domain_code: str) -> str:
+    """Create a new vector store for a domain. Returns the store ID."""
+    client = _get_client()
+    store = await client.vector_stores.create(
+        name=f"domain-{domain_code}-{settings.namespace}",
+        metadata={"domain_code": domain_code, "env": settings.namespace, "app": "verdictcouncil"},
+    )
+    logger.info("Created domain vector store %s for domain %s", store.id, domain_code)
+    return store.id
+
+
+async def ensure_domain_vector_store(db: AsyncSession, domain_id: str) -> tuple[str, bool]:
+    """Return ``(store_id, created)`` for the domain, provisioning one if missing.
+
+    Takes a row-level lock to prevent duplicate creation in concurrent requests.
+    """
+    from sqlalchemy import select as sa_select
+
+    from src.models.domain import Domain
+
+    locked = (
+        await db.execute(
+            sa_select(Domain)
+            .where(Domain.id == domain_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
+    if locked is None:
+        raise LookupError(f"Domain {domain_id} not found")
+
+    if locked.vector_store_id:
+        if not locked.is_active:
+            locked.is_active = True
+            await db.flush()
+        return locked.vector_store_id, False
+
+    store_id = await create_domain_vector_store(locked.code)
+    locked.vector_store_id = store_id
+    locked.is_active = True
+    await db.flush()
+    return store_id, True

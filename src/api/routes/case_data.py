@@ -246,6 +246,14 @@ async def upload_documents(
     created = []
     for upload in files:
         content = await upload.read()
+        if len(content) > settings.case_doc_max_upload_bytes:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=(
+                    f"File '{upload.filename}' exceeds maximum size of "
+                    f"{settings.case_doc_max_upload_bytes // 1024 // 1024} MiB"
+                ),
+            )
         openai_file_id: str | None = None
         try:
             oa_file = await oa_client.files.create(
@@ -319,6 +327,14 @@ async def upload_supplementary_documents(
     created: list[Document] = []
     for upload in files:
         content = await upload.read()
+        if len(content) > settings.case_doc_max_upload_bytes:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=(
+                    f"File '{upload.filename}' exceeds maximum size of "
+                    f"{settings.case_doc_max_upload_bytes // 1024 // 1024} MiB"
+                ),
+            )
         openai_file_id: str | None = None
         try:
             oa_file = await oa_client.files.create(

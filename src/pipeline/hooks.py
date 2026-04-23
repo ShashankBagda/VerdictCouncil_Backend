@@ -139,9 +139,60 @@ class GovernanceHaltHook:
         return HookResult(state=state)
 
 
+class DocumentPagesHydrationHook:
+    """Pre-run hook: hydrates raw_documents with cached Document.pages from DB.
+
+    Avoids redundant parse_document OpenAI calls when pages were already
+    extracted and persisted on a prior run. parse_document checks
+    CaseState.raw_documents for a "pages" key and short-circuits if found.
+    """
+
+    async def before_run(self, state: CaseState, ctx: HookContext) -> HookResult:
+        if not state.raw_documents:
+            return HookResult(state=state)
+        from sqlalchemy import select
+
+        from src.models.case import Document
+        from src.services.database import async_session
+
+        file_ids = [
+            d.get("openai_file_id")
+            for d in state.raw_documents
+            if d.get("openai_file_id") and not d.get("pages")
+        ]
+        if not file_ids:
+            return HookResult(state=state)
+
+        async with async_session() as db:
+            result = await db.execute(
+                select(Document).where(Document.openai_file_id.in_(file_ids))
+            )
+            docs_by_file_id = {d.openai_file_id: d for d in result.scalars().all()}
+
+        new_raw = []
+        for raw in state.raw_documents:
+            fid = raw.get("openai_file_id")
+            if fid and fid in docs_by_file_id and not raw.get("pages"):
+                db_pages = docs_by_file_id[fid].pages
+                if db_pages:
+                    raw = {**raw, "pages": db_pages}
+            new_raw.append(raw)
+
+        return HookResult(state=state.model_copy(update={"raw_documents": new_raw}))
+
+    async def after_agent(
+        self, agent_name: str, state: CaseState, ctx: HookContext
+    ) -> HookResult:
+        return HookResult(state=state)
+
+    async def after_run(self, state: CaseState, ctx: HookContext) -> HookResult:
+        return HookResult(state=state)
+
+
 def default_hooks(client: Any) -> list[PipelineHook]:
     """Return the standard hook list for production use."""
     return [
+        DocumentPagesHydrationHook(),
         InputGuardrailHook(client),
         ComplexityEscalationHook(),
         GovernanceHaltHook(),

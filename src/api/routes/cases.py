@@ -318,6 +318,12 @@ def _serialize_case_summary(case: Case) -> dict[str, Any]:
         "description": case.description,
         "summary_snippet": summary_snippet,
         "domain": case.domain,
+        "domain_id": case.domain_id,
+        "domain_detail": (
+            {"id": case.domain_ref.id, "code": case.domain_ref.code, "name": case.domain_ref.name}
+            if case.domain_ref
+            else None
+        ),
         "status": case.status,
         "status_group": _status_group(case.status),
         "jurisdiction": _build_jurisdiction_summary(case),
@@ -396,9 +402,56 @@ async def create_case(
     db: DBSession,
     current_user: User = require_role(UserRole.judge),
 ) -> dict[str, Any]:
+    from src.models.domain import Domain as DomainModel
+
+    # Resolve domain row — must be active
+    domain_row: DomainModel | None = None
+    if body.domain_id is not None:
+        domain_row = await db.get(DomainModel, body.domain_id)
+        if domain_row is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Domain {body.domain_id} not found",
+            )
+        # Check for disagreement between domain_id and legacy domain enum
+        if body.domain is not None and body.domain.value != domain_row.code:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="domain_id and domain disagree — send only one or ensure they match",
+            )
+    elif body.domain is not None:
+        result = await db.execute(
+            select(DomainModel)
+            .where(DomainModel.code == body.domain.value)
+            .with_for_update(read=True)
+        )
+        domain_row = result.scalar_one_or_none()
+        if domain_row is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Domain seed row missing — contact platform team",
+            )
+
+    if domain_row is not None and not domain_row.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Domain '{domain_row.code}' is not active",
+        )
+
+    # Resolve legacy domain enum from domain_row if only domain_id was sent
+    legacy_domain = body.domain
+    if legacy_domain is None and domain_row is not None:
+        from src.models.case import CaseDomain
+
+        try:
+            legacy_domain = CaseDomain(domain_row.code)
+        except ValueError:
+            legacy_domain = None  # New domain without a legacy enum value — OK
+
     case = Case(
         id=uuid4(),
-        domain=body.domain,
+        domain=legacy_domain,
+        domain_id=domain_row.id if domain_row else None,
         title=body.title.strip(),
         description=body.description.strip() if body.description else None,
         filed_date=body.filed_date,
@@ -419,6 +472,8 @@ async def create_case(
     db.add(case)
     await db.flush()
     await db.refresh(case)
+    if case.domain_id:
+        await db.refresh(case, ["domain_ref"])
     return _serialize_case_summary(case)
 
 
@@ -731,10 +786,16 @@ async def _run_case_pipeline(case_id: UUID) -> None:
     from src.shared.config import settings
 
     async with async_session() as db:
+        from sqlalchemy.orm import joinedload as _joinedload
+
         case_result = await db.execute(
             select(Case)
             .where(Case.id == case_id)
-            .options(selectinload(Case.documents), selectinload(Case.parties))
+            .options(
+                selectinload(Case.documents),
+                selectinload(Case.parties),
+                _joinedload(Case.domain_ref),
+            )
         )
         case = case_result.scalar_one_or_none()
         if not case:
@@ -747,12 +808,21 @@ async def _run_case_pipeline(case_id: UUID) -> None:
                 "filename": document.filename,
                 "file_type": _optional_text(getattr(document, "file_type", None)),
                 "openai_file_id": _optional_text(getattr(document, "openai_file_id", None)),
+                "pages": getattr(document, "pages", None),
             }
             for document in case.documents
         ]
+
+        domain_vector_store_id = (
+            case.domain_ref.vector_store_id
+            if case.domain_ref and case.domain_ref.is_active
+            else None
+        )
+
         initial_state = CaseState(
             case_id=str(case.id),
-            domain=case.domain.value,
+            domain=case.domain.value if case.domain else None,
+            domain_vector_store_id=domain_vector_store_id,
             status="processing",
             parties=[
                 {

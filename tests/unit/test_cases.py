@@ -121,11 +121,20 @@ class TestCreateCase:
         case_id = uuid.uuid4()
         now = datetime.now(UTC)
 
-        async def _refresh(case):
-            case.id = case_id
-            case.status = CaseStatus.pending
-            case.created_at = now
-            case.updated_at = None
+        # The create_case route looks up the Domain row by code when only legacy
+        # `domain` enum is sent. Provide an active domain mock so the query succeeds.
+        domain_mock = MagicMock()
+        domain_mock.id = uuid.uuid4()
+        domain_mock.code = "traffic_violation"
+        domain_mock.is_active = True
+        mock_db.execute.return_value = _mock_scalar_result(domain_mock)
+
+        async def _refresh(obj, attrs=None):
+            if hasattr(obj, "status"):
+                obj.id = case_id
+                obj.status = CaseStatus.pending
+                obj.created_at = now
+                obj.updated_at = None
 
         mock_db.refresh.side_effect = _refresh
 
@@ -154,7 +163,7 @@ class TestCreateCase:
         assert data["title"] == "Traffic prosecution"
         assert data["status"] == "pending"
         assert data["status_group"] == "processing"
-        mock_db.add.assert_called_once()
+        mock_db.add.assert_called()
 
     async def test_create_case_rejects_small_claims_without_claim_amount(self):
         user = _make_user()

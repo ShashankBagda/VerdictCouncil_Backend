@@ -9,9 +9,11 @@ guarantees no row is double-dispatched.
 from __future__ import annotations
 
 from arq.connections import RedisSettings
+from arq.cron import cron
 
 from src.shared.config import settings
 from src.workers.dispatcher import shutdown, startup
+from src.workers.domain_reconciliation import reconcile_domain_documents
 from src.workers.tasks import (
     run_case_pipeline_job,
     run_gate_job,
@@ -27,6 +29,9 @@ class WorkerSettings:
         run_whatif_scenario_job,
         run_stability_computation_job,
         run_gate_job,
+    ]
+    cron_jobs = [
+        cron(reconcile_domain_documents, minute={0, 10, 20, 30, 40, 50}),
     ]
     on_startup = startup
     on_shutdown = shutdown

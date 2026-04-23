@@ -6,6 +6,10 @@ from datetime import date, datetime, time
 from typing import Any
 from uuid import UUID
 
+import logging
+import warnings
+from uuid import UUID
+
 from pydantic import BaseModel, Field, model_validator
 
 from src.models.case import (
@@ -36,11 +40,24 @@ class CasePartyCreateRequest(BaseModel):
     )
 
 
-class CaseCreateRequest(BaseModel):
-    """Create a new case for processing."""
+_schema_logger = logging.getLogger(__name__)
 
-    domain: CaseDomain = Field(
-        ..., description="Legal domain of the case", examples=["small_claims"]
+
+class CaseCreateRequest(BaseModel):
+    """Create a new case for processing.
+
+    Accepts both the canonical ``domain_id`` (UUID FK) and the legacy
+    ``domain`` enum string. During the dual-write parallel-run window both
+    are accepted; once old clients migrate, the enum alias will be dropped.
+    """
+
+    domain_id: UUID | None = Field(
+        default=None, description="UUID of the Domain row (canonical, preferred)"
+    )
+    domain: CaseDomain | None = Field(
+        default=None,
+        description="[Deprecated] Legacy domain enum. Use domain_id instead.",
+        examples=["small_claims"],
     )
     title: str = Field(..., min_length=1, max_length=255)
     description: str | None = Field(default=None, max_length=5000)
@@ -52,10 +69,24 @@ class CaseCreateRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_domain_requirements(self) -> CaseCreateRequest:
+        if self.domain_id is None and self.domain is None:
+            raise ValueError("Either domain_id or domain must be provided.")
+
+        if self.domain is not None and self.domain_id is None:
+            warnings.warn(
+                "CaseCreateRequest.domain (enum) is deprecated; send domain_id instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            _schema_logger.warning("Deprecated domain enum used in case create request")
+
         if len(self.parties) < 2:
             raise ValueError("At least two parties are required for case intake.")
 
-        if self.domain == CaseDomain.small_claims:
+        # Domain-specific validation on enum code (works for both legacy and new path)
+        domain_code = self.domain.value if self.domain else None
+
+        if domain_code == CaseDomain.small_claims.value:
             if self.claim_amount is None:
                 raise ValueError("SCT cases require claim_amount.")
             if self.claim_amount > 30000:
@@ -65,7 +96,7 @@ class CaseCreateRequest(BaseModel):
                     "SCT claim_amount above $20,000 requires consent_to_higher_claim_limit."
                 )
 
-        if self.domain == CaseDomain.traffic_violation:
+        if domain_code == CaseDomain.traffic_violation.value:
             if not self.offence_code:
                 raise ValueError("Traffic cases require offence_code.")
             if self.offence_code not in KNOWN_TRAFFIC_OFFENCE_CODES:

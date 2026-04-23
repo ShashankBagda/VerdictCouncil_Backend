@@ -21,6 +21,7 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from src.models.domain import Domain
 
 # ---------------------------------------------------------------------------
 # Enums
@@ -137,6 +138,13 @@ class Case(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     jurisdiction_valid: Mapped[bool | None] = mapped_column(Boolean)
     complexity: Mapped[CaseComplexity | None] = mapped_column(Enum(CaseComplexity))
     route: Mapped[CaseRoute | None] = mapped_column(Enum(CaseRoute))
+    domain_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("domains.id"), nullable=True
+    )
+    domain_ref: Mapped[Domain | None] = relationship(
+        "Domain", foreign_keys=[domain_id], lazy="select"
+    )
+
     # Anchor for What-If rehydration: the run_id of the most recent terminal
     # pipeline run for this case. Written by persist_case_results at the end
     # of a successful run; read by what_if/stability to load the real

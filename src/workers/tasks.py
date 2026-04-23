@@ -150,7 +150,15 @@ async def run_gate_job(ctx: dict[str, Any], job_id: str) -> None:  # noqa: ARG00
 
         if state is None:
             async with async_session() as db:
-                case = await db.get(Case, case_id)
+                from sqlalchemy import select as _select
+                from sqlalchemy.orm import joinedload as _joinedload
+
+                case_result = await db.execute(
+                    _select(Case)
+                    .where(Case.id == case_id)
+                    .options(_joinedload(Case.domain_ref))
+                )
+                case = case_result.scalar_one_or_none()
                 if case is None:
                     raise ValueError(f"Case {case_id} not found for gate_run job {job.id}")
                 state = CaseState(
@@ -158,6 +166,36 @@ async def run_gate_job(ctx: dict[str, Any], job_id: str) -> None:  # noqa: ARG00
                     domain=case.domain.value if case.domain else None,
                     status=CaseStatusEnum.processing,
                 )
+
+        # D2: Always re-read domain from live DB to catch retirements after gate 1
+        async with async_session() as db:
+            from sqlalchemy import select as _select
+            from sqlalchemy.orm import joinedload as _joinedload
+            from src.tools.exceptions import RetiredDomainError
+
+            case_result = await db.execute(
+                _select(Case)
+                .where(Case.id == case_id)
+                .options(_joinedload(Case.domain_ref))
+            )
+            live_case = case_result.scalar_one_or_none()
+            if live_case is None:
+                raise ValueError(f"Case {case_id} disappeared before gate resume")
+
+            if live_case.domain_id is None or live_case.domain_ref is None:
+                raise RetiredDomainError("Case has no linked domain; cannot resume")
+
+            if not live_case.domain_ref.is_active or not live_case.domain_ref.vector_store_id:
+                live_case.status_value = "failed_retryable"
+                await db.commit()
+                raise RetiredDomainError(
+                    f"Domain {live_case.domain_ref.code} retired mid-case; aborting gate resume"
+                )
+
+            # Always overwrite from live DB — never use stale checkpoint value
+            state = state.model_copy(
+                update={"domain_vector_store_id": live_case.domain_ref.vector_store_id}
+            )
 
         # Force status to processing before handing to run_gate
         state = state.model_copy(update={"status": CaseStatusEnum.processing})

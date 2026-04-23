@@ -18,12 +18,13 @@ import redis.asyncio as redis
 from src.shared.circuit_breaker import CircuitState, get_pair_search_breaker
 from src.shared.config import settings
 from src.shared.retry import retry_with_backoff
+from src.tools.exceptions import DegradableToolError
 from src.tools.vector_store_fallback import VectorStoreError, vector_store_search
 
 logger = logging.getLogger(__name__)
 
 
-class PrecedentSearchError(Exception):
+class PrecedentSearchError(DegradableToolError):
     """Raised when precedent search encounters an unrecoverable error."""
 
 
@@ -41,10 +42,20 @@ class SearchResult:
     )
 
 
-def _cache_key(query: str, domain: str, max_results: int) -> str:
-    """Generate a deterministic cache key for a search query."""
+def _cache_key(
+    query: str, domain: str, vector_store_id: str | None, max_results: int
+) -> str:
+    """Generate a deterministic cache key for a search query.
+
+    vector_store_id is included to avoid cross-domain cache collisions (H6).
+    """
     key_data = json.dumps(
-        {"query": query, "domain": domain, "max_results": max_results},
+        {
+            "query": query,
+            "domain": domain,
+            "vector_store_id": vector_store_id,
+            "max_results": max_results,
+        },
         sort_keys=True,
     )
     return f"vc:precedents:{hashlib.sha256(key_data.encode()).hexdigest()}"
@@ -130,9 +141,10 @@ async def _search_precedents_impl(
     query: str,
     domain: str = "small_claims",
     max_results: int = 5,
+    vector_store_id: str | None = None,
 ) -> SearchResult:
     """Internal implementation that returns SearchResult with metadata."""
-    cache_k = _cache_key(query, domain, max_results)
+    cache_k = _cache_key(query, domain, vector_store_id, max_results)
     metadata: dict[str, Any] = {
         "source_failed": False,
         "fallback_used": False,
@@ -169,7 +181,11 @@ async def _search_precedents_impl(
         logger.info("Circuit breaker OPEN for pair_search; using vector store fallback")
         metadata["pair_status"] = "circuit_open"
         try:
-            results = await vector_store_search(query, domain, max_results)
+            results = await vector_store_search(
+                query, domain, max_results,
+                vector_store_id=vector_store_id,
+                allow_global_fallback=True,
+            )
         except VectorStoreError as exc:
             logger.warning("Vector store fallback also failed: %s", exc)
             metadata["source_failed"] = True
@@ -195,7 +211,11 @@ async def _search_precedents_impl(
                 new_state.value,
             )
             try:
-                results = await vector_store_search(query, domain, max_results)
+                results = await vector_store_search(
+                    query, domain, max_results,
+                    vector_store_id=vector_store_id,
+                    allow_global_fallback=True,
+                )
             except VectorStoreError as vs_exc:
                 logger.warning("Vector store fallback also failed: %s", vs_exc)
                 metadata["source_failed"] = True
@@ -240,13 +260,14 @@ async def search_precedents(
     query: str,
     domain: str = "small_claims",
     max_results: int = 5,
+    vector_store_id: str | None = None,
 ) -> list[dict]:
     """Search PAIR API for precedent cases.
 
     Backward-compatible public API that returns only the precedent list.
     Used by the SAM tool wrapper and direct callers.
     """
-    result = await _search_precedents_impl(query, domain, max_results)
+    result = await _search_precedents_impl(query, domain, max_results, vector_store_id)
     return result.precedents
 
 
@@ -254,6 +275,7 @@ async def search_precedents_with_meta(
     query: str,
     domain: str = "small_claims",
     max_results: int = 5,
+    vector_store_id: str | None = None,
 ) -> SearchResult:
     """Search PAIR API for precedent cases with source metadata.
 
@@ -261,4 +283,4 @@ async def search_precedents_with_meta(
     metadata about source availability. Used by the pipeline runner
     to populate CaseState.precedent_source_metadata.
     """
-    return await _search_precedents_impl(query, domain, max_results)
+    return await _search_precedents_impl(query, domain, max_results, vector_store_id)

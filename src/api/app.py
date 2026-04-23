@@ -64,6 +64,10 @@ OPENAPI_TAGS = [
             "Administrative operations: vector store refresh, user actions, cost config."
         ),
     },
+    {
+        "name": "domains",
+        "description": "Domain management: create/retire domains, upload per-domain guidance documents.",
+    },
 ]
 
 
@@ -163,6 +167,7 @@ def create_app() -> FastAPI:
         cases,
         dashboard,
         documents,
+        domains,
         health,
         hearing_notes,
         hearing_pack,
@@ -192,6 +197,7 @@ def create_app() -> FastAPI:
     )
     app.include_router(documents.router, prefix="/api/v1/documents", tags=["documents"])
     app.include_router(admin.router, prefix="/api/v1/admin", tags=["admin"])
+    app.include_router(domains.router, prefix="/api/v1/domains", tags=["domains"])
 
     # Prometheus-compatible metrics (excluded from OpenAPI spec)
     app.routes.append(Route("/metrics", metrics_endpoint, methods=["GET"], include_in_schema=False))
