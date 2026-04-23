@@ -16,6 +16,7 @@ from src.models.case import (
     ArgumentSide,
     CaseDomain,
     CaseStatus,
+    DocumentKind,
     EvidenceStrength,
     EvidenceType,
     FactConfidence,
@@ -24,12 +25,11 @@ from src.models.case import (
     PrecedentSource,
 )
 
-KNOWN_TRAFFIC_OFFENCE_CODES = {
-    "RTA-S64",
-    "RTA-S65",
-    "RTA-S67",
-    "RTA-S69",
-}
+# Traffic-court offence codes are not a closed set in Singapore practice
+# (s64, 65, 65AA, 65B, 67, 67(1)(b), 68, 69, and more appear on charge sheets),
+# and sitting judges know the codes by heart. Validate format only; never reject
+# on an allow-list that will inevitably drift from the statute book.
+_OFFENCE_CODE_RE = r"^[A-Za-z0-9().\-/ ]+$"
 
 
 class CasePartyCreateRequest(BaseModel):
@@ -99,10 +99,62 @@ class CaseCreateRequest(BaseModel):
         if domain_code == CaseDomain.traffic_violation.value:
             if not self.offence_code:
                 raise ValueError("Traffic cases require offence_code.")
-            if self.offence_code not in KNOWN_TRAFFIC_OFFENCE_CODES:
-                raise ValueError(f"Unknown traffic offence code: {self.offence_code}")
 
         return self
+
+
+class CaseDraftCreateRequest(BaseModel):
+    """Create an intake draft. Domain is the only hard requirement — parties,
+    offence code, description, etc. come later from the extraction + confirm
+    round-trip. Judge picks the jurisdiction; everything else is read from
+    typed documents the judge uploads against the draft."""
+
+    domain_id: UUID | None = Field(default=None)
+    domain: CaseDomain | None = Field(default=None)
+    filed_date: date | None = Field(default=None)
+
+    @model_validator(mode="after")
+    def require_domain(self) -> CaseDraftCreateRequest:
+        if self.domain_id is None and self.domain is None:
+            raise ValueError("Either domain_id or domain must be provided.")
+        return self
+
+
+class CaseConfirmRequest(BaseModel):
+    """Judge's confirmed intake payload. Transitions a case from
+    awaiting_intake_confirmation → pending so the pipeline can start. Values
+    here are what the judge has either accepted from the extractor or typed
+    themselves via the 'I'll type it' fallback."""
+
+    title: str = Field(..., min_length=1, max_length=255)
+    description: str | None = Field(default=None, max_length=5000)
+    filed_date: date | None = Field(default=None)
+    parties: list[CasePartyCreateRequest] = Field(default_factory=list)
+    claim_amount: float | None = Field(default=None, ge=0)
+    consent_to_higher_claim_limit: bool = Field(default=False)
+    offence_code: str | None = Field(
+        default=None, max_length=100, pattern=_OFFENCE_CODE_RE
+    )
+
+    @model_validator(mode="after")
+    def validate_parties_min(self) -> CaseConfirmRequest:
+        if len(self.parties) < 2:
+            raise ValueError("At least two parties are required to confirm intake.")
+        return self
+
+
+class CaseIntakeMessageRequest(BaseModel):
+    """Judge's free-text correction on the intake confirm chat. The extractor
+    consumes this as an additional instruction and re-emits updated proposed
+    fields over the SSE channel."""
+
+    content: str = Field(..., min_length=1, max_length=4000)
+
+
+class DocumentUploadMetadata(BaseModel):
+    """Optional form-data sidecar on document upload. Omitted kind → 'other'."""
+
+    kind: DocumentKind = Field(default=DocumentKind.other)
 
 
 class CaseJurisdictionResponse(BaseModel):
@@ -130,6 +182,7 @@ class DocumentResponse(BaseModel):
     openai_file_id: str | None = None
     filename: str = Field(..., description="Original filename")
     file_type: str | None = Field(None, description="MIME type or extension")
+    kind: DocumentKind = Field(DocumentKind.other, description="Typed-slot kind")
     uploaded_at: datetime | None = Field(None, description="Upload timestamp")
 
     model_config = {"from_attributes": True}

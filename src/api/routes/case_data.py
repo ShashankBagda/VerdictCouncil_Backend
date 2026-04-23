@@ -35,6 +35,7 @@ from src.models.case import (
     Case,
     CaseStatus,
     Document,
+    DocumentKind,
     Evidence,
     Fact,
     HearingAnalysis,
@@ -42,6 +43,15 @@ from src.models.case import (
     Precedent,
     Witness,
 )
+
+# Typed slots that kick off intake extraction as soon as one is uploaded.
+# Judges can still drop evidence bundles or letters of mitigation into a
+# draft, but none of those alone are sufficient grounding to propose
+# parties / offence / title — so we wait until an authoritative doc arrives.
+_INTAKE_TRIGGER_KINDS = {
+    DocumentKind.notice_of_traffic_offence,
+    DocumentKind.charge_sheet,
+}
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -234,6 +244,14 @@ async def upload_documents(
     db: DBSession,
     current_user: CurrentUser,
     files: list[UploadFile] = File(..., description="Files to upload"),
+    kinds: list[str] | None = Form(
+        default=None,
+        description=(
+            "Typed-slot kind for each file (one per file, same order). "
+            "Valid values: " + ", ".join(k.value for k in DocumentKind) + ". "
+            "Omit for legacy untyped upload — defaults to 'other'."
+        ),
+    ),
 ) -> list[Document]:
     case = await _get_case_or_404(case_id, db, current_user)
 
@@ -241,10 +259,30 @@ async def upload_documents(
 
     from src.shared.config import settings
 
+    if kinds is not None and len(kinds) != len(files):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="kinds must be the same length as files (one per upload)",
+        )
+
+    resolved_kinds: list[DocumentKind] = []
+    for idx, _ in enumerate(files):
+        if kinds is None:
+            resolved_kinds.append(DocumentKind.other)
+            continue
+        raw = kinds[idx]
+        try:
+            resolved_kinds.append(DocumentKind(raw))
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Unknown document kind: {raw}",
+            ) from exc
+
     oa_client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
 
     created = []
-    for upload in files:
+    for upload, doc_kind in zip(files, resolved_kinds, strict=True):
         content = await upload.read()
         if len(content) > settings.case_doc_max_upload_bytes:
             raise HTTPException(
@@ -272,6 +310,7 @@ async def upload_documents(
             case_id=case.id,
             filename=upload.filename or "unnamed",
             file_type=upload.content_type,
+            kind=doc_kind,
             uploaded_by=current_user.id,
             openai_file_id=openai_file_id,
         )
@@ -283,12 +322,32 @@ async def upload_documents(
         case_id=case.id,
         agent_name="system",
         action="document_upload",
-        input_payload={"filenames": [f.filename for f in files]},
+        input_payload={
+            "filenames": [f.filename for f in files],
+            "kinds": [k.value for k in resolved_kinds],
+        },
     )
     db.add(audit)
     await db.flush()
     for doc in created:
         await db.refresh(doc)
+
+    # Draft intake: the first authoritative document triggers extraction.
+    # Anything uploaded after the case has left intake is business-as-usual
+    # (evidence / supplementary uploads for an already-pending case).
+    if case.status == CaseStatus.draft and any(
+        k in _INTAKE_TRIGGER_KINDS for k in resolved_kinds
+    ):
+        from src.models.pipeline_job import PipelineJobType
+        from src.workers.outbox import enqueue_outbox_job
+
+        case.status = CaseStatus.extracting
+        await enqueue_outbox_job(
+            db, case_id=case.id, job_type=PipelineJobType.intake_extraction
+        )
+        await db.commit()
+    else:
+        await db.commit()
 
     return created
 

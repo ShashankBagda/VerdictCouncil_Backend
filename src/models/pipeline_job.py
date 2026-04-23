@@ -16,6 +16,10 @@ class PipelineJobType(str, enum.Enum):
     whatif_scenario = "whatif_scenario"
     stability_computation = "stability_computation"
     gate_run = "gate_run"
+    # Pre-pipeline intake: read judge-uploaded typed documents and propose
+    # structured fields (parties, offence_code, title, description, filed_date,
+    # claim_amount) for the judge to confirm before the 9-agent pipeline runs.
+    intake_extraction = "intake_extraction"
 
 
 class PipelineJobStatus(str, enum.Enum):

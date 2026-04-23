@@ -249,9 +249,24 @@ async def run_gate_job(ctx: dict[str, Any], job_id: str) -> None:  # noqa: ARG00
     await _run_with_outbox(job_id, PipelineJobType.gate_run, _runner)
 
 
+async def run_intake_extraction_job(ctx: dict[str, Any], job_id: str) -> None:  # noqa: ARG001
+    async def _runner(job: PipelineJob) -> None:
+        from src.services.database import async_session
+        from src.services.intake_extraction import run_intake_extraction
+
+        correction = (job.payload or {}).get("correction")
+        async with async_session() as db:
+            await run_intake_extraction(
+                db, case_id=job.case_id, correction=correction
+            )
+
+    await _run_with_outbox(job_id, PipelineJobType.intake_extraction, _runner)
+
+
 TASK_BY_JOB_TYPE: dict[PipelineJobType, str] = {
     PipelineJobType.case_pipeline: run_case_pipeline_job.__name__,
     PipelineJobType.whatif_scenario: run_whatif_scenario_job.__name__,
     PipelineJobType.stability_computation: run_stability_computation_job.__name__,
     PipelineJobType.gate_run: run_gate_job.__name__,
+    PipelineJobType.intake_extraction: run_intake_extraction_job.__name__,
 }

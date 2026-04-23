@@ -87,6 +87,10 @@ class Settings(BaseSettings):
     openai_model_efficient_reasoning: str = "gpt-5-mini"
     openai_model_strong_reasoning: str = "gpt-5"
     openai_model_frontier_reasoning: str = "gpt-5.4"
+    # Intake extractor — defaults to the lightweight tier so it runs without
+    # org verification. Override via env if the org is verified and you want
+    # the efficient-reasoning model's better structured-output behaviour.
+    openai_model_intake: str = ""
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 

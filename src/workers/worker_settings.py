@@ -17,6 +17,7 @@ from src.workers.domain_reconciliation import reconcile_domain_documents
 from src.workers.tasks import (
     run_case_pipeline_job,
     run_gate_job,
+    run_intake_extraction_job,
     run_stability_computation_job,
     run_whatif_scenario_job,
 )
@@ -29,6 +30,7 @@ class WorkerSettings:
         run_whatif_scenario_job,
         run_stability_computation_job,
         run_gate_job,
+        run_intake_extraction_job,
     ]
     cron_jobs = [
         cron(reconcile_domain_documents, minute={0, 10, 20, 30, 40, 50}),
