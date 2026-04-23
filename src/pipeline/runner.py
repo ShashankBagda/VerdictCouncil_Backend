@@ -598,7 +598,7 @@ class PipelineRunner:
 
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": state_json},
+            {"role": "user", "content": f"Current case state JSON:\n{state_json}"},
         ]
 
         logger.info("Running agent '%s' with model '%s'", agent_name, model)
@@ -696,6 +696,20 @@ class PipelineRunner:
             for key in allowed:
                 if key in agent_output:
                     merged_dict[key] = agent_output[key]
+
+        # Coerce any status value the LLM produced that isn't a valid enum member.
+        # Agents occasionally output strings like 'REJECTED' that are not in
+        # CaseStatusEnum; letting them through crashes CaseState construction.
+        if "status" in merged_dict:
+            try:
+                CaseStatusEnum(merged_dict["status"])
+            except ValueError:
+                logger.warning(
+                    "Agent '%s' output invalid status '%s'; coercing to 'failed'.",
+                    agent_name,
+                    merged_dict["status"],
+                )
+                merged_dict["status"] = CaseStatusEnum.failed
 
         # Inject precedent source metadata from tool execution (overrides any LLM output)
         if agent_name == "legal-knowledge" and self._pending_precedent_meta is not None:

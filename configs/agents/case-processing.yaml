@@ -43,12 +43,14 @@ apps:
         STEP 4 - VALIDATE JURISDICTION:
           - SCT: claim <= $20,000 (or $30,000 with consent), within 2 years
           - Traffic: valid offence code, not time-barred
-          - Output: jurisdiction_valid (bool), jurisdiction_issues (list)
+          - Output jurisdiction_valid (bool) and jurisdiction_issues (list) inside case_metadata.
 
         CONSTRAINTS:
         - Extract ONLY what is explicitly stated. Flag missing info as MISSING.
-        - If jurisdiction fails, set status to 'REJECTED' with specific reasons.
+        - If jurisdiction fails, set status to 'failed' and include the reasons in case_metadata under 'jurisdiction_issues'.
+        - Valid status values are: 'pending', 'processing', 'failed'. Do not use any other value.
         - Output the complete structured CaseState fields as JSON.
+        - Do not output top-level fields that are not part of the CaseState schema. Put extra analysis (domain criteria, jurisdiction details, etc.) inside case_metadata.
 
         GUARDRAILS:
         - Must not infer facts beyond what documents state. Flag gaps, do not fill them.
