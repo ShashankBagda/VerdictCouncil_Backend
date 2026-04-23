@@ -53,3 +53,18 @@ class PipelineProgressEvent(BaseModel):
             "{'reason': <halt reason>, 'stopped_at': <mesh stage label>}."
         ),
     )
+    mlflow_run_id: str | None = Field(
+        None,
+        description=(
+            "MLflow run UUID for the nested agent run. Populated on the "
+            "`completed` phase when MLflow tracing is enabled; the frontend "
+            "uses it to link the building-simulation cards to the MLflow UI."
+        ),
+    )
+    mlflow_experiment_id: str | None = Field(
+        None,
+        description=(
+            "MLflow experiment id owning `mlflow_run_id`. Needed to build the "
+            "MLflow UI URL because the path includes /experiments/<id>/runs/<run_id>."
+        ),
+    )

@@ -41,6 +41,7 @@ def reset():
     import src.models.audit  # noqa: F401
     import src.models.calibration  # noqa: F401
     import src.models.case  # noqa: F401
+    import src.models.pipeline_checkpoint  # noqa: F401
     import src.models.pipeline_job  # noqa: F401
     import src.models.system_config  # noqa: F401
     import src.models.user  # noqa: F401

@@ -41,6 +41,8 @@ from src.services.case_report_data import build_case_report_data
 from src.services.hearing_pack import assemble_pack
 from src.services.pdf_export import render_case_report_pdf
 from src.services.pipeline_events import subscribe as subscribe_pipeline_events
+from src.pipeline.sam_status_translator import translate_sam_status
+from src.shared.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -1098,17 +1100,69 @@ async def stream_pipeline_status(
         # and check for client disconnect / watchdog expiry. This avoids the
         # wait_for-on-__anext__ pitfall where a heartbeat-driven cancellation
         # would tear down the underlying pubsub mid-iteration.
+        #
+        # Two producers feed the same queue:
+        #   1. Redis pub/sub — coarse-grained pipeline lifecycle events
+        #      (started/completed/failed/terminal), emitted by mesh_runner.
+        #   2. Solace per-case status topic — fine-grained agent telemetry
+        #      (thinking / tool_call / llm_response) published by SAM itself
+        #      because mesh_runner sets `a2aStatusTopic` on each request.
+        # The Solace producer is best-effort: if the broker is unreachable
+        # the Redis-only stream still works, so we never block the SSE on it.
         queue: asyncio.Queue[str] = asyncio.Queue()
         producer_done = asyncio.Event()
 
-        async def _producer():
+        async def _redis_producer():
             try:
                 async for payload in subscribe_pipeline_events(case_id):
                     await queue.put(payload)
             finally:
+                # Redis is the authoritative producer for stream-end (emits
+                # the `terminal` phase). Solace producer runs alongside but
+                # doesn't gate stream termination.
                 producer_done.set()
 
-        producer_task = asyncio.create_task(_producer())
+        solace_subscription = None
+        case_status_pattern = (
+            f"{settings.namespace}/case/{case_id}/status/>"
+        )
+        try:
+            from src.pipeline.mesh_runner_factory import get_a2a_client
+            a2a_client = await get_a2a_client()
+            solace_subscription = a2a_client.subscribe_status(case_status_pattern)
+            await solace_subscription.start()
+        except Exception as exc:
+            logger.warning(
+                "SSE Solace status subscription unavailable for case_id=%s: %s",
+                case_id,
+                exc,
+            )
+            solace_subscription = None
+
+        async def _solace_producer():
+            if solace_subscription is None:
+                return
+            while True:
+                try:
+                    raw = await solace_subscription.next_event()
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    logger.warning("SSE Solace producer error: %s", exc)
+                    return
+                try:
+                    translated = translate_sam_status(raw, case_id=str(case_id))
+                except Exception as exc:
+                    logger.warning("SAM status translate failed: %s", exc)
+                    continue
+                if translated is None:
+                    continue
+                await queue.put(json.dumps(translated))
+
+        producer_task = asyncio.create_task(_redis_producer())
+        solace_task: asyncio.Task | None = (
+            asyncio.create_task(_solace_producer()) if solace_subscription else None
+        )
         stream_start = time.monotonic()
 
         try:
@@ -1146,10 +1200,18 @@ async def stream_pipeline_status(
                     return
         finally:
             producer_task.cancel()
+            if solace_task is not None:
+                solace_task.cancel()
             # Cancellation and cleanup errors must not escape — the client
             # already disconnected or the watchdog fired.
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await producer_task
+            if solace_task is not None:
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await solace_task
+            if solace_subscription is not None:
+                with contextlib.suppress(Exception):
+                    await solace_subscription.close()
 
     return StreamingResponse(
         event_generator(),
@@ -1276,6 +1338,27 @@ async def _run_case_pipeline(case_id: UUID) -> None:
                 agent_name="gate_complete",
                 state=final_state,
             )
+
+    # Close the SSE stream from the backend side: the frontend treats
+    # `agent=pipeline` + `phase=awaiting_review|terminal` as the
+    # authoritative shutdown signal, but the sequential runner never
+    # emits it on its own. Without this, the browser holds an open
+    # EventSource well past the gate pause and never shows the gate
+    # review UI until the next poll tick catches up.
+    from src.api.schemas.pipeline_events import PipelineProgressEvent
+    from src.services.pipeline_events import publish_progress
+
+    if status_val.startswith("awaiting_review_gate"):
+        close_event = PipelineProgressEvent(
+            case_id=case_id,
+            agent="pipeline",
+            phase="awaiting_review",
+            step=None,
+            total=9,
+            ts=datetime.now(UTC),
+            detail={"reason": "gate_pause", "stopped_at": status_val},
+        )
+        await publish_progress(close_event)
 
 
 @router.post(

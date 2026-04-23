@@ -44,6 +44,13 @@ from solace.messaging.resources.topic_subscription import TopicSubscription
 logger = logging.getLogger(__name__)
 
 REPLY_TO_PROPERTY = "replyTo"
+# SAM agents read this user property off the inbound A2A request and
+# publish all subsequent TaskStatusUpdateEvents (llm_invocation,
+# llm_response, tool_invocation_start, ...) to it instead of the
+# default gateway-status topic. Setting it per publish is how the mesh
+# runner steers per-case telemetry to a topic the SSE endpoint can
+# subscribe to. See `solace_agent_mesh/common/a2a_protocol.py`.
+STATUS_TOPIC_PROPERTY = "a2aStatusTopic"
 
 
 class SolaceA2AClient:
@@ -160,10 +167,17 @@ class SolaceA2AClient:
         topic: str,
         envelope: dict,
         reply_to: str | None = None,
+        status_topic: str | None = None,
     ) -> str:
         """Publish envelope to topic. Returns the SHA-256 hex digest of the
         serialized body — callers should record it in CaseState.audit_log
         so broker traffic can be tied back to a specific outbound message.
+
+        When `status_topic` is provided it is attached as the Solace
+        `a2aStatusTopic` user property; the receiving SAM agent will
+        publish all lifecycle status updates (llm_invocation,
+        llm_response, tool_invocation_start, ...) to that topic instead
+        of its default gateway-status topic.
         """
         if self._publisher is None or self._service is None:
             raise RuntimeError("SolaceA2AClient.publish called before connect()")
@@ -177,14 +191,17 @@ class SolaceA2AClient:
         builder = self._service.message_builder()
         if reply_to:
             builder = builder.with_property(REPLY_TO_PROPERTY, reply_to)
+        if status_topic:
+            builder = builder.with_property(STATUS_TOPIC_PROPERTY, status_topic)
         outbound = builder.build(body)
         await asyncio.to_thread(self._publisher.publish, outbound, Topic.of(topic))
         logger.info(
-            "A2A publish topic=%s task_id=%s payload_sha256=%s bytes=%d",
+            "A2A publish topic=%s task_id=%s payload_sha256=%s bytes=%d status_topic=%s",
             topic,
             envelope.get("id"),
             payload_hash,
             len(body),
+            status_topic or "<default>",
         )
         return payload_hash
 
@@ -208,6 +225,106 @@ class SolaceA2AClient:
             fut.set_result(envelope)
             return
         self._delivered[task_id] = envelope
+
+    def subscribe_status(self, topic_subscription: str) -> "StatusSubscription":
+        """Open a dedicated DirectMessageReceiver on `topic_subscription`.
+
+        Caller reads envelopes from the returned handle's async queue
+        and MUST call `close()` when done. Each subscription owns its
+        own receiver so the SSE endpoint can tear down a single
+        case-scoped listener without disturbing the shared A2A
+        request/response machinery.
+        """
+        if self._service is None or self._loop is None:
+            raise RuntimeError("SolaceA2AClient.subscribe_status called before connect()")
+        return StatusSubscription(
+            service=self._service,
+            loop=self._loop,
+            topic_subscription=topic_subscription,
+        )
+
+
+class StatusSubscription:
+    """Per-connection Solace receiver bound to one topic subscription.
+
+    Inbound messages are JSON-parsed on the Solace receiver thread and
+    pushed to an `asyncio.Queue` via `loop.call_soon_threadsafe` so
+    consumers can `await queue.get()` from the event loop. Parse
+    failures are logged and dropped rather than raised through the
+    queue — the SSE stream should keep flowing even if one malformed
+    message arrives.
+    """
+
+    def __init__(
+        self,
+        *,
+        service: MessagingService,
+        loop: asyncio.AbstractEventLoop,
+        topic_subscription: str,
+    ) -> None:
+        self._service = service
+        self._loop = loop
+        self._topic = topic_subscription
+        self._queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=512)
+        self._receiver: DirectMessageReceiver | None = None
+
+    async def start(self) -> None:
+        receiver = (
+            self._service.create_direct_message_receiver_builder()
+            .with_subscriptions([TopicSubscription.of(self._topic)])
+            .build()
+        )
+        await asyncio.to_thread(receiver.start)
+        receiver.receive_async(_StatusHandler(self))
+        self._receiver = receiver
+        logger.info("StatusSubscription started topic=%s", self._topic)
+
+    async def next_event(self) -> dict:
+        return await self._queue.get()
+
+    async def close(self) -> None:
+        if self._receiver is not None:
+            try:
+                await asyncio.to_thread(self._receiver.terminate, 5000)
+            except Exception as exc:
+                logger.warning(
+                    "StatusSubscription terminate failed topic=%s: %s",
+                    self._topic,
+                    exc,
+                )
+            self._receiver = None
+
+    def _deliver(self, envelope: dict) -> None:
+        # Called on the asyncio loop via call_soon_threadsafe.
+        try:
+            self._queue.put_nowait(envelope)
+        except asyncio.QueueFull:
+            logger.warning(
+                "StatusSubscription queue full topic=%s — dropping message",
+                self._topic,
+            )
+
+
+class _StatusHandler(MessageHandler):
+    """Solace receiver callback for a StatusSubscription. Parse JSON and hop to loop."""
+
+    def __init__(self, subscription: StatusSubscription) -> None:
+        self._sub = subscription
+
+    def on_message(self, message: InboundMessage) -> None:
+        try:
+            payload_str = message.get_payload_as_string()
+            if payload_str:
+                envelope = json.loads(payload_str)
+            else:
+                payload_bytes = message.get_payload_as_bytes()
+                envelope = json.loads(payload_bytes.decode("utf-8")) if payload_bytes else None
+        except Exception as exc:
+            logger.error("StatusSubscription failed to parse status envelope: %s", exc)
+            return
+        if not isinstance(envelope, dict):
+            return
+        self._sub._loop.call_soon_threadsafe(self._sub._deliver, envelope)
 
 
 class _ReplyHandler(MessageHandler):

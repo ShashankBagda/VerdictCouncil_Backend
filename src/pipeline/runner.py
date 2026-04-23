@@ -17,13 +17,14 @@ import json
 import logging
 import os
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import yaml
 from openai import AsyncOpenAI
 
+from src.services.pipeline_events import publish_agent_event
 from src.shared.audit import append_audit_entry
 from src.shared.case_state import CaseState, CaseStatusEnum
 from src.shared.config import settings
@@ -544,6 +545,56 @@ CONFIGS_DIR = Path(__file__).resolve().parent.parent.parent / "configs" / "agent
 _ENV_VAR_PATTERN = re.compile(r"\$\{([^}]+)\}")
 
 
+def _summarise_agent_output(agent_name: str, agent_output: dict[str, Any]) -> str:
+    """Produce a short human-readable summary of an agent's output.
+
+    Shown on the Building page's `agent_completed` card. The agents
+    write to disjoint fields, so we tailor the summary by name rather
+    than dumping the whole JSON blob.
+    """
+    if not agent_output:
+        return "no output"
+    if agent_name == "case-processing":
+        parties = agent_output.get("parties") or []
+        docs = agent_output.get("raw_documents") or []
+        return f"{len(parties)} parties, {len(docs)} documents"
+    if agent_name == "complexity-routing":
+        meta = agent_output.get("case_metadata") or {}
+        parts = []
+        if meta.get("complexity"):
+            parts.append(f"complexity={meta['complexity']}")
+        if meta.get("route"):
+            parts.append(f"route={meta['route']}")
+        return " ".join(parts) or "routing decision recorded"
+    if agent_name == "evidence-analysis":
+        items = (agent_output.get("evidence_analysis") or {}).get("items") or []
+        return f"{len(items)} evidence items analysed"
+    if agent_name == "fact-reconstruction":
+        facts = (agent_output.get("extracted_facts") or {}).get("facts") or []
+        return f"{len(facts)} facts reconstructed"
+    if agent_name == "witness-analysis":
+        ws = (agent_output.get("witnesses") or {}).get("items") or []
+        return f"{len(ws)} witness statements"
+    if agent_name == "legal-knowledge":
+        rules = agent_output.get("legal_rules") or []
+        precs = agent_output.get("precedents") or []
+        return f"{len(rules)} rules, {len(precs)} precedents"
+    if agent_name == "argument-construction":
+        args = agent_output.get("arguments") or {}
+        return f"{len(args)} argument sides"
+    if agent_name == "hearing-analysis":
+        ha = agent_output.get("hearing_analysis") or {}
+        if ha.get("recommendation"):
+            return f"recommendation: {ha['recommendation']}"
+        return "hearing analysis recorded"
+    if agent_name == "hearing-governance":
+        fc = agent_output.get("fairness_check") or {}
+        if fc.get("passed") is not None:
+            return f"fairness check {'passed' if fc['passed'] else 'failed'}"
+        return "governance review recorded"
+    return "output recorded"
+
+
 def _resolve_env_vars(value: str) -> str:
     """Replace ``${VAR}`` placeholders with environment variable values.
 
@@ -827,6 +878,38 @@ class PipelineRunner:
             for d in state.raw_documents
             if d.get("openai_file_id") and d.get("pages")
         }
+        case_id = str(state.case_id) if state.case_id else "unknown"
+        await publish_agent_event(
+            case_id,
+            {
+                "case_id": case_id,
+                "agent": agent_name,
+                "event": "agent_started",
+                "ts": datetime.now(UTC).isoformat(),
+            },
+        )
+        try:
+            return await self._run_agent_inner(agent_name, state, extra_instructions, case_id)
+        except Exception as exc:
+            await publish_agent_event(
+                case_id,
+                {
+                    "case_id": case_id,
+                    "agent": agent_name,
+                    "event": "agent_failed",
+                    "error": str(exc)[:500],
+                    "ts": datetime.now(UTC).isoformat(),
+                },
+            )
+            raise
+
+    async def _run_agent_inner(
+        self,
+        agent_name: str,
+        state: CaseState,
+        extra_instructions: str | None,
+        case_id: str,
+    ) -> CaseState:
         config = self._load_agent_config(agent_name)
         model = self._resolve_model(config)
         system_prompt = config.get("instruction", "")
@@ -854,6 +937,19 @@ class PipelineRunner:
         if tools:
             kwargs["tools"] = tools
 
+        await publish_agent_event(
+            case_id,
+            {
+                "case_id": case_id,
+                "agent": agent_name,
+                "event": "thinking",
+                "content": (
+                    f"→ {model} · tools={len(tools) if tools else 0}"
+                ),
+                "ts": datetime.now(UTC).isoformat(),
+            },
+        )
+
         response = await self._client.chat.completions.create(**kwargs)
         choice = response.choices[0]
         token_usage = None
@@ -876,7 +972,31 @@ class PipelineRunner:
                 if fn_name in ("search_precedents", "search_domain_guidance"):
                     if state.domain_vector_store_id and "vector_store_id" not in fn_args:
                         fn_args = {**fn_args, "vector_store_id": state.domain_vector_store_id}
+                await publish_agent_event(
+                    case_id,
+                    {
+                        "case_id": case_id,
+                        "agent": agent_name,
+                        "event": "tool_call",
+                        "tool_name": fn_name,
+                        "args": fn_args,
+                        "ts": datetime.now(UTC).isoformat(),
+                    },
+                )
                 tool_result = await self._execute_tool_call(fn_name, fn_args)
+                await publish_agent_event(
+                    case_id,
+                    {
+                        "case_id": case_id,
+                        "agent": agent_name,
+                        "event": "tool_result",
+                        "tool_name": fn_name,
+                        # tool_result is JSON-encoded; keep it as a string
+                        # for the UI but cap to avoid flooding the SSE stream.
+                        "result": tool_result[:400],
+                        "ts": datetime.now(UTC).isoformat(),
+                    },
+                )
 
                 tool_calls_log.append(
                     {
@@ -894,6 +1014,16 @@ class PipelineRunner:
                     }
                 )
 
+            await publish_agent_event(
+                case_id,
+                {
+                    "case_id": case_id,
+                    "agent": agent_name,
+                    "event": "thinking",
+                    "content": f"→ {model} · continuing after {len(tool_calls_log)} tool call(s)",
+                    "ts": datetime.now(UTC).isoformat(),
+                },
+            )
             response = await self._client.chat.completions.create(**kwargs)
             choice = response.choices[0]
             if response.usage:
@@ -905,6 +1035,16 @@ class PipelineRunner:
 
         # Parse the final JSON response
         raw_content = choice.message.content or "{}"
+        await publish_agent_event(
+            case_id,
+            {
+                "case_id": case_id,
+                "agent": agent_name,
+                "event": "llm_response",
+                "content": raw_content[:600],
+                "ts": datetime.now(UTC).isoformat(),
+            },
+        )
         try:
             agent_output = json.loads(raw_content)
         except json.JSONDecodeError:
@@ -974,6 +1114,17 @@ class PipelineRunner:
             tool_calls=tool_calls_log if tool_calls_log else None,
             model=model,
             token_usage=token_usage,
+        )
+
+        await publish_agent_event(
+            case_id,
+            {
+                "case_id": case_id,
+                "agent": agent_name,
+                "event": "agent_completed",
+                "output_summary": _summarise_agent_output(agent_name, agent_output),
+                "ts": datetime.now(UTC).isoformat(),
+            },
         )
 
         return updated_state
