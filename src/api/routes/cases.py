@@ -14,9 +14,11 @@ from sqlalchemy.orm import selectinload
 
 from src.api.deps import CurrentUser, DBSession, require_role
 from src.api.schemas.cases import (
-    KNOWN_TRAFFIC_OFFENCE_CODES,
+    CaseConfirmRequest,
     CaseCreateRequest,
     CaseDetailResponse,
+    CaseDraftCreateRequest,
+    CaseIntakeMessageRequest,
     CaseListResponse,
     CaseResponse,
     GateAdvanceRequest,
@@ -208,11 +210,11 @@ def _build_jurisdiction_summary(case: Case) -> dict[str, Any]:
 
     if case.domain == CaseDomain.traffic_violation:
         if case.offence_code:
-            if case.offence_code not in KNOWN_TRAFFIC_OFFENCE_CODES:
-                failure = True
-                reasons.append(f"Offence code {case.offence_code} is not recognised.")
-            else:
-                reasons.append(f"Offence code {case.offence_code} is recognised.")
+            # Offence codes are not a closed set — the RTA lists many sections
+            # and sitting judges are the authority on which code applies. We
+            # record the code on the jurisdiction summary for audit, but never
+            # fail the case on an allow-list mismatch.
+            reasons.append(f"Offence code recorded: {case.offence_code}.")
         if earliest_fact_date and case.filed_date:
             limitation_days = (case.filed_date - earliest_fact_date).days
             if limitation_days > 365:
@@ -475,6 +477,349 @@ async def create_case(
     if case.domain_id:
         await db.refresh(case, ["domain_ref"])
     return _serialize_case_summary(case)
+
+
+# ---------------------------------------------------------------------------
+# Chat-first intake — draft / confirm / extract / stream / message
+# ---------------------------------------------------------------------------
+#
+# The legacy POST /cases/ above takes a fully-typed payload from the judge.
+# The new intake flow inverts this: the judge picks a domain and uploads
+# typed documents; the extractor proposes fields; the judge confirms via
+# the chat surface; only then does the case reach `pending` and become
+# eligible for the 9-agent pipeline.
+
+
+@router.post(
+    "/draft",
+    response_model=CaseResponse,
+    status_code=status.HTTP_201_CREATED,
+    operation_id="create_case_draft",
+    summary="Create a draft case for docs-as-source-of-truth intake",
+)
+async def create_case_draft(
+    body: CaseDraftCreateRequest,
+    db: DBSession,
+    current_user: User = require_role(UserRole.judge),
+) -> dict[str, Any]:
+    from src.models.domain import Domain as DomainModel
+
+    domain_row: DomainModel | None = None
+    if body.domain_id is not None:
+        domain_row = await db.get(DomainModel, body.domain_id)
+        if domain_row is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Domain {body.domain_id} not found",
+            )
+    elif body.domain is not None:
+        result = await db.execute(
+            select(DomainModel).where(DomainModel.code == body.domain.value)
+        )
+        domain_row = result.scalar_one_or_none()
+        if domain_row is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Domain seed row missing — contact platform team",
+            )
+
+    if domain_row is not None and not domain_row.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Domain '{domain_row.code}' is not active",
+        )
+
+    legacy_domain = body.domain
+    if legacy_domain is None and domain_row is not None:
+        try:
+            legacy_domain = CaseDomain(domain_row.code)
+        except ValueError:
+            legacy_domain = None
+
+    case = Case(
+        id=uuid4(),
+        domain=legacy_domain,
+        domain_id=domain_row.id if domain_row else None,
+        filed_date=body.filed_date,
+        status=CaseStatus.draft,
+        created_by=current_user.id,
+    )
+    db.add(case)
+    await db.flush()
+    await db.refresh(case)
+    if case.domain_id:
+        await db.refresh(case, ["domain_ref"])
+    return _serialize_case_summary(case)
+
+
+@router.post(
+    "/{case_id}/confirm",
+    response_model=CaseResponse,
+    status_code=status.HTTP_200_OK,
+    operation_id="confirm_case_intake",
+    summary="Judge confirms extracted fields — transitions draft/awaiting_intake_confirmation → pending",
+)
+async def confirm_case_intake(
+    case_id: UUID,
+    body: CaseConfirmRequest,
+    db: DBSession,
+    current_user: User = require_role(UserRole.judge),
+) -> dict[str, Any]:
+    case = await db.get(Case, case_id)
+    if case is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
+    if case.created_by != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+
+    if case.status not in (
+        CaseStatus.draft,
+        CaseStatus.extracting,
+        CaseStatus.awaiting_intake_confirmation,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Case cannot be confirmed from status {case.status.value}",
+        )
+
+    # Domain-specific validation was loosened on CaseConfirmRequest (no
+    # closed offence-code whitelist), but we still enforce the SCT
+    # jurisdictional caps that the Act fixes in statute.
+    if case.domain == CaseDomain.small_claims:
+        if body.claim_amount is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Small-claims matters require claim_amount at confirm",
+            )
+        if body.claim_amount > 30000:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="SCT claim_amount exceeds the $30,000 jurisdiction limit.",
+            )
+        if body.claim_amount > 20000 and not body.consent_to_higher_claim_limit:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="SCT claim_amount above $20,000 requires consent_to_higher_claim_limit.",
+            )
+    if case.domain == CaseDomain.traffic_violation and not body.offence_code:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Traffic matters require offence_code at confirm",
+        )
+
+    case.title = body.title.strip()
+    case.description = body.description.strip() if body.description else None
+    case.filed_date = body.filed_date
+    case.claim_amount = body.claim_amount
+    case.consent_to_higher_claim_limit = body.consent_to_higher_claim_limit
+    case.offence_code = body.offence_code
+    case.status = CaseStatus.pending
+
+    # Replace parties wholesale — confirm is authoritative. The Party rows
+    # have ON DELETE CASCADE so orphans are cleaned up automatically.
+    for existing in list(case.parties):
+        await db.delete(existing)
+    for party in body.parties:
+        case.parties.append(
+            Party(
+                id=uuid4(),
+                name=party.name.strip(),
+                role=party.role,
+                contact_info=party.contact_info,
+            )
+        )
+
+    await db.commit()
+    await db.refresh(case)
+    if case.domain_id:
+        await db.refresh(case, ["domain_ref"])
+
+    # Close the intake stream for any subscribers still listening.
+    from src.services.intake_events import publish_intake_event
+
+    await publish_intake_event(
+        case_id,
+        {"type": "confirmed", "ts": datetime.now(UTC).isoformat()},
+    )
+
+    return _serialize_case_summary(case)
+
+
+@router.post(
+    "/{case_id}/intake/extract",
+    response_model=MessageResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    operation_id="trigger_intake_extraction",
+    summary="(Re-)enqueue intake extraction for a draft case",
+)
+async def trigger_intake_extraction(
+    case_id: UUID,
+    db: DBSession,
+    current_user: User = require_role(UserRole.judge),
+) -> MessageResponse:
+    case = await db.get(Case, case_id)
+    if case is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
+    if case.created_by != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+    if case.status not in (
+        CaseStatus.draft,
+        CaseStatus.extracting,
+        CaseStatus.awaiting_intake_confirmation,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Intake extraction not valid from status {case.status.value}",
+        )
+
+    from src.models.pipeline_job import PipelineJobType
+    from src.workers.outbox import enqueue_outbox_job
+
+    case.status = CaseStatus.extracting
+    await enqueue_outbox_job(db, case_id=case_id, job_type=PipelineJobType.intake_extraction)
+    await db.commit()
+    return MessageResponse(message="Intake extraction enqueued")
+
+
+@router.post(
+    "/{case_id}/intake/message",
+    response_model=MessageResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    operation_id="send_intake_message",
+    summary="Judge correction on the intake chat — re-runs extraction",
+)
+async def send_intake_message(
+    case_id: UUID,
+    body: CaseIntakeMessageRequest,
+    db: DBSession,
+    current_user: User = require_role(UserRole.judge),
+) -> MessageResponse:
+    case = await db.get(Case, case_id)
+    if case is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
+    if case.created_by != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+    if case.status not in (
+        CaseStatus.draft,
+        CaseStatus.extracting,
+        CaseStatus.awaiting_intake_confirmation,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Cannot accept intake message from status {case.status.value}",
+        )
+
+    from src.models.pipeline_job import PipelineJobType
+    from src.workers.outbox import enqueue_outbox_job
+
+    case.status = CaseStatus.extracting
+    await enqueue_outbox_job(
+        db,
+        case_id=case_id,
+        job_type=PipelineJobType.intake_extraction,
+        payload={"correction": body.content},
+    )
+    await db.commit()
+
+    # Echo the judge's message on the stream so the frontend chat renders
+    # it immediately without waiting for the worker to pick the job up.
+    from src.services.intake_events import publish_intake_event
+
+    await publish_intake_event(
+        case_id,
+        {
+            "type": "user_message",
+            "content": body.content,
+            "ts": datetime.now(UTC).isoformat(),
+        },
+    )
+    return MessageResponse(message="Correction received — re-extracting")
+
+
+@router.get(
+    "/{case_id}/intake/stream",
+    operation_id="stream_intake_events",
+    summary="SSE stream of intake extraction events (ai-sdk UIMessage format)",
+    description=(
+        "Server-Sent Events stream backed by the intake Redis pub/sub channel. "
+        "Closes on `done`, `error`, or `confirmed` events."
+    ),
+)
+async def stream_intake_events(
+    case_id: UUID,
+    request: Request,
+    db: DBSession,
+    current_user: CurrentUser,
+) -> StreamingResponse:
+    case = await _load_case_for_export(case_id, db, current_user)
+
+    from src.services.intake_events import subscribe_intake_events
+
+    async def event_generator():
+        # Snapshot-on-connect so a client that reconnects after the worker
+        # already finished still sees the latest extraction without polling.
+        if case.intake_extraction is not None:
+            snap = {
+                "type": "done"
+                if case.status == CaseStatus.awaiting_intake_confirmation
+                else "status",
+                "phase": "reconnect_snapshot",
+                "extraction": case.intake_extraction,
+                "ts": datetime.now(UTC).isoformat(),
+            }
+            yield f"data: {json.dumps(snap)}\n\n"
+
+        queue: asyncio.Queue[str] = asyncio.Queue()
+        producer_done = asyncio.Event()
+
+        async def _producer():
+            try:
+                async for payload in subscribe_intake_events(case_id):
+                    await queue.put(payload)
+            finally:
+                producer_done.set()
+
+        producer_task = asyncio.create_task(_producer())
+        stream_start = time.monotonic()
+        try:
+            while True:
+                if await request.is_disconnected():
+                    return
+                remaining = SSE_WATCHDOG_SECONDS - (time.monotonic() - stream_start)
+                if remaining <= 0:
+                    yield "data: " + json.dumps(
+                        {
+                            "type": "error",
+                            "message": "watchdog_timeout",
+                            "ts": datetime.now(UTC).isoformat(),
+                        }
+                    ) + "\n\n"
+                    return
+                try:
+                    payload = await asyncio.wait_for(
+                        queue.get(), timeout=min(SSE_HEARTBEAT_SECONDS, remaining)
+                    )
+                except TimeoutError:
+                    if producer_done.is_set() and queue.empty():
+                        return
+                    yield ": keepalive\n\n"
+                    continue
+                yield f"data: {payload}\n\n"
+                if producer_done.is_set() and queue.empty():
+                    return
+        finally:
+            producer_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await producer_task
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get(
