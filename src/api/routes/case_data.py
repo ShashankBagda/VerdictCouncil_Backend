@@ -178,10 +178,27 @@ def _compute_progress(agents: list[dict]) -> int:
 
 
 def _derive_overall_status(case: Case, agents: list[dict]) -> str:
+    # Map concrete DB statuses to frontend-facing strings first so the
+    # frontend can gate visibility of action buttons on the exact value.
     if case.status == CaseStatus.failed:
         return "failed"
+    if case.status == CaseStatus.failed_retryable:
+        return "failed_retryable"
+    if case.status == CaseStatus.escalated:
+        return "escalated"
     if case.status in (CaseStatus.ready_for_review, CaseStatus.closed):
         return "completed"
+    # Gate-pause statuses — pass through the enum value string so the
+    # frontend can render gate review panels and stop polling.
+    _GATE_PAUSE_STATUSES = {
+        CaseStatus.awaiting_review_gate1,
+        CaseStatus.awaiting_review_gate2,
+        CaseStatus.awaiting_review_gate3,
+        CaseStatus.awaiting_review_gate4,
+    }
+    if case.status in _GATE_PAUSE_STATUSES:
+        return case.status.value
+    # Derive from agent states for actively-processing cases
     if any(a["status"] == "failed" for a in agents):
         return "failed"
     if all(a["status"] == "completed" for a in agents):
