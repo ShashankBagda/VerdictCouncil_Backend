@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 class UserRole(str, enum.Enum):
     judge = "judge"
     admin = "admin"
+    senior_judge = "senior_judge"
 
 
 class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
