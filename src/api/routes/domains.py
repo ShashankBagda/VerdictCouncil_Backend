@@ -9,6 +9,7 @@ Every admin route declares response_model= explicitly (enforced by test).
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, UploadFile, status
@@ -497,6 +498,8 @@ async def upload_domain_document(
         status=DomainDocumentStatus.pending,
         idempotency_key=uuid4(),
         uploaded_by=current_user.id,
+        sanitized=False,
+        uploaded_at=datetime.now(UTC),
     )
     db.add(doc)
     await db.commit()

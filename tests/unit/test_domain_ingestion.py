@@ -1,12 +1,13 @@
 """Unit tests for the domain document sanitize-at-ingest pipeline.
 
-Verifies the DB-first insert ordering (D15), parse failure → 422,
+Verifies DB-first insert ordering (D15), parse failure handling,
 MIME whitelist enforcement, and that only the sanitized artifact is indexed.
 """
 
 from __future__ import annotations
 
 import uuid
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -48,13 +49,12 @@ def _make_domain(vector_store_id="vs_test", is_active=True) -> MagicMock:
 
 
 class _TrackingSession:
-    """Records DB operations to verify insert-before-OpenAI ordering."""
+    """Mock HTTP-layer session for route handler tests."""
 
     def __init__(self, domain: MagicMock) -> None:
         self._domain = domain
         self.added: list = []
-        self.flush_count = 0
-        self._added_doc: DomainDocument | None = None
+        self.commit_count = 0
 
     def add(self, obj) -> None:
         self.added.append(obj)
@@ -75,14 +75,32 @@ class _TrackingSession:
         return mock
 
     async def flush(self) -> None:
-        self.flush_count += 1
-        # Simulate server defaults that Postgres would set
-        for obj in self.added:
-            if isinstance(obj, DomainDocument):
-                if getattr(obj, "uploaded_at", None) is None:
-                    obj.uploaded_at = datetime.now(UTC)
-                if getattr(obj, "sanitized", None) is None:
-                    obj.sanitized = False
+        pass
+
+    async def commit(self) -> None:
+        self.commit_count += 1
+
+    async def rollback(self) -> None:
+        return None
+
+    async def refresh(self, obj, attrs=None) -> None:
+        return None
+
+
+class _BgSession:
+    """Mock session for direct background-task (ingest pipeline) tests."""
+
+    def __init__(self, doc: DomainDocument) -> None:
+        self._doc = doc
+        self.added: list = []
+
+    def add(self, obj) -> None:
+        self.added.append(obj)
+
+    async def get(self, model, pk):
+        if hasattr(model, "__name__") and model.__name__ == "DomainDocument":
+            return self._doc
+        return None
 
     async def commit(self) -> None:
         return None
@@ -94,6 +112,14 @@ class _TrackingSession:
         return None
 
 
+def _make_bg_session_factory(session: _BgSession):
+    @asynccontextmanager
+    async def factory():
+        yield session
+
+    return factory
+
+
 def _app_with(user, session):
     app = create_app()
     app.dependency_overrides[get_current_user] = lambda: user
@@ -102,99 +128,93 @@ def _app_with(user, session):
 
 
 # ---------------------------------------------------------------------------
-# DB-first ordering: DomainDocument row is inserted before OpenAI calls
+# DB-first ordering: row committed in HTTP handler before background task runs
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_db_first_insert_before_openai_upload():
-    """The DomainDocument row must be flushed to the DB before the first OpenAI call.
-
-    This prevents orphaned OpenAI files with no corresponding DB record (D15).
+    """The DomainDocument row must be committed in the HTTP handler before the
+    background task (which makes OpenAI calls) starts — no orphaned files (D15).
     """
     from src.shared.config import settings as _settings
 
     admin = _make_admin()
     domain = _make_domain()
     session = _TrackingSession(domain)
-
-    oa_file = MagicMock(id="file-original-abc")
-    san_file = MagicMock(id="file-sanitized-xyz")
-    vs_file = MagicMock(id="vsf-123", status="completed")
-
-    mock_client = MagicMock()
-    mock_client.files = MagicMock(create=AsyncMock(side_effect=[oa_file, san_file]))
-    mock_client.vector_stores = MagicMock(
-        files=MagicMock(create_and_poll=AsyncMock(return_value=vs_file))
-    )
-
-    parse_result = {
-        "pages": [{"page_number": 1, "text": "Sanitized text content"}],
-        "text": "Sanitized text content",
-        "tables": [],
-    }
-
     app = _app_with(admin, session)
 
-    with (
-        patch.object(_settings, "domain_uploads_enabled", True),
-        patch("openai.AsyncOpenAI", return_value=mock_client),
-        patch("src.tools.parse_document.parse_document", AsyncMock(return_value=parse_result)),
-    ):
+    with patch.object(_settings, "domain_uploads_enabled", True):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.post(
                 f"/api/v1/domains/admin/{domain.id}/documents",
                 files={"file": ("test.pdf", b"%PDF-1.4", "application/pdf")},
             )
 
-    # The session must have had at least one flush before OpenAI was called
-    # (flush_count > 0 when the first OpenAI call happens)
-    assert resp.status_code == 201
-    # DomainDocument was added to the session before flush
-    assert session.flush_count >= 1, "DB flush must happen before OpenAI upload (D15)"
+    assert resp.status_code == 202
+    domain_docs = [obj for obj in session.added if isinstance(obj, DomainDocument)]
+    assert len(domain_docs) == 1, "DomainDocument must be added to DB in the HTTP handler"
+    assert domain_docs[0].status == DomainDocumentStatus.pending
+    assert session.commit_count >= 1, "DB commit must happen in HTTP handler before background task"
 
 
 # ---------------------------------------------------------------------------
-# Parse failure → 422, no vector-store write
+# Parse failure → doc marked failed, vector store never written
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_parse_failure_returns_422_and_no_vector_store_write():
-    """If parse_document raises, the route must return 422 and never write to the vector store."""
+async def test_ingest_parse_failure_marks_doc_failed():
+    """If parse_document raises, the doc is marked failed and vector store is never written."""
+    from src.api.routes.domains import _ingest_domain_document
     from src.tools.parse_document import DocumentParseError
-    from src.shared.config import settings as _settings
 
     admin = _make_admin()
     domain = _make_domain()
-    session = _TrackingSession(domain)
+    doc_id = uuid.uuid4()
+    doc = DomainDocument(
+        id=doc_id,
+        domain_id=domain.id,
+        filename="scan.pdf",
+        mime_type="application/pdf",
+        size_bytes=10,
+        status=DomainDocumentStatus.pending,
+        idempotency_key=uuid.uuid4(),
+        uploaded_by=admin.id,
+        sanitized=False,
+        uploaded_at=datetime.now(UTC),
+    )
 
+    bg_session = _BgSession(doc)
     oa_file = MagicMock(id="file-original-abc")
     mock_client = MagicMock()
     mock_client.files = MagicMock(create=AsyncMock(return_value=oa_file))
     mock_client.vector_stores = MagicMock(
-        files=MagicMock(create_and_poll=AsyncMock(side_effect=AssertionError("should not be called")))
+        files=MagicMock(
+            create_and_poll=AsyncMock(side_effect=AssertionError("should not be called"))
+        )
     )
 
-    app = _app_with(admin, session)
-
     with (
-        patch.object(_settings, "domain_uploads_enabled", True),
         patch("openai.AsyncOpenAI", return_value=mock_client),
+        patch("src.services.database.async_session", _make_bg_session_factory(bg_session)),
         patch(
             "src.tools.parse_document.parse_document",
             AsyncMock(side_effect=DocumentParseError("Cannot parse image-only PDF")),
         ),
     ):
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            resp = await client.post(
-                f"/api/v1/domains/admin/{domain.id}/documents",
-                files={"file": ("scan.pdf", b"%PDF-1.4", "application/pdf")},
-            )
+        await _ingest_domain_document(
+            doc_id=doc_id,
+            domain_id=domain.id,
+            vector_store_id="vs_test",
+            file_bytes=b"%PDF-1.4",
+            filename="scan.pdf",
+            content_type="application/pdf",
+            actor_id=admin.id,
+        )
 
-    assert resp.status_code == 422
-    assert "parsed" in resp.json()["detail"].lower() or "parse" in resp.json()["detail"].lower()
-    # vector store create_and_poll must never have been called
+    assert doc.status == DomainDocumentStatus.failed
+    assert doc.error_reason is not None
     mock_client.vector_stores.files.create_and_poll.assert_not_awaited()
 
 
@@ -206,12 +226,25 @@ async def test_parse_failure_returns_422_and_no_vector_store_write():
 @pytest.mark.asyncio
 async def test_only_sanitized_file_goes_into_vector_store():
     """The original OpenAI file must not be added to the vector store — only the sanitized artifact."""
-    from src.shared.config import settings as _settings
+    from src.api.routes.domains import _ingest_domain_document
 
     admin = _make_admin()
     domain = _make_domain(vector_store_id="vs_test")
-    session = _TrackingSession(domain)
+    doc_id = uuid.uuid4()
+    doc = DomainDocument(
+        id=doc_id,
+        domain_id=domain.id,
+        filename="test.pdf",
+        mime_type="application/pdf",
+        size_bytes=10,
+        status=DomainDocumentStatus.pending,
+        idempotency_key=uuid.uuid4(),
+        uploaded_by=admin.id,
+        sanitized=False,
+        uploaded_at=datetime.now(UTC),
+    )
 
+    bg_session = _BgSession(doc)
     original_file_id = "file-original-DO-NOT-INDEX"
     sanitized_file_id = "file-sanitized-OK-TO-INDEX"
 
@@ -231,20 +264,21 @@ async def test_only_sanitized_file_goes_into_vector_store():
         "tables": [],
     }
 
-    app = _app_with(admin, session)
-
     with (
-        patch.object(_settings, "domain_uploads_enabled", True),
         patch("openai.AsyncOpenAI", return_value=mock_client),
+        patch("src.services.database.async_session", _make_bg_session_factory(bg_session)),
         patch("src.tools.parse_document.parse_document", AsyncMock(return_value=parse_result)),
     ):
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            await client.post(
-                f"/api/v1/domains/admin/{domain.id}/documents",
-                files={"file": ("test.pdf", b"%PDF-1.4", "application/pdf")},
-            )
+        await _ingest_domain_document(
+            doc_id=doc_id,
+            domain_id=domain.id,
+            vector_store_id="vs_test",
+            file_bytes=b"%PDF-1.4",
+            filename="test.pdf",
+            content_type="application/pdf",
+            actor_id=admin.id,
+        )
 
-    # create_and_poll must have been called with the sanitized file id, NOT the original
     call_kwargs = mock_client.vector_stores.files.create_and_poll.await_args
     indexed_file_id = call_kwargs.kwargs.get("file_id") or call_kwargs[1].get("file_id")
     assert indexed_file_id == sanitized_file_id, (
@@ -313,14 +347,28 @@ async def test_upload_too_large_returns_413():
 
 
 @pytest.mark.asyncio
-async def test_upload_records_classifier_hits_in_admin_event():
+async def test_ingest_records_classifier_hits_in_admin_event():
     """parse_result['sanitization'] metrics land in the AdminEvent payload."""
-    from src.shared.config import settings as _settings
+    from src.api.routes.domains import _ingest_domain_document
+    from src.models.admin_event import AdminEvent
 
     admin = _make_admin()
     domain = _make_domain(vector_store_id="vs_test")
-    session = _TrackingSession(domain)
+    doc_id = uuid.uuid4()
+    doc = DomainDocument(
+        id=doc_id,
+        domain_id=domain.id,
+        filename="test.pdf",
+        mime_type="application/pdf",
+        size_bytes=10,
+        status=DomainDocumentStatus.pending,
+        idempotency_key=uuid.uuid4(),
+        uploaded_by=admin.id,
+        sanitized=False,
+        uploaded_at=datetime.now(UTC),
+    )
 
+    bg_session = _BgSession(doc)
     oa_file = MagicMock(id="file-original-abc")
     san_file = MagicMock(id="file-sanitized-xyz")
     vs_file = MagicMock(id="vsf-123", status="completed")
@@ -343,24 +391,22 @@ async def test_upload_records_classifier_hits_in_admin_event():
         ),
     }
 
-    app = _app_with(admin, session)
-
     with (
-        patch.object(_settings, "domain_uploads_enabled", True),
         patch("openai.AsyncOpenAI", return_value=mock_client),
+        patch("src.services.database.async_session", _make_bg_session_factory(bg_session)),
         patch("src.tools.parse_document.parse_document", AsyncMock(return_value=parse_result)),
     ):
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            resp = await client.post(
-                f"/api/v1/domains/admin/{domain.id}/documents",
-                files={"file": ("test.pdf", b"%PDF-1.4", "application/pdf")},
-            )
+        await _ingest_domain_document(
+            doc_id=doc_id,
+            domain_id=domain.id,
+            vector_store_id="vs_test",
+            file_bytes=b"%PDF-1.4",
+            filename="test.pdf",
+            content_type="application/pdf",
+            actor_id=admin.id,
+        )
 
-    assert resp.status_code == 201
-    # Find the AdminEvent that was added to the session
-    from src.models.admin_event import AdminEvent
-
-    admin_events = [obj for obj in session.added if isinstance(obj, AdminEvent)]
+    admin_events = [obj for obj in bg_session.added if isinstance(obj, AdminEvent)]
     assert admin_events, "No AdminEvent written to the session"
     upload_event = next(
         (e for e in admin_events if e.action == "domain_document_uploaded"), None

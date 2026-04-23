@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import enum
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
@@ -59,7 +59,7 @@ class DomainDocument(UUIDPrimaryKeyMixin, Base):
     filename: Mapped[str] = mapped_column(String(500), nullable=False)
     mime_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
     size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    sanitized: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    sanitized: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false", default=False)
     status: Mapped[DomainDocumentStatus] = mapped_column(
         String(20), nullable=False, server_default=DomainDocumentStatus.pending.value
     )
@@ -71,7 +71,8 @@ class DomainDocument(UUIDPrimaryKeyMixin, Base):
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
     )
     uploaded_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
+        DateTime(timezone=True), server_default=func.now(), nullable=False,
+        default=lambda: datetime.now(UTC),
     )
 
     domain: Mapped[Domain] = relationship(back_populates="documents")
