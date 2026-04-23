@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, UploadFile, status
 from sqlalchemy import select
 
 from src.api.deps import CurrentUser, DBSession, require_role
@@ -310,10 +310,126 @@ async def list_domain_documents(
     return list(result.scalars().all())
 
 
+async def _ingest_domain_document(
+    doc_id: UUID,
+    domain_id: UUID,
+    vector_store_id: str,
+    file_bytes: bytes,
+    filename: str,
+    content_type: str,
+    actor_id: UUID,
+) -> None:
+    """Background pipeline: upload → parse → sanitize → index."""
+    from openai import AsyncOpenAI
+
+    from src.services.database import async_session
+    from src.tools.parse_document import parse_document
+
+    client = AsyncOpenAI(api_key=settings.openai_api_key)
+
+    async with async_session() as db:
+        try:
+            doc = await db.get(DomainDocument, doc_id)
+            if doc is None:
+                logger.error("Background ingest: doc %s not found", doc_id)
+                return
+
+            try:
+                oa_file = await client.files.create(
+                    file=(filename, file_bytes, content_type),
+                    purpose="assistants",
+                )
+                doc.openai_file_id = oa_file.id
+                doc.status = DomainDocumentStatus.uploading
+                await db.commit()
+            except Exception as exc:
+                doc.status = DomainDocumentStatus.failed
+                doc.error_reason = f"OpenAI upload failed: {exc}"
+                await db.commit()
+                logger.error("Ingest upload failed for doc %s: %s", doc_id, exc)
+                return
+
+            try:
+                parse_result = await parse_document(
+                    file_id=doc.openai_file_id,
+                    run_classifier=settings.classifier_sanitizer_enabled,
+                )
+                doc.status = DomainDocumentStatus.parsed
+                await db.commit()
+            except Exception as exc:
+                doc.status = DomainDocumentStatus.failed
+                doc.error_reason = f"Parse failed: {exc}"
+                await db.commit()
+                logger.error("Ingest parse failed for doc %s: %s", doc_id, exc)
+                return
+
+            pages = parse_result.get("pages", [])
+            if not pages:
+                doc.status = DomainDocumentStatus.failed
+                doc.error_reason = "Parse returned no pages"
+                await db.commit()
+                return
+
+            sanitized_text = "\n".join(
+                f"--- Page {i + 1} ---\n{p.get('text', '')}" for i, p in enumerate(pages)
+            )
+            sanitized_filename = f"{filename.rsplit('.', 1)[0]}.sanitized.txt"
+
+            try:
+                san_file = await client.files.create(
+                    file=(sanitized_filename, sanitized_text.encode(), "text/plain"),
+                    purpose="assistants",
+                )
+                doc.sanitized_file_id = san_file.id
+                doc.status = DomainDocumentStatus.indexing
+                doc.sanitized = True
+                await db.commit()
+
+                vs_file = await client.vector_stores.files.create_and_poll(
+                    vector_store_id=vector_store_id,
+                    file_id=san_file.id,
+                )
+            except Exception as exc:
+                doc.status = DomainDocumentStatus.failed
+                doc.error_reason = f"Indexing failed: {exc}"
+                await db.commit()
+                logger.error("Ingest index failed for doc %s: %s", doc_id, exc)
+                return
+
+            if vs_file.status != "completed":
+                doc.status = DomainDocumentStatus.failed
+                doc.error_reason = f"Vector store file status: {vs_file.status}"
+                await db.commit()
+                return
+
+            doc.status = DomainDocumentStatus.indexed
+            san = parse_result.get("sanitization")
+            db.add(
+                AdminEvent(
+                    actor_id=actor_id,
+                    action="domain_document_uploaded",
+                    payload={
+                        "domain_id": str(domain_id),
+                        "doc_id": str(doc_id),
+                        "filename": filename,
+                        "regex_hits": san.regex_hits if san else 0,
+                        "classifier_hits": san.classifier_hits if san else 0,
+                        "chunks_scanned": san.chunks_scanned if san else 0,
+                    },
+                )
+            )
+            await db.commit()
+            logger.info("Ingest complete for doc %s (%s)", doc_id, filename)
+
+        except Exception as exc:
+            logger.error("Unexpected ingest error for doc %s: %s", doc_id, exc)
+            await db.rollback()
+
+
 @router.post(
     "/admin/{domain_id}/documents",
     response_model=DomainDocumentResponse,
-    status_code=status.HTTP_201_CREATED,
+    status_code=status.HTTP_202_ACCEPTED,
     operation_id="upload_domain_document",
     summary="Upload a document to a domain KB",
     description="Sanitize-at-ingest pipeline. Feature-flagged behind domain_uploads_enabled.",
@@ -322,11 +438,11 @@ async def list_domain_documents(
         404: {"model": ErrorResponse, "description": "Domain not found"},
         413: {"model": ErrorResponse, "description": "File too large"},
         415: {"model": ErrorResponse, "description": "Unsupported file type"},
-        422: {"model": ErrorResponse, "description": "Document could not be parsed/sanitized"},
-        503: {"model": ErrorResponse, "description": "Uploads temporarily disabled"},
+        503: {"model": ErrorResponse, "description": "Uploads temporarily disabled or vector store unavailable"},
     },
 )
 async def upload_domain_document(
+    background_tasks: BackgroundTasks,
     domain_id: UUID,
     db: DBSession,
     file: UploadFile,
@@ -371,139 +487,32 @@ async def upload_domain_document(
             ),
         )
 
-    from openai import AsyncOpenAI
-
-    from src.tools.parse_document import parse_document
-
-    client = AsyncOpenAI(api_key=settings.openai_api_key)
-    idempotency_key = uuid4()
-
-    # Step 1: DB-first insert with status='pending' before any OpenAI calls
+    filename = file.filename or "document"
     doc = DomainDocument(
         id=uuid4(),
         domain_id=domain_id,
-        filename=file.filename or "document",
+        filename=filename,
         mime_type=content_type,
         size_bytes=len(content),
         status=DomainDocumentStatus.pending,
-        idempotency_key=idempotency_key,
+        idempotency_key=uuid4(),
         uploaded_by=current_user.id,
     )
     db.add(doc)
     await db.flush()
-
-    # Step 2: Upload original to OpenAI Files
-    try:
-        oa_file = await client.files.create(
-            file=(file.filename or "document", content, content_type),
-            purpose="assistants",
-        )
-        doc.openai_file_id = oa_file.id
-        doc.status = DomainDocumentStatus.uploading
-        await db.flush()
-    except Exception as exc:
-        doc.status = DomainDocumentStatus.failed
-        doc.error_reason = f"OpenAI upload failed: {exc}"
-        await db.flush()
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Failed to upload to OpenAI: {exc}",
-        ) from exc
-
-    # Step 3: Parse + sanitize (regex layer-1 + DeBERTa-v3 classifier layer-2)
-    try:
-        parse_result = await parse_document(
-            file_id=doc.openai_file_id,
-            run_classifier=settings.classifier_sanitizer_enabled,
-        )
-        doc.status = DomainDocumentStatus.parsed
-        await db.flush()
-    except RuntimeError as exc:
-        # Classifier failed to initialise (e.g. missing llm-guard or HF outage)
-        doc.status = DomainDocumentStatus.failed
-        doc.error_reason = f"Sanitizer init failed: {exc}"
-        await db.flush()
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Sanitizer unavailable: {exc}",
-        ) from exc
-    except Exception as exc:
-        doc.status = DomainDocumentStatus.failed
-        doc.error_reason = f"Parse failed: {exc}"
-        await db.flush()
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Document could not be parsed: {exc}",
-        ) from exc
-
-    # Build sanitized text artifact with page markers
-    pages = parse_result.get("pages", [])
-    if not pages:
-        doc.status = DomainDocumentStatus.failed
-        doc.error_reason = "Parse returned no pages"
-        await db.flush()
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Document yielded no extractable text",
-        )
-
-    sanitized_text = "\n".join(
-        f"--- Page {i + 1} ---\n{p.get('text', '')}" for i, p in enumerate(pages)
-    )
-    sanitized_filename = f"{(file.filename or 'document').rsplit('.', 1)[0]}.sanitized.txt"
-
-    # Step 4: Upload sanitized artifact
-    try:
-        san_file = await client.files.create(
-            file=(sanitized_filename, sanitized_text.encode(), "text/plain"),
-            purpose="assistants",
-        )
-        doc.sanitized_file_id = san_file.id
-        doc.status = DomainDocumentStatus.indexing
-        doc.sanitized = True
-        await db.flush()
-
-        # Add ONLY the sanitized file to the domain vector store
-        vs_file = await client.vector_stores.files.create_and_poll(
-            vector_store_id=domain.vector_store_id,
-            file_id=san_file.id,
-        )
-    except Exception as exc:
-        doc.status = DomainDocumentStatus.failed
-        doc.error_reason = f"Indexing failed: {exc}"
-        await db.flush()
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Failed to index document: {exc}",
-        ) from exc
-
-    if vs_file.status != "completed":
-        doc.status = DomainDocumentStatus.failed
-        doc.error_reason = f"Vector store file status: {vs_file.status}"
-        await db.flush()
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Document indexing did not complete",
-        )
-
-    doc.status = DomainDocumentStatus.indexed
-    san = parse_result.get("sanitization")
-    db.add(
-        AdminEvent(
-            actor_id=current_user.id,
-            action="domain_document_uploaded",
-            payload={
-                "domain_id": str(domain_id),
-                "doc_id": str(doc.id),
-                "filename": doc.filename,
-                "regex_hits": san.regex_hits if san else 0,
-                "classifier_hits": san.classifier_hits if san else 0,
-                "chunks_scanned": san.chunks_scanned if san else 0,
-            },
-        )
-    )
-    await db.flush()
     await db.refresh(doc)
+
+    background_tasks.add_task(
+        _ingest_domain_document,
+        doc_id=doc.id,
+        domain_id=domain_id,
+        vector_store_id=domain.vector_store_id,
+        file_bytes=content,
+        filename=filename,
+        content_type=content_type,
+        actor_id=current_user.id,
+    )
+
     return doc
 
 
