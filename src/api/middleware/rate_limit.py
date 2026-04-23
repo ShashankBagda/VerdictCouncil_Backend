@@ -26,9 +26,15 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self._cleanup_interval = 300  # purge stale entries every 5 minutes
 
     def _client_ip(self, request: Request) -> str:
-        # Do NOT trust X-Forwarded-For from untrusted clients.
-        # In production behind a reverse proxy, configure the proxy
-        # to set a trusted header and read that instead.
+        # X-Real-IP is set by nginx/trusted reverse proxy to the original client.
+        # X-Forwarded-For is a fallback (first entry is the originating client).
+        # Falls back to the direct connection host when not behind a proxy.
+        real_ip = request.headers.get("x-real-ip")
+        if real_ip:
+            return real_ip.strip()
+        forwarded_for = request.headers.get("x-forwarded-for")
+        if forwarded_for:
+            return forwarded_for.split(",")[0].strip()
         return request.client.host if request.client else "unknown"
 
     def _cleanup_expired(self, now: float) -> None:

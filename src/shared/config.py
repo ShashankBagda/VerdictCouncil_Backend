@@ -37,13 +37,13 @@ class Settings(BaseSettings):
     def model_post_init(self, __context: object) -> None:
         import warnings
 
-        if self.jwt_secret == "change-me-in-production" and self.log_level != "DEBUG":
+        if self.jwt_secret == "change-me-in-production":
             warnings.warn(
                 "JWT_SECRET is using the default value. "
                 "Set a secure secret via the JWT_SECRET environment variable.",
                 stacklevel=2,
             )
-        if not self.cookie_secure and self.log_level != "DEBUG":
+        if not self.cookie_secure:
             warnings.warn(
                 "COOKIE_SECURE is False. Session cookies will be sent over "
                 "insecure HTTP. This must ONLY be used in local development.",
