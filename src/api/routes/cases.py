@@ -546,7 +546,12 @@ async def create_case_draft(
     )
     db.add(case)
     await db.flush()
-    await db.refresh(case)
+    # Eager-load the collections _serialize_case_summary touches. A draft has
+    # no parties/documents/reopens yet, but the serializer walks the lazy
+    # relationships; without an explicit refresh they try to emit an async
+    # SELECT through SQLAlchemy's sync adapter and blow up with
+    # MissingGreenlet.
+    await db.refresh(case, ["parties", "documents", "reopen_requests"])
     if case.domain_id:
         await db.refresh(case, ["domain_ref"])
     return _serialize_case_summary(case)
@@ -629,7 +634,10 @@ async def confirm_case_intake(
         )
 
     await db.commit()
-    await db.refresh(case)
+    # Same trap as create_case_draft — the serializer walks lazy collections.
+    # The parties we just appended are in session memory, but documents and
+    # reopen_requests still need an explicit refresh to avoid MissingGreenlet.
+    await db.refresh(case, ["parties", "documents", "reopen_requests"])
     if case.domain_id:
         await db.refresh(case, ["domain_ref"])
 
