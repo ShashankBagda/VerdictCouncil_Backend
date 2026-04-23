@@ -17,6 +17,7 @@ from src.api.app import create_app
 from src.api.deps import get_current_user, get_db
 from src.models.domain import Domain, DomainDocument, DomainDocumentStatus
 from src.models.user import User, UserRole
+from src.shared.sanitization import SanitizationResult
 
 
 def _make_admin(**overrides) -> MagicMock:
@@ -304,3 +305,67 @@ async def test_upload_too_large_returns_413():
             )
 
     assert resp.status_code == 413
+
+
+# ---------------------------------------------------------------------------
+# AdminEvent payload includes sanitization metrics
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_upload_records_classifier_hits_in_admin_event():
+    """parse_result['sanitization'] metrics land in the AdminEvent payload."""
+    from src.shared.config import settings as _settings
+
+    admin = _make_admin()
+    domain = _make_domain(vector_store_id="vs_test")
+    session = _TrackingSession(domain)
+
+    oa_file = MagicMock(id="file-original-abc")
+    san_file = MagicMock(id="file-sanitized-xyz")
+    vs_file = MagicMock(id="vsf-123", status="completed")
+
+    mock_client = MagicMock()
+    mock_client.files = MagicMock(create=AsyncMock(side_effect=[oa_file, san_file]))
+    mock_client.vector_stores = MagicMock(
+        files=MagicMock(create_and_poll=AsyncMock(return_value=vs_file))
+    )
+
+    parse_result = {
+        "pages": [{"page_number": 1, "text": "clean text"}],
+        "text": "clean text",
+        "tables": [],
+        "sanitization": SanitizationResult(
+            text="clean text",
+            regex_hits=0,
+            classifier_hits=1,
+            chunks_scanned=1,
+        ),
+    }
+
+    app = _app_with(admin, session)
+
+    with (
+        patch.object(_settings, "domain_uploads_enabled", True),
+        patch("openai.AsyncOpenAI", return_value=mock_client),
+        patch("src.tools.parse_document.parse_document", AsyncMock(return_value=parse_result)),
+    ):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.post(
+                f"/api/v1/domains/admin/{domain.id}/documents",
+                files={"file": ("test.pdf", b"%PDF-1.4", "application/pdf")},
+            )
+
+    assert resp.status_code == 201
+    # Find the AdminEvent that was added to the session
+    from src.models.admin_event import AdminEvent
+
+    admin_events = [obj for obj in session.added if isinstance(obj, AdminEvent)]
+    assert admin_events, "No AdminEvent written to the session"
+    upload_event = next(
+        (e for e in admin_events if e.action == "domain_document_uploaded"), None
+    )
+    assert upload_event is not None, "domain_document_uploaded AdminEvent not found"
+    assert upload_event.payload["regex_hits"] == 0
+    assert upload_event.payload["classifier_hits"] == 1
+    assert upload_event.payload["chunks_scanned"] == 1

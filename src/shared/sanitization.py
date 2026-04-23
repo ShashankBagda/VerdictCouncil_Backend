@@ -4,6 +4,7 @@ import asyncio
 import logging
 import re
 from dataclasses import dataclass
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -97,11 +98,11 @@ def sanitize_user_input(text: str) -> str:
 # Layer-2: llm-guard DeBERTa-v3 classifier (semantic injection detection)
 # ---------------------------------------------------------------------------
 
-_scanner: object | None = None
+_scanner: Any | None = None
 _scanner_init_failed: bool = False
 
 
-def _get_prompt_injection_scanner() -> object:
+def _get_prompt_injection_scanner() -> Any:
     """Return the cached PromptInjection scanner, initialising it on first call.
 
     Lazy-initialised so model weights (~415 MB) are not loaded at import time —
@@ -116,7 +117,7 @@ def _get_prompt_injection_scanner() -> object:
     if _scanner is not None:
         return _scanner
     try:
-        from llm_guard.input_scanners.prompt_injection import (  # type: ignore[import]
+        from llm_guard.input_scanners.prompt_injection import (  # noqa: I001
             MatchType,
             PromptInjection,
             V2_MODEL,
@@ -140,7 +141,7 @@ def _classify_sync(text: str) -> tuple[str, float]:
     scanner = _get_prompt_injection_scanner()
     # scan() returns (sanitized_prompt, is_valid, risk_score).
     # The library does not redact; we handle replacement ourselves.
-    _sanitized, is_valid, risk_score = scanner.scan(text)  # type: ignore[union-attr]
+    _sanitized, is_valid, risk_score = scanner.scan(text)
     if not is_valid:
         logger.warning(
             "prompt_injection_blocked",

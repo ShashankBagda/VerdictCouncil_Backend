@@ -80,7 +80,7 @@ async def parse_document(
     file_id: Annotated[str, "OpenAI File ID of the uploaded document"],
     extract_tables: Annotated[bool, "Whether to extract tabular data"] = True,
     ocr_enabled: Annotated[bool, "Whether to enable OCR for scanned/image documents"] = False,
-    run_classifier: Annotated[bool, "Enable llm-guard DeBERTa-v3 classifier on top of regex"] = False,
+    run_classifier: Annotated[bool, "Enable DeBERTa-v3 classifier on top of regex"] = False,
 ) -> dict:
     """Parse an uploaded document via the OpenAI Files API.
 

@@ -13,7 +13,6 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, HTTPException, UploadFile, status
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
 
 from src.api.deps import CurrentUser, DBSession, require_role
 from src.api.schemas.common import ErrorResponse
@@ -317,7 +316,7 @@ async def list_domain_documents(
     status_code=status.HTTP_201_CREATED,
     operation_id="upload_domain_document",
     summary="Upload a document to a domain KB",
-    description="Sanitize-at-ingest pipeline. Upload route is feature-flagged behind domain_uploads_enabled.",
+    description="Sanitize-at-ingest pipeline. Feature-flagged behind domain_uploads_enabled.",
     responses={
         403: {"model": ErrorResponse, "description": "Insufficient permissions"},
         404: {"model": ErrorResponse, "description": "Domain not found"},
