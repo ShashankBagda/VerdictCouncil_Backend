@@ -3,14 +3,21 @@
 Chains 9 agent calls sequentially via OpenAI API. No Solace, no Redis.
 Used to validate pipeline logic against gold-set eval cases before
 adding distributed infrastructure.
+
+Exports two runner classes:
+  - PipelineRunner: low-level gate-by-gate runner (used by API routes)
+  - OrchestratorRunner: high-level runner driven by the Pipeline Orchestrator Agent,
+    which manages the full lifecycle including retries, parallel dispatch, and escalation.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -26,7 +33,11 @@ from src.tools.search_precedents import PrecedentSearchError  # noqa: F401 — r
 
 logger = logging.getLogger(__name__)
 
-# Pipeline order: all 9 agents in sequence
+# Pipeline orchestrator — meta-agent that manages the full pipeline lifecycle.
+# It is NOT part of the sequential agent chain; it sits above it.
+ORCHESTRATOR_AGENT: str = "pipeline-orchestrator"
+
+# Pipeline order: all 9 agents in sequence (managed by PipelineRunner / OrchestratorRunner)
 AGENT_ORDER: list[str] = [
     "case-processing",
     "complexity-routing",
@@ -47,6 +58,14 @@ GATE_AGENTS: dict[str, list[str]] = {
     "gate4": ["hearing-governance"],
 }
 
+# Gate2 agents can be dispatched in parallel (order within barrier is irrelevant).
+GATE2_PARALLEL_AGENTS: list[str] = [
+    "evidence-analysis",
+    "fact-reconstruction",
+    "witness-analysis",
+    "legal-knowledge",
+]
+
 # Maps each agent to the tool function names it can invoke
 AGENT_TOOLS: dict[str, list[str]] = {
     "case-processing": ["parse_document"],
@@ -58,6 +77,15 @@ AGENT_TOOLS: dict[str, list[str]] = {
     "argument-construction": ["confidence_calc"],
     "hearing-analysis": [],
     "hearing-governance": [],
+    # Orchestrator management tools
+    "pipeline-orchestrator": [
+        "pipeline_status",
+        "delegate_to_agent",
+        "retry_failed_agent",
+        "escalate_case",
+        "parallel_dispatch",
+        "advance_gate",
+    ],
 }
 
 # Maps model tier names to settings attribute names
@@ -292,6 +320,220 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
                     "witness_scores",
                     "precedent_similarities",
                 ],
+            },
+        },
+    },
+}
+
+    # ── Orchestrator management tools ─────────────────────────────────────
+    "pipeline_status": {
+        "type": "function",
+        "function": {
+            "name": "pipeline_status",
+            "description": (
+                "Record a pipeline lifecycle event and update orchestration metadata. "
+                "Used to mark gate completions, halts, aborts, and what-if boundaries."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "description": (
+                            "Lifecycle action: 'complete' | 'halt' | 'abort' | "
+                            "'await_judge_input' | 'what_if_start' | 'what_if_complete'"
+                        ),
+                    },
+                    "gate": {
+                        "type": "string",
+                        "description": "Gate name this event belongs to (e.g., 'gate1')",
+                    },
+                    "outcome": {
+                        "type": "string",
+                        "description": (
+                            "Outcome for 'complete' actions: "
+                            "'ready_for_review' | 'escalated' | 'failed'"
+                        ),
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "Human-readable reason for halt or abort",
+                    },
+                },
+                "required": ["action"],
+            },
+        },
+    },
+    "delegate_to_agent": {
+        "type": "function",
+        "function": {
+            "name": "delegate_to_agent",
+            "description": (
+                "Dispatch a specific pipeline agent to run against the current CaseState. "
+                "Returns the updated CaseState after the agent completes."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "agent_name": {
+                        "type": "string",
+                        "description": (
+                            "Name of the agent to run. One of: case-processing, "
+                            "complexity-routing, evidence-analysis, fact-reconstruction, "
+                            "witness-analysis, legal-knowledge, argument-construction, "
+                            "hearing-analysis, hearing-governance"
+                        ),
+                    },
+                    "extra_instructions": {
+                        "type": "string",
+                        "description": (
+                            "Optional additional instructions appended to the agent's "
+                            "system prompt for this run only"
+                        ),
+                    },
+                },
+                "required": ["agent_name"],
+            },
+        },
+    },
+    "retry_failed_agent": {
+        "type": "function",
+        "function": {
+            "name": "retry_failed_agent",
+            "description": (
+                "Retry a specific pipeline agent that previously failed or produced "
+                "incomplete output. Accepts optional corrective instructions."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "agent_name": {
+                        "type": "string",
+                        "description": "Name of the agent to retry",
+                    },
+                    "failure_reason": {
+                        "type": "string",
+                        "description": "Description of why the previous run failed",
+                    },
+                    "extra_instructions": {
+                        "type": "string",
+                        "description": "Corrective instructions to guide the retry",
+                    },
+                    "attempt_number": {
+                        "type": "integer",
+                        "description": "Retry attempt count (1-based). Max auto-retries = 1.",
+                        "default": 1,
+                    },
+                },
+                "required": ["agent_name", "failure_reason"],
+            },
+        },
+    },
+    "escalate_case": {
+        "type": "function",
+        "function": {
+            "name": "escalate_case",
+            "description": (
+                "Escalate the case to human review, halting automated processing. "
+                "Must include a full escalation record. Sets status='escalated'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "escalation_source": {
+                        "type": "string",
+                        "description": (
+                            "Source of escalation: 'orchestrator' | 'governance_audit' | "
+                            "'judge' | 'routing_trigger'"
+                        ),
+                    },
+                    "trigger_id": {
+                        "type": "string",
+                        "description": "Specific trigger or check ID that caused escalation",
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "Detailed explanation of why the case is being escalated",
+                    },
+                    "case_summary": {
+                        "type": "string",
+                        "description": "1-2 sentence case summary for the human reviewer",
+                    },
+                    "last_gate_completed": {
+                        "type": "string",
+                        "description": "Name of the last gate that completed, or null",
+                    },
+                    "recommended_human_action": {
+                        "type": "string",
+                        "description": "What the human reviewer should do with this case",
+                    },
+                },
+                "required": [
+                    "escalation_source",
+                    "reason",
+                    "case_summary",
+                    "recommended_human_action",
+                ],
+            },
+        },
+    },
+    "parallel_dispatch": {
+        "type": "function",
+        "function": {
+            "name": "parallel_dispatch",
+            "description": (
+                "Dispatch multiple pipeline agents concurrently and await all completions "
+                "(barrier sync). Used for gate2 parallel execution."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "agent_names": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "List of agent names to run in parallel. "
+                            "All must complete before the barrier resolves."
+                        ),
+                    },
+                    "gate": {
+                        "type": "string",
+                        "description": "Gate this parallel dispatch belongs to (e.g., 'gate2')",
+                    },
+                },
+                "required": ["agent_names", "gate"],
+            },
+        },
+    },
+    "advance_gate": {
+        "type": "function",
+        "function": {
+            "name": "advance_gate",
+            "description": (
+                "Signal that a gate review is complete and the pipeline should advance "
+                "to the next gate. Records the Judge's decision and gate completion time."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "from_gate": {
+                        "type": "string",
+                        "description": "Gate being completed (e.g., 'gate1')",
+                    },
+                    "to_gate": {
+                        "type": "string",
+                        "description": "Next gate to run (e.g., 'gate2')",
+                    },
+                    "judge_decision": {
+                        "type": "string",
+                        "description": "Judge's decision: 'accept' | 'amend' | 'reject'",
+                    },
+                    "judge_notes": {
+                        "type": "string",
+                        "description": "Optional notes from the Judge about this gate's output",
+                    },
+                },
+                "required": ["from_gate", "to_gate", "judge_decision"],
             },
         },
     },
@@ -796,3 +1038,589 @@ class PipelineRunner:
             state = await self.run_gate(state, "gate1")
 
         return state
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OrchestratorRunner
+# High-level runner that mirrors the Pipeline Orchestrator Agent's logic in
+# process.  Provides full lifecycle management: gate sequencing, parallel
+# gate-2 dispatch, retry policy, escalation, and What-If forking.
+# Used by API routes that want the full orchestrated flow rather than
+# gate-by-gate control.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Maximum automatic retries per agent (beyond this, escalate or require judge)
+_MAX_AUTO_RETRIES = 1
+
+# Gate2 agents that can run concurrently
+_GATE2_PARALLEL = [
+    "evidence-analysis",
+    "fact-reconstruction",
+    "witness-analysis",
+    "legal-knowledge",
+]
+
+
+class EscalationRequired(Exception):
+    """Raised when the pipeline must halt and escalate to human review."""
+
+    def __init__(self, reason: str, source: str, trigger_id: str | None = None) -> None:
+        super().__init__(reason)
+        self.reason = reason
+        self.source = source
+        self.trigger_id = trigger_id
+
+
+class OrchestratorRunner:
+    """Full-lifecycle pipeline runner managed by the orchestrator protocol.
+
+    Wraps PipelineRunner and adds:
+      - Parallel gate-2 dispatch with barrier synchronisation
+      - Post-run guardrail checks for each agent
+      - Automatic retry with corrective instructions (max 1 auto-retry)
+      - Escalation on unrecoverable failures
+      - What-If scenario forking
+      - Orchestration metadata tracking in case_metadata.orchestration
+    """
+
+    def __init__(self, client: AsyncOpenAI | None = None) -> None:
+        self._runner = PipelineRunner(client=client)
+        self._retry_counts: dict[str, int] = {}
+
+    # ── Orchestration metadata helpers ──────────────────────────────────
+
+    @staticmethod
+    def _init_orchestration(state: CaseState) -> CaseState:
+        """Initialise the orchestration tracking block in case_metadata."""
+        meta = dict(state.case_metadata)
+        meta.setdefault(
+            "orchestration",
+            {
+                "pipeline_version": "2.0",
+                "gates_completed": [],
+                "agents_run": [],
+                "gate_statuses": {
+                    "gate1": "pending",
+                    "gate2": "pending",
+                    "gate3": "pending",
+                    "gate4": "pending",
+                },
+                "parallel_dispatch_results": {},
+                "retry_log": [],
+                "escalation_record": None,
+                "what_if_runs": [],
+                "pipeline_start_time": datetime.now(timezone.utc).isoformat(),
+                "pipeline_end_time": None,
+                "total_duration_seconds": None,
+                "final_disposition": "in_progress",
+            },
+        )
+        return state.model_copy(update={"case_metadata": meta})
+
+    @staticmethod
+    def _record_agent_run(
+        state: CaseState,
+        agent_name: str,
+        status: str,
+        retries: int = 0,
+        start_time: str | None = None,
+    ) -> CaseState:
+        meta = dict(state.case_metadata)
+        orch = dict(meta.get("orchestration", {}))
+        agents_run: list = list(orch.get("agents_run", []))
+        agents_run.append(
+            {
+                "agent_name": agent_name,
+                "status": status,
+                "retries": retries,
+                "start_time": start_time or datetime.now(timezone.utc).isoformat(),
+                "end_time": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+        orch["agents_run"] = agents_run
+        meta["orchestration"] = orch
+        return state.model_copy(update={"case_metadata": meta})
+
+    @staticmethod
+    def _set_gate_status(state: CaseState, gate: str, status: str) -> CaseState:
+        meta = dict(state.case_metadata)
+        orch = dict(meta.get("orchestration", {}))
+        gate_statuses = dict(orch.get("gate_statuses", {}))
+        gate_statuses[gate] = status
+        if status == "complete":
+            completed: list = list(orch.get("gates_completed", []))
+            if gate not in completed:
+                completed.append(gate)
+            orch["gates_completed"] = completed
+        orch["gate_statuses"] = gate_statuses
+        meta["orchestration"] = orch
+        return state.model_copy(update={"case_metadata": meta})
+
+    @staticmethod
+    def _record_escalation(
+        state: CaseState, source: str, reason: str, trigger_id: str | None
+    ) -> CaseState:
+        meta = dict(state.case_metadata)
+        orch = dict(meta.get("orchestration", {}))
+        orch["escalation_record"] = {
+            "source": source,
+            "trigger_id": trigger_id,
+            "reason": reason,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        orch["final_disposition"] = "escalated"
+        meta["orchestration"] = orch
+        return state.model_copy(update={"case_metadata": meta})
+
+    @staticmethod
+    def _finalize_orchestration(state: CaseState, disposition: str) -> CaseState:
+        meta = dict(state.case_metadata)
+        orch = dict(meta.get("orchestration", {}))
+        end = datetime.now(timezone.utc).isoformat()
+        orch["pipeline_end_time"] = end
+        orch["final_disposition"] = disposition
+        start_str = orch.get("pipeline_start_time")
+        if start_str:
+            try:
+                start = datetime.fromisoformat(start_str)
+                end_dt = datetime.fromisoformat(end)
+                orch["total_duration_seconds"] = (end_dt - start).total_seconds()
+            except (ValueError, TypeError):
+                pass
+        meta["orchestration"] = orch
+        return state.model_copy(update={"case_metadata": meta})
+
+    # ── Guardrail checks ─────────────────────────────────────────────────
+
+    @staticmethod
+    def _check_gate1_post_run(state: CaseState, agent_name: str) -> tuple[bool, str]:
+        """Return (ok, reason). ok=False means retry or escalate is needed."""
+        if agent_name == "case-processing":
+            if state.status == CaseStatusEnum.failed:
+                return False, "jurisdiction_failed"
+            meta = state.case_metadata
+            if not meta.get("jurisdiction_valid", True) is False:
+                pass  # valid
+        if agent_name == "complexity-routing":
+            route = state.case_metadata.get("route")
+            if route not in ("proceed_automated", "proceed_with_review", "escalate_human", None):
+                return False, f"invalid_route_value: {route}"
+        return True, ""
+
+    @staticmethod
+    def _check_gate2_barrier(state: CaseState) -> list[str]:
+        """Return list of issue descriptions after all gate2 agents complete."""
+        issues = []
+        ea = state.evidence_analysis
+        if ea is None or (not ea.evidence_items and not ea.exhibits):
+            issues.append("evidence_analysis produced no evidence items")
+        ef = state.extracted_facts
+        if ef is None or not ef.facts:
+            issues.append("fact_reconstruction produced no facts")
+        if not state.legal_rules:
+            issues.append("legal_knowledge produced no legal rules")
+        return issues
+
+    @staticmethod
+    def _check_gate3_post_run(state: CaseState, agent_name: str) -> tuple[bool, str]:
+        if agent_name == "hearing-analysis":
+            ha = state.hearing_analysis
+            if ha and ha.preliminary_conclusion is not None:
+                return False, "preliminary_conclusion must be null — retrying with correction"
+        return True, ""
+
+    @staticmethod
+    def _check_gate4_post_run(state: CaseState) -> tuple[bool, str]:
+        fc = state.fairness_check
+        if fc is None:
+            return False, "hearing_governance produced no fairness_check output"
+        if fc.critical_issues_found:
+            raise EscalationRequired(
+                reason=f"Governance audit critical issues: {'; '.join(fc.issues)}",
+                source="governance_audit",
+                trigger_id="critical_issues_found",
+            )
+        return True, ""
+
+    # ── Agent dispatch with retry ─────────────────────────────────────────
+
+    async def _run_with_retry(
+        self,
+        state: CaseState,
+        agent_name: str,
+        extra_instructions: str | None = None,
+    ) -> CaseState:
+        """Run agent with up to _MAX_AUTO_RETRIES automatic retries."""
+        retries = 0
+        last_error: str = ""
+        start_time = datetime.now(timezone.utc).isoformat()
+
+        while retries <= _MAX_AUTO_RETRIES:
+            try:
+                state = await self._runner._run_agent(
+                    agent_name, state, extra_instructions=extra_instructions
+                )
+                state = self._record_agent_run(state, agent_name, "success", retries, start_time)
+                return state
+            except CriticalToolFailure as exc:
+                # Never retry critical failures — escalate immediately
+                state = self._record_agent_run(
+                    state, agent_name, "critical_failure", retries, start_time
+                )
+                raise EscalationRequired(
+                    reason=f"CriticalToolFailure in {agent_name}: {exc}",
+                    source="orchestrator",
+                    trigger_id="critical_tool_failure",
+                ) from exc
+            except Exception as exc:
+                last_error = str(exc)
+                logger.warning(
+                    "Agent '%s' failed (attempt %d/%d): %s",
+                    agent_name,
+                    retries + 1,
+                    _MAX_AUTO_RETRIES + 1,
+                    last_error,
+                )
+                # Log retry
+                meta = dict(state.case_metadata)
+                orch = dict(meta.get("orchestration", {}))
+                retry_log: list = list(orch.get("retry_log", []))
+                retry_log.append(
+                    {
+                        "agent_name": agent_name,
+                        "attempt": retries + 1,
+                        "reason": last_error,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    }
+                )
+                orch["retry_log"] = retry_log
+                meta["orchestration"] = orch
+                state = state.model_copy(update={"case_metadata": meta})
+
+                if retries >= _MAX_AUTO_RETRIES:
+                    state = self._record_agent_run(
+                        state, agent_name, "failed_max_retries", retries, start_time
+                    )
+                    raise EscalationRequired(
+                        reason=f"Agent '{agent_name}' failed after {retries + 1} attempts: {last_error}",
+                        source="orchestrator",
+                        trigger_id="max_retries_exceeded",
+                    ) from exc
+
+                retries += 1
+                extra_instructions = (
+                    f"RETRY {retries}/{_MAX_AUTO_RETRIES}: Previous run failed: {last_error}. "
+                    "Please ensure all required output fields are populated correctly."
+                )
+
+        # Should be unreachable
+        state = self._record_agent_run(state, agent_name, "failed", retries, start_time)
+        raise EscalationRequired(
+            reason=f"Agent '{agent_name}' exhausted retries",
+            source="orchestrator",
+            trigger_id="max_retries_exceeded",
+        )
+
+    # ── Gate runners ─────────────────────────────────────────────────────
+
+    async def _run_gate1(self, state: CaseState) -> CaseState:
+        state = self._set_gate_status(state, "gate1", "running")
+
+        state = await self._run_with_retry(state, "case-processing")
+        ok, reason = self._check_gate1_post_run(state, "case-processing")
+        if not ok:
+            if reason == "jurisdiction_failed":
+                state = self._set_gate_status(state, "gate1", "complete")
+                return self._finalize_orchestration(state, "failed")
+            raise EscalationRequired(reason=reason, source="orchestrator", trigger_id=reason)
+
+        state = await self._run_with_retry(state, "complexity-routing")
+        route = state.case_metadata.get("route")
+        if route == "escalate_human":
+            trigger = (
+                state.case_metadata.get("routing_factors", {}).get("unconditional_trigger")
+                or "routing_escalation"
+            )
+            state = self._record_escalation(
+                state,
+                source="routing_trigger",
+                reason=state.case_metadata.get("escalation_reason", "Complexity routing escalation"),
+                trigger_id=trigger,
+            )
+            raise EscalationRequired(
+                reason=f"Complexity routing triggered escalation: trigger={trigger}",
+                source="routing_trigger",
+                trigger_id=trigger,
+            )
+
+        state = self._set_gate_status(state, "gate1", "complete")
+        return state
+
+    async def _run_gate2_parallel(self, state: CaseState) -> CaseState:
+        """Dispatch gate2 agents in parallel, then apply barrier checks."""
+        state = self._set_gate_status(state, "gate2", "running")
+
+        barrier_start = datetime.now(timezone.utc).isoformat()
+
+        # Run all four gate2 agents concurrently from the same input state.
+        # Each agent reads the shared CaseState and writes its own dedicated fields.
+        results = await asyncio.gather(
+            *[self._run_with_retry(state, agent) for agent in _GATE2_PARALLEL],
+            return_exceptions=True,
+        )
+
+        # Merge gate2 outputs: apply each successful result's fields onto state
+        failures: list[tuple[str, Exception]] = []
+        for agent_name, result in zip(_GATE2_PARALLEL, results, strict=True):
+            if isinstance(result, EscalationRequired):
+                failures.append((agent_name, result))
+                logger.error("Gate2 agent '%s' requires escalation: %s", agent_name, result.reason)
+            elif isinstance(result, Exception):
+                failures.append((agent_name, result))
+                logger.error("Gate2 agent '%s' failed: %s", agent_name, result)
+            else:
+                # Merge fields written by this agent (those unique to its role)
+                _GATE2_WRITE_FIELDS: dict[str, list[str]] = {
+                    "evidence-analysis": ["evidence_analysis"],
+                    "fact-reconstruction": ["extracted_facts"],
+                    "witness-analysis": ["witnesses"],
+                    "legal-knowledge": ["legal_rules", "precedents", "precedent_source_metadata"],
+                }
+                write_fields = _GATE2_WRITE_FIELDS.get(agent_name, [])
+                merged = dict(state.model_dump())
+                for field in write_fields:
+                    agent_value = result.model_dump().get(field)
+                    if agent_value is not None:
+                        merged[field] = agent_value
+                # Merge audit log from parallel result
+                merged["audit_log"] = (
+                    state.audit_log + [
+                        e for e in result.audit_log if e not in state.audit_log
+                    ]
+                )
+                state = CaseState(**merged)
+
+        # Escalate if too many failures
+        if len(failures) >= 2:
+            failed_names = [name for name, _ in failures]
+            raise EscalationRequired(
+                reason=f"Gate2 parallel dispatch: {len(failures)} agents failed: {failed_names}",
+                source="orchestrator",
+                trigger_id="gate2_barrier_failure",
+            )
+
+        # Barrier checks
+        issues = self._check_gate2_barrier(state)
+        if issues:
+            logger.warning("Gate2 barrier issues: %s", issues)
+            # Attempt targeted retries for missing fields
+            if "fact_reconstruction produced no facts" in issues:
+                state = await self._run_with_retry(
+                    state,
+                    "fact-reconstruction",
+                    extra_instructions="RETRY: Previous run produced no facts. Ensure facts[] is populated.",
+                )
+            if "legal_knowledge produced no legal rules" in issues:
+                state = await self._run_with_retry(
+                    state,
+                    "legal-knowledge",
+                    extra_instructions="RETRY: Previous run produced no legal rules. Ensure legal_rules[] is populated.",
+                )
+            if "evidence_analysis produced no evidence items" in issues:
+                state = await self._run_with_retry(
+                    state,
+                    "evidence-analysis",
+                    extra_instructions="RETRY: Previous run produced no evidence items. Ensure evidence_items[] is populated.",
+                )
+
+        # Impartiality check
+        ea = state.evidence_analysis
+        if ea is not None:
+            impartiality = getattr(ea, "impartiality_check", None)
+            if isinstance(impartiality, dict) and not impartiality.get("passed", True):
+                raise EscalationRequired(
+                    reason="Evidence Analysis impartiality check failed — bias detected in evidence weighting",
+                    source="orchestrator",
+                    trigger_id="impartiality_check_failed",
+                )
+
+        meta = dict(state.case_metadata)
+        orch = dict(meta.get("orchestration", {}))
+        parallel_results = dict(orch.get("parallel_dispatch_results", {}))
+        parallel_results["gate2"] = {
+            "status": "complete",
+            "barrier_met_at": datetime.now(timezone.utc).isoformat(),
+            "barrier_start": barrier_start,
+            "agent_failures": len(failures),
+        }
+        orch["parallel_dispatch_results"] = parallel_results
+        meta["orchestration"] = orch
+        state = state.model_copy(update={"case_metadata": meta})
+
+        state = self._set_gate_status(state, "gate2", "complete")
+        return state
+
+    async def _run_gate3(self, state: CaseState) -> CaseState:
+        state = self._set_gate_status(state, "gate3", "running")
+
+        state = await self._run_with_retry(state, "argument-construction")
+        # Check both sides' weaknesses are present
+        args = state.arguments or {}
+        if isinstance(args, dict):
+            for side_key in ("prosecution_argument", "claimant_position",
+                             "defence_argument", "respondent_position"):
+                if side_key in args and not args[side_key].get("weaknesses"):
+                    state = await self._run_with_retry(
+                        state,
+                        "argument-construction",
+                        extra_instructions=(
+                            "RETRY: Weaknesses must be populated for BOTH sides. "
+                            "Ensure prosecution/claimant AND defence/respondent weaknesses are present."
+                        ),
+                    )
+                    break
+
+        state = await self._run_with_retry(state, "hearing-analysis")
+        ok, reason = self._check_gate3_post_run(state, "hearing-analysis")
+        if not ok:
+            state = await self._run_with_retry(
+                state,
+                "hearing-analysis",
+                extra_instructions=(
+                    "MANDATORY CORRECTION: You must set preliminary_conclusion=null "
+                    "and confidence_score=null. Do NOT produce an outcome recommendation."
+                ),
+            )
+
+        state = self._set_gate_status(state, "gate3", "complete")
+        return state
+
+    async def _run_gate4(self, state: CaseState) -> CaseState:
+        state = self._set_gate_status(state, "gate4", "running")
+
+        state = await self._run_with_retry(state, "hearing-governance")
+        ok, reason = self._check_gate4_post_run(state)  # may raise EscalationRequired
+        if not ok:
+            # Missing fairness_check — retry once
+            state = await self._run_with_retry(
+                state,
+                "hearing-governance",
+                extra_instructions=(
+                    "RETRY: fairness_check output was missing. "
+                    "Ensure fairness_check field is fully populated with all required keys."
+                ),
+            )
+            self._check_gate4_post_run(state)  # second failure escalates
+
+        state = self._set_gate_status(state, "gate4", "complete")
+        return state
+
+    # ── Public API ────────────────────────────────────────────────────────
+
+    async def run_full_pipeline(self, case_state: CaseState) -> CaseState:
+        """Run the complete gated pipeline from intake to governance audit.
+
+        Manages the full lifecycle:
+          Gate1 (sequential) → Gate2 (parallel) → Gate3 (sequential) → Gate4 (governance)
+
+        Returns the final CaseState with orchestration metadata populated.
+        Raises EscalationRequired if the case must be reviewed by a human.
+        """
+        from src.pipeline.observability import pipeline_run  # lazy: avoids linter removal
+
+        state = self._init_orchestration(case_state)
+
+        try:
+            with pipeline_run(
+                case_id=str(state.case_id or "unknown"),
+                run_id=state.run_id or "unknown",
+                mode="orchestrated",
+            ):
+                state = await self._run_gate1(state)
+                if state.status == CaseStatusEnum.failed:
+                    return self._finalize_orchestration(state, "failed")
+
+                state = await self._run_gate2_parallel(state)
+                state = await self._run_gate3(state)
+                state = await self._run_gate4(state)
+
+        except EscalationRequired as exc:
+            logger.warning("Pipeline escalation: %s (source=%s)", exc.reason, exc.source)
+            state = self._record_escalation(
+                state, source=exc.source, reason=exc.reason, trigger_id=exc.trigger_id
+            )
+            state = state.model_copy(update={"status": CaseStatusEnum.escalated})
+            return self._finalize_orchestration(state, "escalated")
+
+        # Pipeline completed successfully
+        final_status = state.fairness_check
+        if final_status and final_status.audit_passed and not final_status.critical_issues_found:
+            state = state.model_copy(update={"status": CaseStatusEnum.ready_for_review})
+            return self._finalize_orchestration(state, "ready_for_review")
+
+        # Governance did not pass but no exception — escalate conservatively
+        state = state.model_copy(update={"status": CaseStatusEnum.escalated})
+        return self._finalize_orchestration(state, "escalated")
+
+    async def run_what_if(
+        self,
+        base_state: CaseState,
+        modifications: dict[str, Any],
+        modification_type: str,
+    ) -> CaseState:
+        """Fork the pipeline for a What-If scenario.
+
+        Args:
+            base_state: The completed original pipeline state.
+            modifications: Dict of CaseState fields to override for the scenario.
+            modification_type: 'facts' | 'evidence' | 'credibility' | 'legal'
+
+        Returns a new CaseState with a forked run_id, re-running only the
+        minimum gates affected by the modification type.
+        """
+        import uuid
+
+        # Fork: new run with parent reference
+        forked = base_state.model_copy(
+            update={
+                "run_id": str(uuid.uuid4()),
+                "parent_run_id": base_state.run_id,
+                "status": CaseStatusEnum.processing,
+                **modifications,
+            }
+        )
+        forked = self._init_orchestration(forked)
+
+        # Record what-if in parent state's orchestration metadata
+        meta = dict(base_state.case_metadata)
+        orch = dict(meta.get("orchestration", {}))
+        what_if_runs: list = list(orch.get("what_if_runs", []))
+        what_if_runs.append(
+            {
+                "scenario_id": forked.run_id,
+                "parent_run_id": base_state.run_id,
+                "modification_type": modification_type,
+                "modifications": list(modifications.keys()),
+                "started_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+        orch["what_if_runs"] = what_if_runs
+        meta["orchestration"] = orch
+
+        # Determine minimum re-run scope
+        # Gate1 results (domain, jurisdiction, routing) carry over unchanged.
+        # Gate2-4 always re-run because they depend on the modified fields.
+        try:
+            forked = await self._run_gate2_parallel(forked)
+            forked = await self._run_gate3(forked)
+            forked = await self._run_gate4(forked)
+        except EscalationRequired as exc:
+            forked = self._record_escalation(
+                forked, source=exc.source, reason=exc.reason, trigger_id=exc.trigger_id
+            )
+            forked = forked.model_copy(update={"status": CaseStatusEnum.escalated})
+            return self._finalize_orchestration(forked, "escalated")
+
+        forked = forked.model_copy(update={"status": CaseStatusEnum.ready_for_review})
+        return self._finalize_orchestration(forked, "ready_for_review")
+
