@@ -119,6 +119,33 @@ async def test_ensure_domain_vector_store_raises_on_missing_domain():
 
 
 @pytest.mark.asyncio
+async def test_ensure_domain_vector_store_force_recreate_replaces_stale_id():
+    """force_recreate=True provisions a new store and overwrites a stale vector_store_id."""
+    domain_id = str(uuid.uuid4())
+    domain = MagicMock()
+    domain.code = "small_claims"
+    domain.vector_store_id = "vs_stale_deleted_upstream"
+    domain.is_active = True
+
+    session = MagicMock()
+    session.execute = AsyncMock(
+        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=domain))
+    )
+    session.flush = AsyncMock()
+
+    mock_client = _mock_client("vs_replacement")
+    with patch("src.services.knowledge_base._get_client", return_value=mock_client):
+        result_id, created = await kb.ensure_domain_vector_store(
+            session, domain_id, force_recreate=True
+        )
+
+    assert result_id == "vs_replacement"
+    assert created is True
+    assert domain.vector_store_id == "vs_replacement"
+    mock_client.vector_stores.create.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_ensure_domain_vector_store_activates_inactive_provisioned_domain():
     """Domain with a store id but is_active=False is re-activated without creating a new store."""
     domain_id = str(uuid.uuid4())

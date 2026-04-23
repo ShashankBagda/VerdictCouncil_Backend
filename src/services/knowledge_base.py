@@ -164,10 +164,16 @@ async def create_domain_vector_store(domain_code: str) -> str:
     return store.id
 
 
-async def ensure_domain_vector_store(db: AsyncSession, domain_id: str) -> tuple[str, bool]:
+async def ensure_domain_vector_store(
+    db: AsyncSession, domain_id: str, *, force_recreate: bool = False
+) -> tuple[str, bool]:
     """Return ``(store_id, created)`` for the domain, provisioning one if missing.
 
     Takes a row-level lock to prevent duplicate creation in concurrent requests.
+
+    When ``force_recreate=True``, any existing ``vector_store_id`` is treated as
+    stale (e.g. the upstream store was deleted out-of-band) and a fresh store is
+    provisioned, replacing the old ID on the domain row.
     """
     from sqlalchemy import select as sa_select
 
@@ -183,6 +189,9 @@ async def ensure_domain_vector_store(db: AsyncSession, domain_id: str) -> tuple[
     ).scalar_one_or_none()
     if locked is None:
         raise LookupError(f"Domain {domain_id} not found")
+
+    if force_recreate:
+        locked.vector_store_id = None
 
     if locked.vector_store_id:
         if not locked.is_active:

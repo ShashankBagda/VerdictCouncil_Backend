@@ -408,7 +408,9 @@ async def _ingest_domain_document(
                 try:
                     from src.services.knowledge_base import ensure_domain_vector_store
 
-                    current_vs_id, _ = await ensure_domain_vector_store(db, str(domain_id))
+                    current_vs_id, _ = await ensure_domain_vector_store(
+                        db, str(domain_id), force_recreate=True
+                    )
                     vs_file = await client.vector_stores.files.create_and_poll(
                         vector_store_id=current_vs_id,
                         file_id=san_file.id,
