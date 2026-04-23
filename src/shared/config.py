@@ -37,8 +37,13 @@ class Settings(BaseSettings):
     domain_kb_max_upload_bytes: int = 52428800
     # Per-case document upload limit (bytes). 50MB default.
     case_doc_max_upload_bytes: int = 52428800
-    # Feature flag — upload route ships disabled until stronger sanitizer lands.
-    domain_uploads_enabled: bool = False
+    # llm-guard DeBERTa-v3 classifier is now wired in on top of the regex pre-filter.
+    # Upload route is open; both flags default True in production.
+    # Set DOMAIN_UPLOADS_ENABLED=false or CLASSIFIER_SANITIZER_ENABLED=false in .env to override.
+    domain_uploads_enabled: bool = True
+    # When True, classify_text_async() in sanitization.py runs the DeBERTa-v3 classifier
+    # on each document page during admin KB ingest (parse_document run_classifier=True path).
+    classifier_sanitizer_enabled: bool = True
 
     def model_post_init(self, __context: object) -> None:
         import warnings

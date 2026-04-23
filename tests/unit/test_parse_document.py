@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import openai
 import pytest
 
+from src.shared.sanitization import SanitizationResult
 from src.tools.parse_document import DocumentParseError, parse_document
 
 
@@ -67,6 +68,8 @@ async def test_happy_path_returns_expected_structure(_openai_client):
     assert isinstance(result["pages"], list)
     assert isinstance(result["tables"], list)
     assert result["metadata"]["page_count"] == 1
+    assert isinstance(result["sanitization"], SanitizationResult)
+    assert result["sanitization"].classifier_hits == 0
 
 
 # ------------------------------------------------------------------ #
@@ -140,3 +143,41 @@ async def test_sanitization_strips_injection_patterns(_openai_client):
     assert "[CONTENT_REMOVED]" in result["text"]
     # Per-page text should also be sanitized
     assert "<|im_start|>" not in result["pages"][0]["text"]
+    # Sanitization result must be present with non-zero hits
+    assert isinstance(result["sanitization"], SanitizationResult)
+    assert result["sanitization"].regex_hits >= 1
+
+
+# ------------------------------------------------------------------ #
+# Single-pass sanitization — no double-scanning
+# ------------------------------------------------------------------ #
+@pytest.mark.asyncio
+async def test_sanitize_text_called_once_per_page(_openai_client):
+    """sanitize_text must be called exactly once per page, not once globally + once per page."""
+    from unittest.mock import call
+
+    client = _openai_client
+    client.files.retrieve = AsyncMock(return_value=_make_file_info())
+
+    api_payload = {
+        "text": "page1 text. page2 text.",
+        "pages": [
+            {"page_number": 1, "text": "page1 text.", "tables": []},
+            {"page_number": 2, "text": "page2 text.", "tables": []},
+        ],
+        "tables": [],
+        "page_count": 2,
+        "word_count": 4,
+    }
+    client.responses.create = AsyncMock(return_value=_make_responses_response(api_payload))
+
+    with (
+        patch("src.tools.parse_document._get_client", return_value=client),
+        patch("src.tools.parse_document.sanitize_text", wraps=__import__("src.shared.sanitization", fromlist=["sanitize_text"]).sanitize_text) as mock_sanitize,
+    ):
+        await parse_document("file-two-pages")
+
+    # sanitize_text must be called exactly once per page (2 pages = 2 calls)
+    assert mock_sanitize.call_count == 2
+    mock_sanitize.assert_any_call("page1 text.")
+    mock_sanitize.assert_any_call("page2 text.")

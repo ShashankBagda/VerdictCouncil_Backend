@@ -404,11 +404,23 @@ async def upload_domain_document(
             detail=f"Failed to upload to OpenAI: {exc}",
         ) from exc
 
-    # Step 3: Parse + sanitize
+    # Step 3: Parse + sanitize (regex layer-1 + DeBERTa-v3 classifier layer-2)
     try:
-        parse_result = await parse_document(file_id=doc.openai_file_id)
+        parse_result = await parse_document(
+            file_id=doc.openai_file_id,
+            run_classifier=settings.classifier_sanitizer_enabled,
+        )
         doc.status = DomainDocumentStatus.parsed
         await db.flush()
+    except RuntimeError as exc:
+        # Classifier failed to initialise (e.g. missing llm-guard or HF outage)
+        doc.status = DomainDocumentStatus.failed
+        doc.error_reason = f"Sanitizer init failed: {exc}"
+        await db.flush()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Sanitizer unavailable: {exc}",
+        ) from exc
     except Exception as exc:
         doc.status = DomainDocumentStatus.failed
         doc.error_reason = f"Parse failed: {exc}"
@@ -469,11 +481,19 @@ async def upload_domain_document(
         )
 
     doc.status = DomainDocumentStatus.indexed
+    san = parse_result.get("sanitization")
     db.add(
         AdminEvent(
             actor_id=current_user.id,
             action="domain_document_uploaded",
-            payload={"domain_id": str(domain_id), "doc_id": str(doc.id), "filename": doc.filename},
+            payload={
+                "domain_id": str(domain_id),
+                "doc_id": str(doc.id),
+                "filename": doc.filename,
+                "regex_hits": san.regex_hits if san else 0,
+                "classifier_hits": san.classifier_hits if san else 0,
+                "chunks_scanned": san.chunks_scanned if san else 0,
+            },
         )
     )
     await db.flush()
