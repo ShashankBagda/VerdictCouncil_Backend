@@ -32,7 +32,6 @@ class CaseReportData:
     evidence: list[dict[str, Any]] = field(default_factory=list)
     facts: list[dict[str, Any]] = field(default_factory=list)
     arguments: list[dict[str, Any]] = field(default_factory=list)
-    verdict: dict[str, Any] | None = None
     fairness_report: dict[str, Any] | None = None
     decision_history: list[dict[str, Any]] = field(default_factory=list)
 
@@ -57,7 +56,6 @@ async def build_case_report_data(db: AsyncSession, case_id: UUID) -> CaseReportD
             selectinload(Case.evidence),
             selectinload(Case.facts),
             selectinload(Case.arguments),
-            selectinload(Case.verdicts),
             selectinload(Case.audit_logs),
         )
     )
@@ -107,33 +105,8 @@ async def build_case_report_data(db: AsyncSession, case_id: UUID) -> CaseReportD
         for a in case.arguments
     ]
 
-    # Verdicts: pick the most recently created if multiple exist
-    verdict_dict: dict[str, Any] | None = None
     fairness_report: dict[str, Any] | None = None
-    decision_history = [
-        {
-            "id": str(verdict.id),
-            "recommendation_type": _enum_to_str(verdict.recommendation_type),
-            "recommended_outcome": verdict.recommended_outcome,
-            "amendment_of": str(verdict.amendment_of) if verdict.amendment_of else None,
-            "amendment_reason": verdict.amendment_reason,
-            "amended_by": str(verdict.amended_by) if verdict.amended_by else None,
-            "created_at": verdict.created_at.isoformat() if verdict.created_at else None,
-        }
-        for verdict in sorted(case.verdicts or [], key=lambda item: item.created_at or datetime.min)
-    ]
-    if case.verdicts:
-        latest = max(case.verdicts, key=lambda v: v.created_at)
-        verdict_dict = {
-            "id": str(latest.id),
-            "recommendation_type": _enum_to_str(latest.recommendation_type),
-            "recommended_outcome": latest.recommended_outcome,
-            "confidence_score": latest.confidence_score,
-            "sentence": latest.sentence,
-            "alternative_outcomes": latest.alternative_outcomes,
-            "created_at": latest.created_at.isoformat(),
-        }
-        fairness_report = latest.fairness_report
+    decision_history: list[dict[str, Any]] = []
 
     return CaseReportData(
         case_id=case.id,
@@ -145,7 +118,6 @@ async def build_case_report_data(db: AsyncSession, case_id: UUID) -> CaseReportD
         evidence=evidence,
         facts=facts,
         arguments=arguments,
-        verdict=verdict_dict,
         fairness_report=fairness_report,
         decision_history=decision_history,
     )

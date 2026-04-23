@@ -88,15 +88,6 @@ def _sample_data(case_id: uuid.UUID | None = None) -> CaseReportData:
                 "weaknesses": "Receipt is partially illegible",
             }
         ],
-        verdict={
-            "id": str(uuid.uuid4()),
-            "recommendation_type": "compensation",
-            "recommended_outcome": "Refund deposit in full",
-            "confidence_score": 87,
-            "sentence": None,
-            "alternative_outcomes": None,
-            "created_at": datetime.now(UTC).isoformat(),
-        },
         fairness_report={"critical_issues_found": False},
     )
 
@@ -140,10 +131,10 @@ class TestAssemblePack:
         with zipfile.ZipFile(io.BytesIO(pack_bytes), "r") as zf:
             evidence = json.loads(zf.read("evidence.json"))
             facts = json.loads(zf.read("facts.json"))
-            verdict = json.loads(zf.read("verdict.json"))
+            fairness_governance = json.loads(zf.read("fairness_governance.json"))
         assert evidence[0]["evidence_type"] == "documentary"
         assert facts[0]["confidence"] == "high"
-        assert verdict["verdict"]["recommendation_type"] == "compensation"
+        assert fairness_governance["fairness_report"]["critical_issues_found"] is False
 
 
 # ---------------------------------------------------------------------------

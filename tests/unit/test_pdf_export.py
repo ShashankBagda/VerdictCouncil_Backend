@@ -105,15 +105,6 @@ def _sample_data(case_id: uuid.UUID | None = None) -> CaseReportData:
                 "weaknesses": "Receipt is partially illegible",
             }
         ],
-        verdict={
-            "id": str(uuid.uuid4()),
-            "recommendation_type": "compensation",
-            "recommended_outcome": "Refund deposit in full",
-            "confidence_score": 87,
-            "sentence": None,
-            "alternative_outcomes": None,
-            "created_at": datetime.now(UTC).isoformat(),
-        },
         fairness_report={"critical_issues_found": False},
     )
 

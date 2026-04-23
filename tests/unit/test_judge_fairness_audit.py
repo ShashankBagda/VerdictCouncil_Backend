@@ -9,7 +9,7 @@ from httpx import ASGITransport, AsyncClient
 from src.api.app import create_app
 from src.api.deps import get_current_user, get_db
 from src.models.audit import AuditLog
-from src.models.case import Case, Verdict
+from src.models.case import Case
 from src.models.user import User, UserRole
 
 # ---------------------------------------------------------------------------
@@ -34,19 +34,11 @@ def _make_user(**overrides) -> MagicMock:
     return user
 
 
-def _make_verdict(case_id: uuid.UUID, fairness_report=None) -> MagicMock:
-    v = MagicMock(spec=Verdict)
-    v.id = uuid.uuid4()
-    v.case_id = case_id
-    v.fairness_report = fairness_report
-    return v
-
-
 def _make_audit_log(case_id: uuid.UUID, output_payload=None) -> MagicMock:
     log = MagicMock(spec=AuditLog)
     log.id = uuid.uuid4()
     log.case_id = case_id
-    log.agent_name = "governance-verdict"
+    log.agent_name = "hearing-governance"
     log.action = "governance_check"
     log.output_payload = output_payload
     log.created_at = datetime.now(UTC)
@@ -91,14 +83,11 @@ async def test_fairness_audit_with_all_data():
     case = MagicMock(spec=Case)
     case.id = case_id
 
-    fairness_report = {"audit_passed": True, "critical_issues_found": False}
-    verdict = _make_verdict(case_id, fairness_report=fairness_report)
     audit_log = _make_audit_log(case_id, output_payload={"fairness_check": {"audit_passed": True}})
 
     mock_db = _build_mock_session()
     mock_db.execute.side_effect = [
         _scalar_one_or_none_result(case),
-        _scalar_one_or_none_result(verdict),
         _scalars_result([audit_log]),
     ]
 
@@ -110,12 +99,11 @@ async def test_fairness_audit_with_all_data():
     data = resp.json()
     assert data["case_id"] == str(case_id)
     assert data["has_fairness_data"] is True
-    assert data["verdict_fairness_report"]["audit_passed"] is True
     assert len(data["governance_checks"]) == 1
     assert data["governance_checks"][0]["action"] == "governance_check"
 
 
-async def test_fairness_audit_no_verdict():
+async def test_fairness_audit_no_governance_data():
     case_id = uuid.uuid4()
     user = _make_user()
     case = MagicMock(spec=Case)
@@ -124,7 +112,6 @@ async def test_fairness_audit_no_verdict():
     mock_db = _build_mock_session()
     mock_db.execute.side_effect = [
         _scalar_one_or_none_result(case),
-        _scalar_one_or_none_result(None),
         _scalars_result([]),
     ]
 
@@ -135,7 +122,6 @@ async def test_fairness_audit_no_verdict():
     assert resp.status_code == 200
     data = resp.json()
     assert data["has_fairness_data"] is False
-    assert data["verdict_fairness_report"] is None
     assert data["governance_checks"] == []
 
 
@@ -166,19 +152,17 @@ async def test_fairness_audit_non_judge_forbidden():
     assert resp.status_code == 403
 
 
-async def test_fairness_audit_no_fairness_report_in_verdict():
+async def test_fairness_audit_governance_log_present_but_no_fairness_data():
     case_id = uuid.uuid4()
     user = _make_user()
     case = MagicMock(spec=Case)
     case.id = case_id
 
-    verdict = _make_verdict(case_id, fairness_report=None)
     audit_log = _make_audit_log(case_id, output_payload={"fairness_check": {}})
 
     mock_db = _build_mock_session()
     mock_db.execute.side_effect = [
         _scalar_one_or_none_result(case),
-        _scalar_one_or_none_result(verdict),
         _scalars_result([audit_log]),
     ]
 
@@ -188,5 +172,4 @@ async def test_fairness_audit_no_fairness_report_in_verdict():
 
     assert resp.status_code == 200
     data = resp.json()
-    assert data["verdict_fairness_report"] is None
     assert data["has_fairness_data"] is True  # governance audit log exists

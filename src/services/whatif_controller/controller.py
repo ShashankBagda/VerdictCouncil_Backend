@@ -246,7 +246,7 @@ class WhatIfController:
                 }
             else:
                 diff = generate_diff(case_state, result)
-                verdict_held = not diff["verdict_changed"]
+                verdict_held = not diff["analysis_changed"]
                 if verdict_held:
                     perturbations_held += 1
 

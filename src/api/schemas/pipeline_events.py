@@ -22,7 +22,7 @@ class PipelineProgressEvent(BaseModel):
       authoritative close signal. ``step`` is omitted; ``detail``
       carries ``{"reason": ..., "stopped_at": ...}`` so downstream
       analytics can attribute the halt to the correct stage without
-      mislabelling it as a governance-verdict failure.
+      mislabelling it as a hearing-governance failure.
     """
 
     case_id: UUID
@@ -32,11 +32,11 @@ class PipelineProgressEvent(BaseModel):
             "Per-agent events: one of the 9 agent names (case-processing, "
             "complexity-routing, evidence-analysis, fact-reconstruction, "
             "witness-analysis, legal-knowledge, argument-construction, "
-            "deliberation, governance-verdict). Terminal events use "
+            "hearing-analysis, hearing-governance). Terminal events use "
             "'pipeline'."
         ),
     )
-    phase: Literal["started", "completed", "failed", "terminal"]
+    phase: Literal["started", "completed", "failed", "terminal", "awaiting_review"]
     step: int | None = Field(
         None,
         ge=1,

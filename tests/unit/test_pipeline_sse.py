@@ -41,6 +41,9 @@ def _make_case(case_id: uuid.UUID, created_by: uuid.UUID) -> MagicMock:
     case = MagicMock(spec=Case)
     case.id = case_id
     case.created_by = created_by
+    case.status = MagicMock()
+    case.status.value = "processing"
+    case.gate_state = None
     return case
 
 
@@ -49,6 +52,7 @@ def _build_mock_session(case: MagicMock | None) -> AsyncMock:
     result = MagicMock()
     result.scalar_one_or_none.return_value = case
     session.execute = AsyncMock(return_value=result)
+    session.get = AsyncMock(return_value=case)
     return session
 
 
@@ -75,7 +79,7 @@ def _fake_subscribe_factory(events: list[str]):
 
 
 class TestStreamPipelineStatus:
-    async def test_streams_events_until_governance_verdict_terminal(self, monkeypatch):
+    async def test_streams_events_until_hearing_governance_terminal(self, monkeypatch):
         """SSE response contains data: lines, one per event from the subscriber."""
         user = _make_user()
         case_id = uuid.uuid4()
@@ -99,7 +103,7 @@ class TestStreamPipelineStatus:
             ).model_dump_json(),
             PipelineProgressEvent(
                 case_id=case_id,
-                agent="governance-verdict",
+                agent="hearing-governance",
                 phase="completed",
                 step=9,
                 ts=datetime.now(UTC),
@@ -127,14 +131,19 @@ class TestStreamPipelineStatus:
         body = resp.text
         # SSE wire format: each event becomes "data: <json>\r\n\r\n"
         data_lines = [line for line in body.splitlines() if line.startswith("data:")]
-        assert len(data_lines) == 3
+        # Snapshot-on-connect adds one extra event at the front (phase="case.status")
+        assert len(data_lines) == 4
 
-        first_payload = json.loads(data_lines[0][len("data: ") :])
+        snap_payload = json.loads(data_lines[0][len("data: ") :])
+        assert snap_payload["phase"] == "case.status"
+        assert snap_payload["agent"] == "pipeline"
+
+        first_payload = json.loads(data_lines[1][len("data: ") :])
         assert first_payload["agent"] == "case-processing"
         assert first_payload["phase"] == "started"
 
         last_payload = json.loads(data_lines[-1][len("data: ") :])
-        assert last_payload["agent"] == "governance-verdict"
+        assert last_payload["agent"] == "hearing-governance"
         assert last_payload["phase"] == "completed"
 
     async def test_returns_404_when_case_missing(self, monkeypatch):
@@ -185,16 +194,16 @@ class TestStreamPipelineStatus:
 
 
 class TestPipelineEventsHelper:
-    """Verify the pub/sub generator closes once governance-verdict reaches terminal phase."""
+    """Verify the pub/sub generator closes once hearing-governance reaches terminal phase."""
 
-    async def test_subscribe_closes_on_governance_verdict_completed(self, monkeypatch):
+    async def test_subscribe_closes_on_hearing_governance_completed(self, monkeypatch):
         from src.services import pipeline_events as pe
 
         case_id = "case-123"
 
         events = [
             json.dumps({"agent": "case-processing", "phase": "started"}),
-            json.dumps({"agent": "governance-verdict", "phase": "completed"}),
+            json.dumps({"agent": "hearing-governance", "phase": "completed"}),
             # Anything after the terminal event must NOT be yielded
             json.dumps({"agent": "case-processing", "phase": "started"}),
         ]
@@ -260,7 +269,7 @@ def test_pipeline_progress_event_accepts_terminal_shape():
 
 
 class TestTerminalCloseCondition:
-    """Subscriber must close on either the legacy governance-verdict happy
+    """Subscriber must close on either the hearing-governance happy
     path or the new pipeline/terminal halt signal — both are authoritative.
     """
 
@@ -329,7 +338,7 @@ class TestSSEStreamHeartbeatAndDisconnect:
 
         event_payload = PipelineProgressEvent(
             case_id=case_id,
-            agent="governance-verdict",
+            agent="hearing-governance",
             phase="completed",
             step=9,
             ts=datetime.now(UTC),

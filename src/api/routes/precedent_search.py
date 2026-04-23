@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException, status
 
@@ -61,6 +62,7 @@ async def search_precedents_adhoc(
             detail="Precedent search service is temporarily unavailable.",
         ) from exc
 
+    searched_at = datetime.now(UTC)
     items = [
         PrecedentSearchResultItem(
             citation=p.get("citation", ""),
@@ -69,7 +71,7 @@ async def search_precedents_adhoc(
             reasoning_summary=p.get("reasoning_summary"),
             similarity_score=p.get("similarity_score"),
             url=p.get("url"),
-            source=p.get("source"),
+            source="live_search",
         )
         for p in result.precedents
     ]
@@ -82,4 +84,5 @@ async def search_precedents_adhoc(
             pair_status=result.metadata.get("pair_status", "ok"),
         ),
         total=len(items),
+        searched_at=searched_at,
     )

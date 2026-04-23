@@ -73,8 +73,8 @@ L2_AGENTS: tuple[str, ...] = (
 L3_AGENTS: tuple[str, ...] = (
     "legal-knowledge",
     "argument-construction",
-    "deliberation",
-    "governance-verdict",
+    "hearing-analysis",
+    "hearing-governance",
 )
 
 # Maps each L2 agent's config name → the CaseState field it owns. Mirrors
@@ -589,7 +589,7 @@ class MeshPipelineRunner:
         is the subscriber's authoritative close signal. ``detail`` carries
         the stage at which the halt occurred so downstream analytics can
         attribute it correctly without mislabelling every halt as a
-        governance-verdict failure.
+        hearing-governance failure.
         """
         event = PipelineProgressEvent(
             case_id=state.case_id,

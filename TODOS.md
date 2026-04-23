@@ -88,17 +88,9 @@
 
 - **US-003: Jurisdiction Validation Result Endpoint** — Dedicated endpoint to surface Agent 1 jurisdiction validation result
 - **US-006: Evidence Analysis Dashboard Endpoint** — Aggregated endpoint for evidence strength, admissibility, and contradiction summaries
-- **US-020: Hearing Pack Generation** — Compile and export a hearing preparation pack (case summary, evidence, arguments, verdict)
+- **US-020: Hearing Pack Generation** — Compile and export a hearing preparation pack (case summary, evidence, arguments, analysis)
   - **Completed:** v0.3.0 (2026-04-16) — `GET /api/v1/cases/{id}/hearing-pack` returns a zip via `src/services/hearing_pack.py`. Introduces shared `CaseReportData` projection in `src/services/case_report_data.py` (also used by US-027). PR #25.
 - **US-027: Case Report PDF Export** — Generate and download a PDF report of the full case analysis
-
-### Judicial Decision Amendment & History
-
-- **US (new):** Amend a published judicial decision and view its full amendment history.
-  - **What:** `POST /api/v1/cases/{case_id}/amend-decision` to submit an amended verdict (reason, amended reasoning, amended outcome) after a case has reached `decided`/`closed`. `GET /api/v1/cases/{case_id}/decision-history` to return the ordered amendment audit trail.
-  - **Why:** The frontend (`CaseDetail.jsx` "Amend Decision" action + `DecisionHistory` panel) wires these paths through `frontend/src/api/client.js` as `amendDecision()` and `getDecisionHistory()`, but the backend has never exposed them. Contract-alignment audit 2026-04-20 confirmed they are not just unmounted — they do not exist. The frontend silently fails today; aligning the contract (plan phase 5) empty-states these surfaces until the backend catches up.
-  - **Context:** Model impact likely spans `Verdict` + a new `VerdictAmendment` table (or equivalent) plus audit-log entries. Needs RBAC (judge/senior_judge), invariant checks (original verdict must exist and be non-draft), and a way to mark the amendment on the status stream.
-  - **Depends on:** OpenAPI contract alignment (feat/openapi-contract-alignment) — the frontend stops calling these paths until we implement them server-side, so there is no silent-failure regression while this backlog item is open.
 
 ### Knowledge Base Admin Endpoints
 
@@ -109,7 +101,7 @@
     - `POST /api/v1/knowledge-base/documents` — multipart upload → chunk → embed → index.
     - `DELETE /api/v1/knowledge-base/documents/{file_id}` — remove the document + its embeddings.
     - `POST /api/v1/knowledge-base/search` — semantic search returning scored fragments.
-  - **Why:** The frontend `KnowledgeBase.jsx` page was fully wired for upload/search/delete flows, but the backend only exposes `GET /api/v1/knowledge-base/status`. Contract-alignment audit 2026-04-20 confirmed these four routes have never been implemented. The frontend was silently failing on the upload-zone, inventory, and semantic-search panels; aligning the contract (plan phase 5) collapses the page to a read-only status view until the backend ships these endpoints.
+  - **Why:** The frontend `KnowledgeBase.jsx` page was fully wired for upload/search/delete flows, but the backend only exposes `GET /api/v1/knowledge-base/status`. Contract-alignment audit 2026-04-20 confirmed these four routes have never been implemented. The frontend was silently failing on the upload-zone, inventory, and semantic-search panels; aligning the contract collapses the page to a read-only status view until the backend ships these endpoints.
   - **Context:** Needs a real vector store (Chroma / pgvector / OpenAI file_search) + chunking + embedding pipeline, per-judge auth scoping, a background worker for ingestion, and a document status field (`pending` → `indexed`). `normalizeKnowledgeBaseStatus` in the frontend already expects `documents_count` / `chunks_count` / `last_updated_at` — mirror those in the response shape.
   - **Depends on:** OpenAPI contract alignment (feat/openapi-contract-alignment) — the frontend stops calling these paths until we implement them server-side, so the KB page reports "deferred" rather than erroring while this backlog item is open.
 
@@ -119,11 +111,6 @@
 - **What:** `get_current_user` (deps.py) decodes the JWT but never validates against the `sessions` table. A revoked session remains valid until JWT expiry.
 - **Why:** A fired/suspended judge retains API access for the JWT lifetime with no kill switch.
 - **Priority:** P1 — security gap. Fix: check `Session.jwt_token_hash` and `expires_at` on every request.
-
-### Verdict Ordering by UUID
-- **What:** `get_fairness_audit` orders `Verdict` by `id.desc()` (UUID v4 — random, not temporal). The Verdict model has no `created_at` column.
-- **Why:** On cases that re-run (via `return_to_pipeline`), the "most recent" verdict returned is random.
-- **Priority:** P2 — add `created_at` to Verdict + migration, then change `order_by` to `created_at.desc()`.
 
 ### Redis Connection Leak in search_precedents.py
 - **What:** `_get_redis_client()` creates a new `redis.Redis` object on every call, never closes them.

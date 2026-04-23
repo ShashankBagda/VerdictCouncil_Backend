@@ -32,7 +32,7 @@ async def create_hearing_note(
     case_id: UUID,
     body: HearingNoteCreateRequest,
     db: DBSession,
-    current_user: User = require_role(UserRole.judge, UserRole.senior_judge),
+    current_user: User = require_role(UserRole.judge),
 ) -> HearingNote:
     case = (await db.execute(select(Case).where(Case.id == case_id))).scalar_one_or_none()
     if not case:
@@ -72,7 +72,7 @@ async def create_hearing_note(
 async def list_hearing_notes(
     case_id: UUID,
     db: DBSession,
-    current_user: User = require_role(UserRole.judge, UserRole.senior_judge),
+    current_user: User = require_role(UserRole.judge),
 ) -> HearingNoteListResponse:
     result = await db.execute(select(HearingNote).where(HearingNote.case_id == case_id))
     items = list(result.scalars().all())
@@ -94,7 +94,7 @@ async def update_hearing_note(
     note_id: UUID,
     body: HearingNoteUpdateRequest,
     db: DBSession,
-    current_user: User = require_role(UserRole.judge, UserRole.senior_judge),
+    current_user: User = require_role(UserRole.judge),
 ) -> HearingNote:
     result = await db.execute(
         select(HearingNote).where(HearingNote.id == note_id, HearingNote.case_id == case_id)
@@ -104,7 +104,7 @@ async def update_hearing_note(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found")
     if note.is_locked:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Note is locked")
-    if note.judge_id != current_user.id and current_user.role != UserRole.senior_judge:
+    if note.judge_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Cannot edit another judge's note",
@@ -140,7 +140,7 @@ async def lock_hearing_note(
     case_id: UUID,
     note_id: UUID,
     db: DBSession,
-    current_user: User = require_role(UserRole.judge, UserRole.senior_judge),
+    current_user: User = require_role(UserRole.judge),
 ) -> HearingNote:
     result = await db.execute(
         select(HearingNote).where(HearingNote.id == note_id, HearingNote.case_id == case_id)
@@ -172,7 +172,7 @@ async def delete_hearing_note(
     case_id: UUID,
     note_id: UUID,
     db: DBSession,
-    current_user: User = require_role(UserRole.judge, UserRole.senior_judge),
+    current_user: User = require_role(UserRole.judge),
 ) -> dict:
     result = await db.execute(
         select(HearingNote).where(HearingNote.id == note_id, HearingNote.case_id == case_id)
@@ -182,7 +182,7 @@ async def delete_hearing_note(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found")
     if note.is_locked:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Note is locked")
-    if note.judge_id != current_user.id and current_user.role != UserRole.senior_judge:
+    if note.judge_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Cannot delete another judge's note",

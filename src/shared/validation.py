@@ -17,8 +17,8 @@ FIELD_OWNERSHIP: dict[str, set[str]] = {
     "witness-analysis": {"witnesses"},
     "legal-knowledge": {"legal_rules", "precedents", "precedent_source_metadata"},
     "argument-construction": {"arguments"},
-    "deliberation": {"deliberation"},
-    "governance-verdict": {"fairness_check", "verdict_recommendation", "status"},
+    "hearing-analysis": {"hearing_analysis"},
+    "hearing-governance": {"fairness_check", "status"},
 }
 
 # Fields that all agents can append to

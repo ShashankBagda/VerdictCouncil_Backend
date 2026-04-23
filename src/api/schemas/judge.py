@@ -79,9 +79,6 @@ class GovernanceFairnessEntry(BaseModel):
 
 class FairnessAuditResponse(BaseModel):
     case_id: UUID
-    verdict_fairness_report: dict[str, Any] | None = Field(
-        None, description="Fairness report stored in the verdict record"
-    )
     governance_checks: list[GovernanceFairnessEntry] = Field(
         default_factory=list,
         description="Fairness check outputs from governance agent audit logs",

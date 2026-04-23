@@ -1,4 +1,4 @@
-"""Generates structured diff between original and modified verdicts."""
+"""Generates structured diff between original and modified hearing analyses."""
 
 from __future__ import annotations
 
@@ -14,21 +14,21 @@ def generate_diff(original: CaseState, modified: CaseState) -> dict[str, Any]:
         - fact_changes: list of facts whose status changed
         - evidence_changes: list of evidence added/removed/excluded
         - argument_deltas: comparison of argument strengths
-        - reasoning_diff: text diff of deliberation reasoning
-        - verdict_changed: bool
+        - reasoning_diff: text diff of hearing analysis reasoning
+        - analysis_changed: bool
         - confidence_delta: int (new - original)
-        - original_verdict: summary
-        - modified_verdict: summary
+        - original_analysis: summary
+        - modified_analysis: summary
     """
     return {
         "fact_changes": _diff_facts(original, modified),
         "evidence_changes": _diff_evidence(original, modified),
         "argument_deltas": _diff_arguments(original, modified),
         "reasoning_diff": _diff_reasoning(original, modified),
-        "verdict_changed": _verdict_changed(original, modified),
+        "analysis_changed": _analysis_changed(original, modified),
         "confidence_delta": _confidence_delta(original, modified),
-        "original_verdict": _extract_verdict_summary(original),
-        "modified_verdict": _extract_verdict_summary(modified),
+        "original_analysis": _extract_analysis_summary(original),
+        "modified_analysis": _extract_analysis_summary(modified),
     }
 
 
@@ -140,32 +140,32 @@ def _diff_arguments(original: CaseState, modified: CaseState) -> list[dict[str, 
 
 
 def _diff_reasoning(original: CaseState, modified: CaseState) -> dict[str, Any]:
-    """Compare deliberation reasoning between original and modified."""
-    orig_delib = original.deliberation
-    mod_delib = modified.deliberation
+    """Compare hearing analysis reasoning between original and modified."""
+    orig_analysis = original.hearing_analysis
+    mod_analysis = modified.hearing_analysis
 
     return {
-        "original": orig_delib.preliminary_conclusion if orig_delib else None,
-        "modified": mod_delib.preliminary_conclusion if mod_delib else None,
-        "original_confidence": orig_delib.confidence_score if orig_delib else None,
-        "modified_confidence": mod_delib.confidence_score if mod_delib else None,
+        "original": orig_analysis.preliminary_conclusion if orig_analysis else None,
+        "modified": mod_analysis.preliminary_conclusion if mod_analysis else None,
+        "original_confidence": orig_analysis.confidence_score if orig_analysis else None,
+        "modified_confidence": mod_analysis.confidence_score if mod_analysis else None,
     }
 
 
-def _verdict_changed(original: CaseState, modified: CaseState) -> bool:
-    """Check whether the verdict recommendation changed."""
-    orig_verdict = _extract_verdict_summary(original)
-    mod_verdict = _extract_verdict_summary(modified)
+def _analysis_changed(original: CaseState, modified: CaseState) -> bool:
+    """Check whether the hearing analysis changed."""
+    orig_analysis = _extract_analysis_summary(original)
+    mod_analysis = _extract_analysis_summary(modified)
 
-    if orig_verdict is None and mod_verdict is None:
+    if orig_analysis is None and mod_analysis is None:
         return False
 
-    if orig_verdict is None or mod_verdict is None:
+    if orig_analysis is None or mod_analysis is None:
         return True
 
-    return orig_verdict.get("recommendation_type") != mod_verdict.get(
-        "recommendation_type"
-    ) or orig_verdict.get("recommended_outcome") != mod_verdict.get("recommended_outcome")
+    return orig_analysis.get("preliminary_conclusion") != mod_analysis.get(
+        "preliminary_conclusion"
+    ) or orig_analysis.get("confidence_score") != mod_analysis.get("confidence_score")
 
 
 def _confidence_delta(original: CaseState, modified: CaseState) -> int:
@@ -175,26 +175,22 @@ def _confidence_delta(original: CaseState, modified: CaseState) -> int:
     return mod_score - orig_score
 
 
-def _extract_verdict_summary(state: CaseState) -> dict[str, Any] | None:
-    """Extract a summary of the verdict from CaseState."""
-    verdict = state.verdict_recommendation
-    if not verdict:
+def _extract_analysis_summary(state: CaseState) -> dict[str, Any] | None:
+    """Extract a summary of the hearing analysis from CaseState."""
+    analysis = state.hearing_analysis
+    if not analysis:
         return None
 
     return {
-        "recommendation_type": verdict.recommendation_type,
-        "recommended_outcome": verdict.recommended_outcome,
-        "confidence_score": verdict.confidence_score,
+        "preliminary_conclusion": analysis.preliminary_conclusion,
+        "confidence_score": analysis.confidence_score,
     }
 
 
 def _get_confidence(state: CaseState) -> int:
-    """Extract confidence score from verdict or deliberation."""
-    if state.verdict_recommendation:
-        return state.verdict_recommendation.confidence_score
-
-    if state.deliberation and state.deliberation.confidence_score is not None:
-        return state.deliberation.confidence_score
+    """Extract confidence score from hearing analysis."""
+    if state.hearing_analysis and state.hearing_analysis.confidence_score is not None:
+        return state.hearing_analysis.confidence_score
 
     return 0
 

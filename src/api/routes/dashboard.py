@@ -3,7 +3,7 @@ from sqlalchemy import func, select
 
 from src.api.deps import CurrentUser, DBSession
 from src.api.schemas.dashboard import DashboardStats
-from src.models.case import Case, CaseStatus, Verdict
+from src.models.case import Case, CaseStatus
 from src.shared.circuit_breaker import get_pair_search_breaker
 
 router = APIRouter()
@@ -57,12 +57,6 @@ async def get_stats(db: DBSession, current_user: CurrentUser) -> dict:
     ).scalar_one()
     escalation_rate = round((escalated_total / total) * 100, 2) if total else 0.0
 
-    avg_confidence = (
-        await db.execute(
-            select(func.avg(Verdict.confidence_score)).where(Verdict.confidence_score.is_not(None))
-        )
-    ).scalar_one()
-
     pair_status = await get_pair_search_breaker().get_status()
 
     return {
@@ -70,9 +64,6 @@ async def get_stats(db: DBSession, current_user: CurrentUser) -> dict:
         "by_status": by_status,
         "by_domain": by_domain,
         "escalation_rate_percent": escalation_rate,
-        "average_verdict_confidence": round(float(avg_confidence), 2)
-        if avg_confidence is not None
-        else None,
         "average_processing_time_seconds": None,
         "recent_cases": recent,
         "pair_api_status": pair_status,

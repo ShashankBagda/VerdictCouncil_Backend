@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "VerdictCouncil API",
-    "summary": "Judicial AI decision-support system with 9-agent pipeline",
-    "description": "VerdictCouncil processes judicial cases through a multi-agent pipeline covering case intake, evidence analysis, fact reconstruction, legal knowledge, argument construction, deliberation, and verdict generation.\n\n**Authentication:** Cookie-based JWT. Call `POST /api/v1/auth/login` to receive an httpOnly `vc_token` cookie.\n\n**Note:** Swagger UI does not support cookie-based auth for interactive testing. Use a separate HTTP client (curl, httpx) for authenticated requests.",
+    "summary": "Judicial hearing support system with 9-agent AI analysis pipeline",
+    "description": "VerdictCouncil processes judicial cases through a multi-agent pipeline covering case intake, evidence analysis, fact reconstruction, legal knowledge, argument construction, and hearing analysis.\n\n**Authentication:** Cookie-based JWT. Call `POST /api/v1/auth/login` to receive an httpOnly `vc_token` cookie.\n\n**Note:** Swagger UI does not support cookie-based auth for interactive testing. Use a separate HTTP client (curl, httpx) for authenticated requests.",
     "version": "0.1.0"
   },
   "servers": [
@@ -754,22 +754,6 @@
             }
           },
           {
-            "name": "outcome",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Outcome"
-            }
-          },
-          {
             "name": "filed_from",
             "in": "query",
             "required": false,
@@ -954,113 +938,6 @@
           },
           "403": {
             "description": "Not authorized to view this case",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Case not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Rate limit exceeded (60 requests/minute per client IP)",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "headers": {
-              "Retry-After": {
-                "description": "Seconds until the rate limit resets",
-                "schema": {
-                  "type": "integer"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/cases/{case_id}/rejection-review": {
-      "post": {
-        "tags": [
-          "cases"
-        ],
-        "summary": "Override or close a rejected case",
-        "operationId": "review_rejected_case",
-        "parameters": [
-          {
-            "name": "case_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Case Id"
-            }
-          },
-          {
-            "name": "vc_token",
-            "in": "cookie",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Vc Token"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RejectionReviewRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RejectionReviewResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Case is not rejected",
             "content": {
               "application/json": {
                 "schema": {
@@ -1567,6 +1444,372 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (60 requests/minute per client IP)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the rate limit resets",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/cases/{case_id}/gates/{gate_name}/advance": {
+      "post": {
+        "tags": [
+          "cases"
+        ],
+        "summary": "Advance to the next pipeline gate",
+        "operationId": "advance_gate",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Case Id"
+            }
+          },
+          {
+            "name": "gate_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Gate Name"
+            }
+          },
+          {
+            "name": "vc_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Vc Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GateAdvanceRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (60 requests/minute per client IP)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the rate limit resets",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/cases/{case_id}/gates/{gate_name}/rerun": {
+      "post": {
+        "tags": [
+          "cases"
+        ],
+        "summary": "Re-run agents in the current gate from a specific agent",
+        "operationId": "rerun_gate",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Case Id"
+            }
+          },
+          {
+            "name": "gate_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Gate Name"
+            }
+          },
+          {
+            "name": "vc_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Vc Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GateRerunRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (60 requests/minute per client IP)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the rate limit resets",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/cases/{case_id}/decision": {
+      "post": {
+        "tags": [
+          "cases"
+        ],
+        "summary": "Record the judge's decision with AI engagement responses",
+        "operationId": "record_decision",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Case Id"
+            }
+          },
+          {
+            "name": "vc_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Vc Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JudicialDecisionCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (60 requests/minute per client IP)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the rate limit resets",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/cases/{case_id}/suggested-questions": {
+      "patch": {
+        "tags": [
+          "cases"
+        ],
+        "summary": "Update suggested questions for a case argument",
+        "operationId": "update_suggested_questions",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Case Id"
+            }
+          },
+          {
+            "name": "vc_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Vc Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SuggestedQuestionsUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponse"
                 }
               }
             }
@@ -2457,13 +2700,13 @@
         }
       }
     },
-    "/api/v1/cases/{case_id}/deliberation": {
+    "/api/v1/cases/{case_id}/hearing-analysis": {
       "get": {
         "tags": [
           "cases"
         ],
-        "summary": "Get AI deliberation for a case",
-        "operationId": "get_case_deliberation",
+        "summary": "Get AI hearing analysis for a case",
+        "operationId": "get_case_hearing_analysis",
         "parameters": [
           {
             "name": "case_id",
@@ -2500,9 +2743,9 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/DeliberationResponse"
+                    "$ref": "#/components/schemas/HearingAnalysisResponse"
                   },
-                  "title": "Response Get Case Deliberation"
+                  "title": "Response Get Case Hearing Analysis"
                 }
               }
             }
@@ -2516,332 +2759,6 @@
               }
             },
             "description": "Not Found"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Rate limit exceeded (60 requests/minute per client IP)",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "headers": {
-              "Retry-After": {
-                "description": "Seconds until the rate limit resets",
-                "schema": {
-                  "type": "integer"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/cases/{case_id}/verdict": {
-      "get": {
-        "tags": [
-          "cases"
-        ],
-        "summary": "Get generated verdicts for a case",
-        "operationId": "get_case_verdict",
-        "parameters": [
-          {
-            "name": "case_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Case Id"
-            }
-          },
-          {
-            "name": "vc_token",
-            "in": "cookie",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Vc Token"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/VerdictResponse"
-                  },
-                  "title": "Response Get Case Verdict"
-                }
-              }
-            }
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Rate limit exceeded (60 requests/minute per client IP)",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "headers": {
-              "Retry-After": {
-                "description": "Seconds until the rate limit resets",
-                "schema": {
-                  "type": "integer"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/cases/{case_id}/decision": {
-      "post": {
-        "tags": [
-          "decisions"
-        ],
-        "summary": "Record a judge decision",
-        "description": "Record a judge's decision on a case verdict (accept, modify, or reject). Case must be in `ready_for_review` status. Transitions the case to `decided` (accept/modify) or `rejected`.",
-        "operationId": "record_decision",
-        "parameters": [
-          {
-            "name": "case_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Case Id"
-            }
-          },
-          {
-            "name": "vc_token",
-            "in": "cookie",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Vc Token"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DecisionRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DecisionResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Case not in ready_for_review status",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Insufficient permissions (judge only)",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Case not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ValidationErrorResponse"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Rate limit exceeded (60 requests/minute per client IP)",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "headers": {
-              "Retry-After": {
-                "description": "Seconds until the rate limit resets",
-                "schema": {
-                  "type": "integer"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/cases/{case_id}/decision-amendments": {
-      "post": {
-        "tags": [
-          "decisions"
-        ],
-        "summary": "Amend or request amendment of a recorded decision",
-        "operationId": "submit_decision_amendment",
-        "parameters": [
-          {
-            "name": "case_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Case Id"
-            }
-          },
-          {
-            "name": "vc_token",
-            "in": "cookie",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Vc Token"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DecisionAmendmentRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DecisionAmendmentResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Case has no recorded decision",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Insufficient permissions",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Case not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
           },
           "422": {
             "description": "Validation Error",
@@ -2880,7 +2797,7 @@
           "what-if"
         ],
         "summary": "Submit a what-if scenario",
-        "description": "Submit a hypothetical modification for a case to test verdict stability. The scenario runs asynchronously in the background. Case must be in `ready_for_review` or `decided` status.",
+        "description": "Submit a hypothetical modification for a case to test analysis stability. The scenario runs asynchronously in the background. Case must be in `ready_for_review` status.",
         "operationId": "submit_whatif_scenario",
         "parameters": [
           {
@@ -3536,7 +3453,7 @@
           "judge"
         ],
         "summary": "Get fairness & bias audit results for a case",
-        "description": "Surfaces the governance agent's fairness check output and the verdict-level fairness report. Requires judge role.",
+        "description": "Surfaces the governance agent's fairness check output. Requires judge role.",
         "operationId": "get_fairness_audit",
         "parameters": [
           {
@@ -5532,256 +5449,35 @@
         }
       }
     },
-    "/api/v1/escalated-cases/": {
+    "/api/v1/documents/{document_id}/excerpt": {
       "get": {
         "tags": [
-          "escalation"
+          "documents"
         ],
-        "summary": "List escalated cases",
-        "description": "Returns all cases currently in escalated status with pagination. Requires judge role.",
-        "operationId": "list_escalated_cases",
+        "summary": "Get a specific page excerpt from an uploaded document",
+        "operationId": "get_document_excerpt",
         "parameters": [
           {
-            "name": "page",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "default": 1,
-              "title": "Page"
-            }
-          },
-          {
-            "name": "per_page",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "maximum": 100,
-              "minimum": 1,
-              "default": 20,
-              "title": "Per Page"
-            }
-          },
-          {
-            "name": "vc_token",
-            "in": "cookie",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Vc Token"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EscalatedCaseListResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Insufficient permissions",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Rate limit exceeded (60 requests/minute per client IP)",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "headers": {
-              "Retry-After": {
-                "description": "Seconds until the rate limit resets",
-                "schema": {
-                  "type": "integer"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/escalated-cases/{case_id}/action": {
-      "post": {
-        "tags": [
-          "escalation"
-        ],
-        "summary": "Take action on an escalated case",
-        "description": "Available actions: `add_notes` (stays escalated), `return_to_pipeline` (-> processing), `manual_decision` (-> decided, requires `final_order`), `reject` (-> rejected). Requires judge role.",
-        "operationId": "take_escalation_action",
-        "parameters": [
-          {
-            "name": "case_id",
+            "name": "document_id",
             "in": "path",
             "required": true,
             "schema": {
               "type": "string",
               "format": "uuid",
-              "title": "Case Id"
+              "title": "Document Id"
             }
           },
-          {
-            "name": "vc_token",
-            "in": "cookie",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Vc Token"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/EscalationActionRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EscalationActionResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Case is not in escalated status",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Insufficient permissions",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Case not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Rate limit exceeded (60 requests/minute per client IP)",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "headers": {
-              "Retry-After": {
-                "description": "Seconds until the rate limit resets",
-                "schema": {
-                  "type": "integer"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/senior-inbox/": {
-      "get": {
-        "tags": [
-          "senior-inbox"
-        ],
-        "summary": "List senior judge inbox items",
-        "description": "Aggregates escalations, decision amendments, and pending reopen requests.",
-        "operationId": "list_senior_inbox",
-        "parameters": [
           {
             "name": "page",
             "in": "query",
-            "required": false,
+            "required": true,
             "schema": {
               "type": "integer",
               "minimum": 1,
-              "default": 1,
+              "description": "1-indexed page number",
               "title": "Page"
-            }
-          },
-          {
-            "name": "per_page",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "maximum": 100,
-              "minimum": 1,
-              "default": 20,
-              "title": "Per Page"
-            }
+            },
+            "description": "1-indexed page number"
           },
           {
             "name": "vc_token",
@@ -5808,93 +5504,7 @@
                 "schema": {
                   "type": "object",
                   "additionalProperties": true,
-                  "title": "Response List Senior Inbox"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Rate limit exceeded (60 requests/minute per client IP)",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "headers": {
-              "Retry-After": {
-                "description": "Seconds until the rate limit resets",
-                "schema": {
-                  "type": "integer"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/senior-inbox/{item_id}/action": {
-      "post": {
-        "tags": [
-          "senior-inbox"
-        ],
-        "summary": "Take action on a senior inbox item",
-        "operationId": "take_senior_inbox_action",
-        "parameters": [
-          {
-            "name": "item_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Item Id"
-            }
-          },
-          {
-            "name": "vc_token",
-            "in": "cookie",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Vc Token"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SeniorInboxActionRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SeniorInboxActionResponse"
+                  "title": "Response Get Document Excerpt"
                 }
               }
             }
@@ -6235,14 +5845,49 @@
   },
   "components": {
     "schemas": {
-      "AmendmentType": {
-        "type": "string",
-        "enum": [
-          "clerical_correction",
-          "post_hearing_update",
-          "error_correction"
+      "AIEngagement": {
+        "properties": {
+          "conclusion_type": {
+            "type": "string",
+            "title": "Conclusion Type",
+            "description": "Type of AI conclusion (verdict_recommendation, fairness_flag, etc.)"
+          },
+          "conclusion_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conclusion Id",
+            "description": "ID of the specific conclusion item"
+          },
+          "agreed": {
+            "type": "boolean",
+            "title": "Agreed",
+            "description": "Whether the judge agrees with this AI conclusion"
+          },
+          "reasoning": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning",
+            "description": "Required when agreed=False: judge's reasoning for disagreement"
+          }
+        },
+        "type": "object",
+        "required": [
+          "conclusion_type",
+          "agreed"
         ],
-        "title": "AmendmentType"
+        "title": "AIEngagement"
       },
       "ArgumentResponse": {
         "properties": {
@@ -6634,65 +6279,6 @@
         "title": "CaseCreateRequest",
         "description": "Create a new case for processing."
       },
-      "CaseDecisionRecordResponse": {
-        "properties": {
-          "decision_type": {
-            "type": "string",
-            "title": "Decision Type",
-            "description": "accept, modify, reject, or amendment type"
-          },
-          "reason": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reason"
-          },
-          "final_order": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Final Order"
-          },
-          "recorded_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Recorded At"
-          },
-          "recorded_by": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Recorded By"
-          }
-        },
-        "type": "object",
-        "required": [
-          "decision_type"
-        ],
-        "title": "CaseDecisionRecordResponse"
-      },
       "CaseDetailResponse": {
         "properties": {
           "id": {
@@ -6928,18 +6514,6 @@
             "$ref": "#/components/schemas/CaseProgressResponse",
             "description": "Pipeline progress summary"
           },
-          "outcome_summary": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Outcome Summary",
-            "description": "Latest recommendation or decision"
-          },
           "escalation_reason": {
             "anyOf": [
               {
@@ -6963,29 +6537,6 @@
             ],
             "title": "Reopen State",
             "description": "Pending or latest reopen-request state"
-          },
-          "amendment_state": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Amendment State",
-            "description": "Current amendment status"
-          },
-          "latest_decision": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/CaseDecisionRecordResponse"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Most recent judge decision record"
           },
           "documents": {
             "items": {
@@ -7043,29 +6594,13 @@
             "title": "Arguments",
             "description": "Constructed arguments"
           },
-          "deliberations": {
+          "hearing_analyses": {
             "items": {
-              "$ref": "#/components/schemas/DeliberationResponse"
+              "$ref": "#/components/schemas/HearingAnalysisResponse"
             },
             "type": "array",
-            "title": "Deliberations",
-            "description": "AI deliberations"
-          },
-          "verdicts": {
-            "items": {
-              "$ref": "#/components/schemas/VerdictResponse"
-            },
-            "type": "array",
-            "title": "Verdicts",
-            "description": "Generated verdicts"
-          },
-          "decision_history": {
-            "items": {
-              "$ref": "#/components/schemas/CaseDecisionRecordResponse"
-            },
-            "type": "array",
-            "title": "Decision History",
-            "description": "Recorded judge decisions and amendments"
+            "title": "Hearing Analyses",
+            "description": "AI hearing analyses"
           },
           "audit_logs": {
             "items": {
@@ -7470,18 +7005,6 @@
             "$ref": "#/components/schemas/CaseProgressResponse",
             "description": "Pipeline progress summary"
           },
-          "outcome_summary": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Outcome Summary",
-            "description": "Latest recommendation or decision"
-          },
           "escalation_reason": {
             "anyOf": [
               {
@@ -7505,29 +7028,6 @@
             ],
             "title": "Reopen State",
             "description": "Pending or latest reopen-request state"
-          },
-          "amendment_state": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Amendment State",
-            "description": "Current amendment status"
-          },
-          "latest_decision": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/CaseDecisionRecordResponse"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Most recent judge decision record"
           }
         },
         "type": "object",
@@ -7550,12 +7050,14 @@
           "pending",
           "processing",
           "ready_for_review",
-          "decided",
-          "rejected",
           "escalated",
           "closed",
           "failed",
-          "failed_retryable"
+          "failed_retryable",
+          "awaiting_review_gate1",
+          "awaiting_review_gate2",
+          "awaiting_review_gate3",
+          "awaiting_review_gate4"
         ],
         "title": "CaseStatus"
       },
@@ -7647,8 +7149,9 @@
             "description": "Case count grouped by status",
             "examples": [
               {
-                "decided": 25,
-                "pending": 10
+                "closed": 3,
+                "pending": 10,
+                "ready_for_review": 5
               }
             ]
           },
@@ -7670,18 +7173,6 @@
             "type": "number",
             "title": "Escalation Rate Percent",
             "description": "Percentage of cases currently escalated"
-          },
-          "average_verdict_confidence": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Average Verdict Confidence",
-            "description": "Average governance-verdict confidence score"
           },
           "average_processing_time_seconds": {
             "anyOf": [
@@ -7728,297 +7219,6 @@
         ],
         "title": "DashboardStats",
         "description": "Aggregate case statistics and system health."
-      },
-      "DecisionAction": {
-        "type": "string",
-        "enum": [
-          "accept",
-          "modify",
-          "reject"
-        ],
-        "title": "DecisionAction"
-      },
-      "DecisionAmendmentRequest": {
-        "properties": {
-          "amendment_type": {
-            "$ref": "#/components/schemas/AmendmentType"
-          },
-          "reason": {
-            "type": "string",
-            "maxLength": 5000,
-            "minLength": 1,
-            "title": "Reason"
-          },
-          "final_order": {
-            "type": "string",
-            "maxLength": 10000,
-            "minLength": 1,
-            "title": "Final Order"
-          },
-          "notes": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 5000
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Notes"
-          }
-        },
-        "type": "object",
-        "required": [
-          "amendment_type",
-          "reason",
-          "final_order"
-        ],
-        "title": "DecisionAmendmentRequest"
-      },
-      "DecisionAmendmentResponse": {
-        "properties": {
-          "case_id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Case Id"
-          },
-          "amendment_request_id": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Amendment Request Id"
-          },
-          "amendment_type": {
-            "$ref": "#/components/schemas/AmendmentType"
-          },
-          "status": {
-            "type": "string",
-            "title": "Status"
-          },
-          "message": {
-            "type": "string",
-            "title": "Message"
-          },
-          "amended_verdict_id": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Amended Verdict Id"
-          }
-        },
-        "type": "object",
-        "required": [
-          "case_id",
-          "amendment_type",
-          "status",
-          "message"
-        ],
-        "title": "DecisionAmendmentResponse"
-      },
-      "DecisionRequest": {
-        "properties": {
-          "action": {
-            "$ref": "#/components/schemas/DecisionAction",
-            "description": "Decision action",
-            "examples": [
-              "accept"
-            ]
-          },
-          "notes": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Notes",
-            "description": "Optional notes from the judge"
-          },
-          "final_order": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Final Order",
-            "description": "Final order text if modifying the verdict"
-          }
-        },
-        "type": "object",
-        "required": [
-          "action"
-        ],
-        "title": "DecisionRequest",
-        "description": "Judge decision on a case verdict."
-      },
-      "DecisionResponse": {
-        "properties": {
-          "case_id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Case Id",
-            "description": "Case ID"
-          },
-          "action": {
-            "$ref": "#/components/schemas/DecisionAction",
-            "description": "Decision action taken"
-          },
-          "status": {
-            "$ref": "#/components/schemas/CaseStatus",
-            "description": "New case status after decision"
-          },
-          "decision_type": {
-            "type": "string",
-            "title": "Decision Type",
-            "description": "Recorded decision type"
-          },
-          "reason": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reason",
-            "description": "Judge reason for modify or reject decisions"
-          },
-          "final_order": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Final Order",
-            "description": "Final order text when supplied"
-          },
-          "recorded_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Recorded At",
-            "description": "Timestamp for the decision record"
-          },
-          "recorded_by": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Recorded By",
-            "description": "Judge identifier"
-          },
-          "message": {
-            "type": "string",
-            "title": "Message",
-            "description": "Confirmation message"
-          }
-        },
-        "type": "object",
-        "required": [
-          "case_id",
-          "action",
-          "status",
-          "decision_type",
-          "message"
-        ],
-        "title": "DecisionResponse",
-        "description": "Confirmation of recorded decision."
-      },
-      "DeliberationResponse": {
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Id"
-          },
-          "reasoning_chain": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reasoning Chain",
-            "description": "Structured reasoning chain"
-          },
-          "preliminary_conclusion": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Preliminary Conclusion",
-            "description": "Preliminary conclusion"
-          },
-          "uncertainty_flags": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Uncertainty Flags",
-            "description": "Uncertainty flags and pivot factors"
-          },
-          "confidence_score": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Confidence Score",
-            "description": "Confidence score (0-100)"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id"
-        ],
-        "title": "DeliberationResponse"
       },
       "DisputeFactRequest": {
         "properties": {
@@ -8147,239 +7347,6 @@
         ],
         "title": "ErrorResponse",
         "description": "Standard error response body."
-      },
-      "EscalatedCaseListResponse": {
-        "properties": {
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/EscalatedCaseResponse"
-            },
-            "type": "array",
-            "title": "Items"
-          },
-          "total": {
-            "type": "integer",
-            "title": "Total"
-          },
-          "page": {
-            "type": "integer",
-            "title": "Page"
-          },
-          "per_page": {
-            "type": "integer",
-            "title": "Per Page"
-          }
-        },
-        "type": "object",
-        "required": [
-          "items",
-          "total",
-          "page",
-          "per_page"
-        ],
-        "title": "EscalatedCaseListResponse"
-      },
-      "EscalatedCaseResponse": {
-        "properties": {
-          "id": {
-            "type": "string",
-            "title": "Id"
-          },
-          "case_id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Case Id"
-          },
-          "item_type": {
-            "type": "string",
-            "title": "Item Type"
-          },
-          "case_title": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Case Title"
-          },
-          "domain": {
-            "$ref": "#/components/schemas/CaseDomain"
-          },
-          "status": {
-            "$ref": "#/components/schemas/CaseStatus"
-          },
-          "route": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Route"
-          },
-          "complexity": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Complexity"
-          },
-          "originating_judge": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Originating Judge"
-          },
-          "reason": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reason"
-          },
-          "priority": {
-            "type": "string",
-            "title": "Priority",
-            "default": "high"
-          },
-          "submitted_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Submitted At"
-          },
-          "preview": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Preview"
-          },
-          "history": {
-            "items": {
-              "$ref": "#/components/schemas/WorkflowHistoryEntryResponse"
-            },
-            "type": "array",
-            "title": "History"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "case_id",
-          "item_type",
-          "domain",
-          "status"
-        ],
-        "title": "EscalatedCaseResponse"
-      },
-      "EscalationAction": {
-        "type": "string",
-        "enum": [
-          "add_notes",
-          "return_to_pipeline",
-          "manual_decision",
-          "reject"
-        ],
-        "title": "EscalationAction"
-      },
-      "EscalationActionRequest": {
-        "properties": {
-          "action": {
-            "$ref": "#/components/schemas/EscalationAction",
-            "description": "Action to take on the escalated case"
-          },
-          "notes": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 2000
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Notes",
-            "description": "Judge's review notes"
-          },
-          "final_order": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 5000
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Final Order",
-            "description": "Final order text \u2014 required when action is manual_decision"
-          }
-        },
-        "type": "object",
-        "required": [
-          "action"
-        ],
-        "title": "EscalationActionRequest"
-      },
-      "EscalationActionResponse": {
-        "properties": {
-          "case_id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Case Id"
-          },
-          "action": {
-            "$ref": "#/components/schemas/EscalationAction"
-          },
-          "previous_status": {
-            "$ref": "#/components/schemas/CaseStatus"
-          },
-          "new_status": {
-            "$ref": "#/components/schemas/CaseStatus"
-          },
-          "message": {
-            "type": "string",
-            "title": "Message"
-          }
-        },
-        "type": "object",
-        "required": [
-          "case_id",
-          "action",
-          "previous_status",
-          "new_status",
-          "message"
-        ],
-        "title": "EscalationActionResponse"
       },
       "EvidenceGapsResponse": {
         "properties": {
@@ -8621,19 +7588,6 @@
             "format": "uuid",
             "title": "Case Id"
           },
-          "verdict_fairness_report": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Verdict Fairness Report",
-            "description": "Fairness report stored in the verdict record"
-          },
           "governance_checks": {
             "items": {
               "$ref": "#/components/schemas/GovernanceFairnessEntry"
@@ -8654,6 +7608,41 @@
           "has_fairness_data"
         ],
         "title": "FairnessAuditResponse"
+      },
+      "GateAdvanceRequest": {
+        "properties": {},
+        "type": "object",
+        "title": "GateAdvanceRequest"
+      },
+      "GateRerunRequest": {
+        "properties": {
+          "agent_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Name",
+            "description": "Agent to restart from; defaults to first agent in gate"
+          },
+          "instructions": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instructions",
+            "description": "Additional instructions appended to the agent's system prompt"
+          }
+        },
+        "type": "object",
+        "title": "GateRerunRequest"
       },
       "GovernanceFairnessEntry": {
         "properties": {
@@ -8710,6 +7699,70 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "HearingAnalysisResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "reasoning_chain": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning Chain",
+            "description": "Structured reasoning chain"
+          },
+          "preliminary_conclusion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preliminary Conclusion",
+            "description": "Preliminary conclusion"
+          },
+          "uncertainty_flags": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uncertainty Flags",
+            "description": "Uncertainty flags and pivot factors"
+          },
+          "confidence_score": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence Score",
+            "description": "Confidence score (0-100)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "title": "HearingAnalysisResponse"
       },
       "HearingNoteCreateRequest": {
         "properties": {
@@ -9031,6 +8084,27 @@
           "status"
         ],
         "title": "HearingPackResponse"
+      },
+      "JudicialDecisionCreate": {
+        "properties": {
+          "verdict_text": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Verdict Text"
+          },
+          "ai_engagements": {
+            "items": {
+              "$ref": "#/components/schemas/AIEngagement"
+            },
+            "type": "array",
+            "title": "Ai Engagements"
+          }
+        },
+        "type": "object",
+        "required": [
+          "verdict_text"
+        ],
+        "title": "JudicialDecisionCreate"
       },
       "KnowledgeBaseDeleteResponse": {
         "properties": {
@@ -9873,6 +8947,18 @@
           "total": {
             "type": "integer",
             "title": "Total"
+          },
+          "searched_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Searched At"
           }
         },
         "type": "object",
@@ -9970,19 +9056,6 @@
         ],
         "title": "PrecedentSource"
       },
-      "RecommendationType": {
-        "type": "string",
-        "enum": [
-          "compensation",
-          "repair",
-          "dismiss",
-          "guilty",
-          "not_guilty",
-          "reduced",
-          "manual_decision"
-        ],
-        "title": "RecommendationType"
-      },
       "RegisterRequest": {
         "properties": {
           "name": {
@@ -10027,82 +9100,6 @@
         ],
         "title": "RegisterRequest",
         "description": "User registration request."
-      },
-      "RejectedCaseAction": {
-        "type": "string",
-        "enum": [
-          "override",
-          "close"
-        ],
-        "title": "RejectedCaseAction"
-      },
-      "RejectionReviewRequest": {
-        "properties": {
-          "action": {
-            "$ref": "#/components/schemas/RejectedCaseAction"
-          },
-          "justification": {
-            "type": "string",
-            "maxLength": 5000,
-            "minLength": 1,
-            "title": "Justification"
-          }
-        },
-        "type": "object",
-        "required": [
-          "action",
-          "justification"
-        ],
-        "title": "RejectionReviewRequest"
-      },
-      "RejectionReviewResponse": {
-        "properties": {
-          "case_id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Case Id"
-          },
-          "action": {
-            "$ref": "#/components/schemas/RejectedCaseAction"
-          },
-          "status": {
-            "$ref": "#/components/schemas/CaseStatus"
-          },
-          "rejection_reason": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rejection Reason"
-          },
-          "resumed_from_stage": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Resumed From Stage"
-          },
-          "message": {
-            "type": "string",
-            "title": "Message"
-          }
-        },
-        "type": "object",
-        "required": [
-          "case_id",
-          "action",
-          "status",
-          "message"
-        ],
-        "title": "RejectionReviewResponse"
       },
       "ReopenRequestCreateRequest": {
         "properties": {
@@ -10274,96 +9271,6 @@
         ],
         "title": "ScenarioStatus"
       },
-      "SeniorInboxAction": {
-        "type": "string",
-        "enum": [
-          "approve",
-          "reject",
-          "reassign",
-          "request_more_info"
-        ],
-        "title": "SeniorInboxAction"
-      },
-      "SeniorInboxActionRequest": {
-        "properties": {
-          "action": {
-            "$ref": "#/components/schemas/SeniorInboxAction"
-          },
-          "reason": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 5000
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reason"
-          },
-          "assignee": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 255
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Assignee"
-          }
-        },
-        "type": "object",
-        "required": [
-          "action"
-        ],
-        "title": "SeniorInboxActionRequest"
-      },
-      "SeniorInboxActionResponse": {
-        "properties": {
-          "item_id": {
-            "type": "string",
-            "title": "Item Id"
-          },
-          "action": {
-            "$ref": "#/components/schemas/SeniorInboxAction"
-          },
-          "status": {
-            "type": "string",
-            "title": "Status"
-          },
-          "message": {
-            "type": "string",
-            "title": "Message"
-          },
-          "assignee": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Assignee"
-          },
-          "reviewed_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Reviewed At"
-          }
-        },
-        "type": "object",
-        "required": [
-          "item_id",
-          "action",
-          "status",
-          "message",
-          "reviewed_at"
-        ],
-        "title": "SeniorInboxActionResponse"
-      },
       "StabilityClassification": {
         "type": "string",
         "enum": [
@@ -10523,6 +9430,30 @@
           "failed"
         ],
         "title": "StabilityStatus"
+      },
+      "SuggestedQuestionsUpdate": {
+        "properties": {
+          "side": {
+            "type": "string",
+            "title": "Side",
+            "description": "Argument side (prosecution/defense/claimant/respondent)"
+          },
+          "questions": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Questions",
+            "description": "Full replacement question list"
+          }
+        },
+        "type": "object",
+        "required": [
+          "side",
+          "questions"
+        ],
+        "title": "SuggestedQuestionsUpdate"
       },
       "SupplementaryUploadResponse": {
         "properties": {
@@ -10892,120 +9823,6 @@
         ],
         "title": "VectorStoreStatus"
       },
-      "VerdictResponse": {
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Id"
-          },
-          "recommendation_type": {
-            "$ref": "#/components/schemas/RecommendationType",
-            "description": "Type of recommendation"
-          },
-          "recommended_outcome": {
-            "type": "string",
-            "title": "Recommended Outcome",
-            "description": "Recommended outcome text"
-          },
-          "sentence": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Sentence",
-            "description": "Traffic sentence details"
-          },
-          "confidence_score": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Confidence Score",
-            "description": "Confidence score (0-100)"
-          },
-          "alternative_outcomes": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Alternative Outcomes",
-            "description": "Alternative outcomes and pivot factors"
-          },
-          "fairness_report": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Fairness Report",
-            "description": "Structured fairness and bias audit"
-          },
-          "amendment_of": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Amendment Of",
-            "description": "Previous verdict in the amendment chain"
-          },
-          "amendment_reason": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Amendment Reason",
-            "description": "Reason for the amendment"
-          },
-          "amended_by": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Amended By",
-            "description": "Judge who amended the verdict"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "recommendation_type",
-          "recommended_outcome"
-        ],
-        "title": "VerdictResponse"
-      },
       "WeakEvidenceItem": {
         "properties": {
           "id": {
@@ -11330,65 +10147,6 @@
           "name"
         ],
         "title": "WitnessResponse"
-      },
-      "WorkflowHistoryEntryResponse": {
-        "properties": {
-          "action": {
-            "type": "string",
-            "title": "Action"
-          },
-          "reason": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reason"
-          },
-          "actor": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Actor"
-          },
-          "created_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Created At"
-          },
-          "details": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Details"
-          }
-        },
-        "type": "object",
-        "required": [
-          "action"
-        ],
-        "title": "WorkflowHistoryEntryResponse"
       }
     },
     "securitySchemes": {
@@ -11408,10 +10166,6 @@
     {
       "name": "cases",
       "description": "CRUD operations for judicial cases. Role-based access: clerks and judges create cases; admins see all."
-    },
-    {
-      "name": "decisions",
-      "description": "Judge decision recording (accept, modify, or reject). Cases must be in `ready_for_review` status."
     },
     {
       "name": "what-if",
@@ -11435,7 +10189,7 @@
     },
     {
       "name": "hearing-pack",
-      "description": "Generate a hearing preparation pack (summary, evidence, arguments, verdict)."
+      "description": "Generate a hearing preparation pack (summary, evidence, arguments, and analysis)."
     },
     {
       "name": "reopen-requests",

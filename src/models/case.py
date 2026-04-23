@@ -36,8 +36,6 @@ class CaseStatus(str, enum.Enum):
     pending = "pending"
     processing = "processing"
     ready_for_review = "ready_for_review"
-    decided = "decided"
-    rejected = "rejected"
     escalated = "escalated"
     closed = "closed"
     failed = "failed"
@@ -45,6 +43,12 @@ class CaseStatus(str, enum.Enum):
     # past its threshold — typically because the broker dropped its in-flight
     # message. The frontend surfaces this as "Pipeline interrupted, retry?"
     failed_retryable = "failed_retryable"
+    # Gate pause statuses — set after each gate group completes; judge must
+    # approve or re-run before the pipeline advances to the next gate.
+    awaiting_review_gate1 = "awaiting_review_gate1"
+    awaiting_review_gate2 = "awaiting_review_gate2"
+    awaiting_review_gate3 = "awaiting_review_gate3"
+    awaiting_review_gate4 = "awaiting_review_gate4"
 
 
 class CaseComplexity(str, enum.Enum):
@@ -104,16 +108,6 @@ class ArgumentSide(str, enum.Enum):
     respondent = "respondent"
 
 
-class RecommendationType(str, enum.Enum):
-    compensation = "compensation"
-    repair = "repair"
-    dismiss = "dismiss"
-    guilty = "guilty"
-    not_guilty = "not_guilty"
-    reduced = "reduced"
-    manual_decision = "manual_decision"
-
-
 class ReopenRequestStatus(str, enum.Enum):
     pending = "pending"
     approved = "approved"
@@ -148,6 +142,8 @@ class Case(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # of a successful run; read by what_if/stability to load the real
     # CaseState from pipeline_checkpoints rather than synthesizing an empty one.
     latest_run_id: Mapped[str | None] = mapped_column(String(36))
+    gate_state: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    judicial_decision: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_by: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
     )
@@ -174,16 +170,13 @@ class Case(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     arguments: Mapped[list[Argument]] = relationship(
         back_populates="case", cascade="all, delete-orphan"
     )
-    deliberations: Mapped[list[Deliberation]] = relationship(
+    hearing_analyses: Mapped[list[HearingAnalysis]] = relationship(
         back_populates="case", cascade="all, delete-orphan"
     )
     hearing_notes: Mapped[list[HearingNote]] = relationship(
         back_populates="case", cascade="all, delete-orphan"
     )
     reopen_requests: Mapped[list[ReopenRequest]] = relationship(
-        back_populates="case", cascade="all, delete-orphan"
-    )
-    verdicts: Mapped[list[Verdict]] = relationship(
         back_populates="case", cascade="all, delete-orphan"
     )
     audit_logs: Mapped[list[AuditLog]] = relationship(
@@ -214,6 +207,7 @@ class Document(UUIDPrimaryKeyMixin, Base):
     openai_file_id: Mapped[str | None] = mapped_column(String(255))
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
     file_type: Mapped[str | None] = mapped_column(String(100))
+    pages: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     uploaded_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id")
     )
@@ -329,8 +323,8 @@ class Argument(UUIDPrimaryKeyMixin, Base):
     case: Mapped[Case] = relationship(back_populates="arguments")
 
 
-class Deliberation(UUIDPrimaryKeyMixin, Base):
-    __tablename__ = "deliberations"
+class HearingAnalysis(UUIDPrimaryKeyMixin, Base):
+    __tablename__ = "hearing_analyses"
 
     case_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("cases.id", ondelete="CASCADE"), nullable=False
@@ -340,31 +334,7 @@ class Deliberation(UUIDPrimaryKeyMixin, Base):
     uncertainty_flags: Mapped[dict | None] = mapped_column(JSONB)
     confidence_score: Mapped[int | None] = mapped_column(Integer)
 
-    case: Mapped[Case] = relationship(back_populates="deliberations")
-
-
-class Verdict(UUIDPrimaryKeyMixin, Base):
-    __tablename__ = "verdicts"
-
-    case_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("cases.id", ondelete="CASCADE"), nullable=False
-    )
-    recommendation_type: Mapped[RecommendationType] = mapped_column(
-        Enum(RecommendationType), nullable=False
-    )
-    recommended_outcome: Mapped[str] = mapped_column(Text, nullable=False)
-    sentence: Mapped[dict | None] = mapped_column(JSONB)
-    confidence_score: Mapped[int | None] = mapped_column(Integer)
-    alternative_outcomes: Mapped[dict | None] = mapped_column(JSONB)
-    fairness_report: Mapped[dict | None] = mapped_column(JSONB)
-    amendment_of: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("verdicts.id")
-    )
-    amendment_reason: Mapped[str | None] = mapped_column(Text)
-    amended_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
-
-    case: Mapped[Case] = relationship(back_populates="verdicts")
-    amended_by_user: Mapped[User | None] = relationship(foreign_keys=[amended_by])
+    case: Mapped[Case] = relationship(back_populates="hearing_analyses")
 
 
 class HearingNote(UUIDPrimaryKeyMixin, Base):

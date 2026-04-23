@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 # checkpoint rows. Checkpoints persisted at a different version are rejected
 # by `load_case_state` so callers fail loud rather than silently proceeding
 # with a partially-decoded state.
-CURRENT_SCHEMA_VERSION = 1
+CURRENT_SCHEMA_VERSION = 2
 
 
 class CheckpointSchemaMismatchError(RuntimeError):

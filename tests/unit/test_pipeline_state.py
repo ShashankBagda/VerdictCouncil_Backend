@@ -66,13 +66,10 @@ async def test_load_case_state_round_trips_a_valid_row():
     original = CaseState(
         case_id=str(case_id),
         run_id="run-1",
-        status=CaseStatusEnum.decided,
-        verdict_recommendation={
-            "recommendation_type": "compensation",
-            "recommended_outcome": "x",
+        status=CaseStatusEnum.ready_for_review,
+        hearing_analysis={
+            "preliminary_conclusion": "Balance of evidence favours claimant.",
             "confidence_score": 70,
-            "reasoning": "test",
-            "alternative_outcomes": [],
         },
     )
     payload = json.loads(original.model_dump_json())
@@ -83,9 +80,9 @@ async def test_load_case_state_round_trips_a_valid_row():
     assert loaded is not None
     assert loaded.case_id == str(case_id)
     assert loaded.run_id == "run-1"
-    assert loaded.status == CaseStatusEnum.decided
-    assert loaded.verdict_recommendation.recommendation_type == "compensation"
-    assert loaded.verdict_recommendation.recommended_outcome == "x"
+    assert loaded.status == CaseStatusEnum.ready_for_review
+    assert loaded.hearing_analysis.preliminary_conclusion == "Balance of evidence favours claimant."
+    assert loaded.hearing_analysis.confidence_score == 70
 
 
 @pytest.mark.asyncio

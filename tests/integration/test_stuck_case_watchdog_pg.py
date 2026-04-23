@@ -110,7 +110,7 @@ class TestStuckCaseWatchdogIntegration:
         async with async_session() as session:
             user = await _make_user(session)
             old = datetime.now(UTC) - timedelta(hours=2)
-            done = await _make_case(session, user.id, status=CaseStatus.decided, created_at=old)
+            done = await _make_case(session, user.id, status=CaseStatus.closed, created_at=old)
             await session.commit()
 
             try:
@@ -118,7 +118,7 @@ class TestStuckCaseWatchdogIntegration:
                 assert str(done.id) not in marked
 
                 refreshed = await session.get(Case, done.id)
-                assert refreshed.status == CaseStatus.decided
+                assert refreshed.status == CaseStatus.closed
             finally:
                 await session.execute(text("DELETE FROM cases WHERE id = :i"), {"i": done.id})
                 await session.execute(text("DELETE FROM users WHERE id = :i"), {"i": user.id})

@@ -22,11 +22,6 @@ OPENAPI_TAGS = [
         "Role-based access: clerks and judges create cases; admins see all.",
     },
     {
-        "name": "decisions",
-        "description": "Judge decision recording (accept, modify, or reject). "
-        "Cases must be in `ready_for_review` status.",
-    },
-    {
         "name": "what-if",
         "description": "Contestable Judgment Mode: submit hypothetical case modifications "
         "and measure verdict stability via perturbation analysis.",
@@ -53,7 +48,7 @@ OPENAPI_TAGS = [
     {
         "name": "hearing-pack",
         "description": (
-            "Generate a hearing preparation pack (summary, evidence, arguments, verdict)."
+            "Generate a hearing preparation pack (summary, evidence, arguments, and analysis)."
         ),
     },
     {
@@ -131,11 +126,11 @@ def create_app() -> FastAPI:
         lifespan=_lifespan,
         title="VerdictCouncil API",
         version="0.1.0",
-        summary="Judicial AI decision-support system with 9-agent pipeline",
+        summary="Judicial hearing support system with 9-agent AI analysis pipeline",
         description=(
             "VerdictCouncil processes judicial cases through a multi-agent pipeline "
             "covering case intake, evidence analysis, fact reconstruction, legal knowledge, "
-            "argument construction, deliberation, and verdict generation.\n\n"
+            "argument construction, and hearing analysis.\n\n"
             "**Authentication:** Cookie-based JWT. Call `POST /api/v1/auth/login` "
             "to receive an httpOnly `vc_token` cookie.\n\n"
             "**Note:** Swagger UI does not support cookie-based auth for interactive "
@@ -168,8 +163,7 @@ def create_app() -> FastAPI:
         case_data,
         cases,
         dashboard,
-        decisions,
-        escalation,
+        documents,
         health,
         hearing_notes,
         hearing_pack,
@@ -177,14 +171,12 @@ def create_app() -> FastAPI:
         knowledge_base,
         precedent_search,
         reopen_requests,
-        senior_inbox,
         what_if,
     )
 
     app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
     app.include_router(cases.router, prefix="/api/v1/cases", tags=["cases"])
     app.include_router(case_data.router, prefix="/api/v1/cases", tags=["cases"])
-    app.include_router(decisions.router, prefix="/api/v1/cases", tags=["decisions"])
     app.include_router(what_if.router, prefix="/api/v1/cases", tags=["what-if"])
     app.include_router(judge.router, prefix="/api/v1/cases", tags=["judge"])
     app.include_router(hearing_notes.router, prefix="/api/v1/cases", tags=["hearing-notes"])
@@ -199,8 +191,7 @@ def create_app() -> FastAPI:
     app.include_router(
         knowledge_base.router, prefix="/api/v1/knowledge-base", tags=["knowledge-base"]
     )
-    app.include_router(escalation.router, prefix="/api/v1/escalated-cases", tags=["escalation"])
-    app.include_router(senior_inbox.router, prefix="/api/v1/senior-inbox", tags=["senior-inbox"])
+    app.include_router(documents.router, prefix="/api/v1/documents", tags=["documents"])
     app.include_router(admin.router, prefix="/api/v1/admin", tags=["admin"])
 
     # Prometheus-compatible metrics (excluded from OpenAPI spec)
