@@ -546,12 +546,22 @@ async def create_case_draft(
     )
     db.add(case)
     await db.flush()
-    # Eager-load the collections _serialize_case_summary touches. A draft has
-    # no parties/documents/reopens yet, but the serializer walks the lazy
-    # relationships; without an explicit refresh they try to emit an async
-    # SELECT through SQLAlchemy's sync adapter and blow up with
-    # MissingGreenlet.
-    await db.refresh(case, ["parties", "documents", "reopen_requests"])
+    # _serialize_case_summary + _build_jurisdiction_summary +
+    # _extract_escalation_reason + _build_pipeline_progress walk six lazy
+    # relationships. On the legacy create path ≥2 parties are always
+    # populated in session memory, so `case.parties` never lazy-loads —
+    # but `case.facts`, `case.audit_logs`, etc. still would. The old path
+    # gets away with it because those collections are only touched if
+    # facts/audit rows exist, which for a freshly-created case is always
+    # empty and returns fast from the ORM's null-marker path (not a real
+    # query). For a draft created with NO parties, the very first
+    # relationship access trips the greenlet wall before any of that
+    # happy-path short-circuiting kicks in. Refresh them all so the
+    # collections materialise as real (empty) lists.
+    await db.refresh(
+        case,
+        ["parties", "documents", "reopen_requests", "facts", "audit_logs"],
+    )
     if case.domain_id:
         await db.refresh(case, ["domain_ref"])
     return _serialize_case_summary(case)
@@ -635,9 +645,13 @@ async def confirm_case_intake(
 
     await db.commit()
     # Same trap as create_case_draft — the serializer walks lazy collections.
-    # The parties we just appended are in session memory, but documents and
-    # reopen_requests still need an explicit refresh to avoid MissingGreenlet.
-    await db.refresh(case, ["parties", "documents", "reopen_requests"])
+    # The parties we just appended live in session memory, but documents,
+    # facts, reopen_requests and audit_logs still need an explicit refresh
+    # to avoid MissingGreenlet.
+    await db.refresh(
+        case,
+        ["parties", "documents", "reopen_requests", "facts", "audit_logs"],
+    )
     if case.domain_id:
         await db.refresh(case, ["domain_ref"])
 
