@@ -45,7 +45,7 @@ async def test_happy_path_returns_results():
 
     with (
         patch("src.tools.vector_store_fallback.settings") as mock_settings,
-        patch("src.tools.vector_store_fallback.AsyncOpenAI", return_value=mock_client),
+        patch("src.tools.vector_store_fallback._get_client", return_value=mock_client),
     ):
         mock_settings.openai_vector_store_id = "vs_global"
         mock_settings.openai_api_key = "test-key"
@@ -74,7 +74,7 @@ async def test_results_tagged_with_source():
 
     with (
         patch("src.tools.vector_store_fallback.settings") as mock_settings,
-        patch("src.tools.vector_store_fallback.AsyncOpenAI", return_value=mock_client),
+        patch("src.tools.vector_store_fallback._get_client", return_value=mock_client),
     ):
         mock_settings.openai_api_key = "test-key"
         mock_settings.openai_model_lightweight = "gpt-4o-mini"
@@ -98,7 +98,7 @@ async def test_empty_results():
 
     with (
         patch("src.tools.vector_store_fallback.settings") as mock_settings,
-        patch("src.tools.vector_store_fallback.AsyncOpenAI", return_value=mock_client),
+        patch("src.tools.vector_store_fallback._get_client", return_value=mock_client),
     ):
         mock_settings.openai_api_key = "test-key"
         mock_settings.openai_model_lightweight = "gpt-4o-mini"
@@ -131,7 +131,7 @@ async def test_api_error_raises_vector_store_error():
 
     with (
         patch("src.tools.vector_store_fallback.settings") as mock_settings,
-        patch("src.tools.vector_store_fallback.AsyncOpenAI", return_value=mock_client),
+        patch("src.tools.vector_store_fallback._get_client", return_value=mock_client),
     ):
         mock_settings.openai_api_key = "test-key"
         mock_settings.openai_model_lightweight = "gpt-4o-mini"

@@ -67,7 +67,7 @@ async def test_search_domain_guidance_raises_on_none_vector_store_id():
 async def test_fail_closed_does_not_call_openai():
     """When vector_store_id is empty, OpenAI must not be called — no network on fail-closed."""
     mock_client = _mock_openai_client()
-    with patch("src.tools.search_domain_guidance.AsyncOpenAI", return_value=mock_client):
+    with patch("src.tools.search_domain_guidance._get_client", return_value=mock_client):
         with pytest.raises(DomainGuidanceUnavailable):
             await search_domain_guidance("query", vector_store_id="")
     mock_client.responses.create.assert_not_awaited()
@@ -90,7 +90,7 @@ async def test_search_domain_guidance_returns_structured_results():
     mock_client = _mock_openai_client(response)
 
     with (
-        patch("src.tools.search_domain_guidance.AsyncOpenAI", return_value=mock_client),
+        patch("src.tools.search_domain_guidance._get_client", return_value=mock_client),
         patch("src.tools.search_domain_guidance.settings") as mock_settings,
     ):
         mock_settings.openai_api_key = "test-key"
@@ -111,7 +111,7 @@ async def test_search_domain_guidance_uses_provided_vector_store_id():
     mock_client = _mock_openai_client(response)
 
     with (
-        patch("src.tools.search_domain_guidance.AsyncOpenAI", return_value=mock_client),
+        patch("src.tools.search_domain_guidance._get_client", return_value=mock_client),
         patch("src.tools.search_domain_guidance.settings") as mock_settings,
     ):
         mock_settings.openai_api_key = "test-key"
@@ -147,7 +147,7 @@ async def test_domain_a_store_id_does_not_retrieve_domain_b_sentinel():
     domain_b_store = "vs_domain_b_store"
 
     with (
-        patch("src.tools.search_domain_guidance.AsyncOpenAI", return_value=mock_client),
+        patch("src.tools.search_domain_guidance._get_client", return_value=mock_client),
         patch("src.tools.search_domain_guidance.settings") as mock_settings,
     ):
         mock_settings.openai_api_key = "test-key"
@@ -182,7 +182,7 @@ async def test_openai_api_error_raises_domain_guidance_unavailable():
     )
 
     with (
-        patch("src.tools.search_domain_guidance.AsyncOpenAI", return_value=mock_client),
+        patch("src.tools.search_domain_guidance._get_client", return_value=mock_client),
         patch("src.tools.search_domain_guidance.settings") as mock_settings,
     ):
         mock_settings.openai_api_key = "test-key"
@@ -205,7 +205,7 @@ async def test_search_domain_guidance_respects_max_results():
     mock_client = _mock_openai_client(response)
 
     with (
-        patch("src.tools.search_domain_guidance.AsyncOpenAI", return_value=mock_client),
+        patch("src.tools.search_domain_guidance._get_client", return_value=mock_client),
         patch("src.tools.search_domain_guidance.settings") as mock_settings,
     ):
         mock_settings.openai_api_key = "test-key"

@@ -17,6 +17,15 @@ from src.tools.exceptions import DomainGuidanceUnavailable
 
 logger = logging.getLogger(__name__)
 
+_client: AsyncOpenAI | None = None
+
+
+def _get_client() -> AsyncOpenAI:
+    global _client
+    if _client is None:
+        _client = AsyncOpenAI(api_key=settings.openai_api_key)
+    return _client
+
 
 async def search_domain_guidance(
     query: str,
@@ -43,7 +52,7 @@ async def search_domain_guidance(
         raise DomainGuidanceUnavailable("Domain has no provisioned vector store")
 
     try:
-        client = AsyncOpenAI(api_key=settings.openai_api_key)
+        client = _get_client()
 
         response = await client.responses.create(
             model=settings.openai_model_lightweight,

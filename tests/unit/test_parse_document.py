@@ -18,11 +18,11 @@ def _make_file_info(filename="contract.pdf", content_type="application/pdf"):
     return info
 
 
-def _make_chat_response(payload: dict):
-    """Build a mock ChatCompletion response wrapping *payload* as JSON."""
-    message = SimpleNamespace(content=json.dumps(payload))
-    choice = SimpleNamespace(message=message)
-    return SimpleNamespace(choices=[choice])
+def _make_responses_response(payload: dict):
+    """Build a mock Responses API response with output_text as JSON."""
+    resp = SimpleNamespace()
+    resp.output_text = json.dumps(payload)
+    return resp
 
 
 @pytest.fixture
@@ -30,8 +30,7 @@ def _openai_client():
     """Yield a fully mocked AsyncOpenAI client."""
     client = AsyncMock(spec=openai.AsyncOpenAI)
     client.files = AsyncMock()
-    client.chat = AsyncMock()
-    client.chat.completions = AsyncMock()
+    client.responses = AsyncMock()
     return client
 
 
@@ -57,9 +56,9 @@ async def test_happy_path_returns_expected_structure(_openai_client):
         "page_count": 1,
         "word_count": 10,
     }
-    client.chat.completions.create = AsyncMock(return_value=_make_chat_response(api_payload))
+    client.responses.create = AsyncMock(return_value=_make_responses_response(api_payload))
 
-    with patch("src.tools.parse_document.openai.AsyncOpenAI", return_value=client):
+    with patch("src.tools.parse_document._get_client", return_value=client):
         result = await parse_document("file-abc123")
 
     assert result["file_id"] == "file-abc123"
@@ -89,7 +88,7 @@ async def test_invalid_file_id_raises_document_parse_error(_openai_client):
     )
 
     with (
-        patch("src.tools.parse_document.openai.AsyncOpenAI", return_value=client),
+        patch("src.tools.parse_document._get_client", return_value=client),
         pytest.raises(DocumentParseError, match="Failed to retrieve file metadata"),
     ):
         await parse_document("file-nonexistent")
@@ -105,10 +104,10 @@ async def test_empty_content_raises_error(_openai_client):
     client.files.retrieve = AsyncMock(return_value=_make_file_info())
 
     api_payload = {"text": "   ", "pages": [], "tables": [], "page_count": 0, "word_count": 0}
-    client.chat.completions.create = AsyncMock(return_value=_make_chat_response(api_payload))
+    client.responses.create = AsyncMock(return_value=_make_responses_response(api_payload))
 
     with (
-        patch("src.tools.parse_document.openai.AsyncOpenAI", return_value=client),
+        patch("src.tools.parse_document._get_client", return_value=client),
         pytest.raises(DocumentParseError, match="No text content extracted"),
     ):
         await parse_document("file-empty")
@@ -131,9 +130,9 @@ async def test_sanitization_strips_injection_patterns(_openai_client):
         "page_count": 1,
         "word_count": 5,
     }
-    client.chat.completions.create = AsyncMock(return_value=_make_chat_response(api_payload))
+    client.responses.create = AsyncMock(return_value=_make_responses_response(api_payload))
 
-    with patch("src.tools.parse_document.openai.AsyncOpenAI", return_value=client):
+    with patch("src.tools.parse_document._get_client", return_value=client):
         result = await parse_document("file-inject")
 
     assert "<|im_start|>" not in result["text"]
