@@ -662,10 +662,9 @@ async def confirm_case_intake(
         )
 
     await db.commit()
-    # Same trap as create_case_draft — the serializer walks lazy collections.
-    # The parties we just appended live in session memory, but documents,
-    # facts, reopen_requests and audit_logs still need an explicit refresh
-    # to avoid MissingGreenlet.
+    # commit() expires all ORM attributes. Refresh scalars first, then the
+    # lazy collections the serializer walks, to avoid MissingGreenlet.
+    await db.refresh(case)
     await db.refresh(
         case,
         ["parties", "documents", "reopen_requests", "facts", "audit_logs"],

@@ -25,12 +25,6 @@ from src.models.case import (
     PrecedentSource,
 )
 
-# Traffic-court offence codes are not a closed set in Singapore practice
-# (s64, 65, 65AA, 65B, 67, 67(1)(b), 68, 69, and more appear on charge sheets),
-# and sitting judges know the codes by heart. Validate format only; never reject
-# on an allow-list that will inevitably drift from the statute book.
-_OFFENCE_CODE_RE = r"^[A-Za-z0-9().\-/ ]+$"
-
 
 class CasePartyCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
@@ -132,9 +126,7 @@ class CaseConfirmRequest(BaseModel):
     parties: list[CasePartyCreateRequest] = Field(default_factory=list)
     claim_amount: float | None = Field(default=None, ge=0)
     consent_to_higher_claim_limit: bool = Field(default=False)
-    offence_code: str | None = Field(
-        default=None, max_length=100, pattern=_OFFENCE_CODE_RE
-    )
+    offence_code: str | None = Field(default=None, max_length=100)
 
     @model_validator(mode="after")
     def validate_parties_min(self) -> CaseConfirmRequest:
