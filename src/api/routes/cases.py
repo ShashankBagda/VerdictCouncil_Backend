@@ -580,7 +580,25 @@ async def confirm_case_intake(
     db: DBSession,
     current_user: User = require_role(UserRole.judge),
 ) -> dict[str, Any]:
-    case = await db.get(Case, case_id)
+    # Eager-load every collection we'll touch before returning: parties
+    # (mutated below), plus the relationships the summary serializer walks
+    # (documents, facts, reopen_requests, audit_logs, domain_ref). Without
+    # selectinload, `case.parties` would lazy-load, which triggers an
+    # autoflush — and with dirty scalar attributes already pending on the
+    # session that flush hits asyncpg outside an active greenlet and 500s.
+    result = await db.execute(
+        select(Case)
+        .where(Case.id == case_id)
+        .options(
+            selectinload(Case.parties),
+            selectinload(Case.documents),
+            selectinload(Case.facts),
+            selectinload(Case.reopen_requests),
+            selectinload(Case.audit_logs),
+            selectinload(Case.domain_ref),
+        )
+    )
+    case = result.scalar_one_or_none()
     if case is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
     if case.created_by != current_user.id:
