@@ -1,4 +1,4 @@
-.PHONY: install lint typecheck test migrate infra-up infra-down solace-bootstrap dev clean openapi-snapshot openapi-check smoke-contract
+.PHONY: install lint typecheck test migrate reset-db infra-up infra-down solace-bootstrap dev clean openapi-snapshot openapi-check smoke-contract
 
 install: ## Install dependencies
 	python3.12 -m venv .venv
@@ -24,6 +24,9 @@ test-cov: ## Run tests with coverage
 
 migrate: ## Run database migrations
 	.venv/bin/python -m alembic upgrade head
+
+reset-db: ## Wipe and recreate schema from models, then stamp alembic to head
+	.venv/bin/python -m scripts.reset_db
 
 infra-up: ## Start local infrastructure (PostgreSQL, Redis, Solace)
 	docker compose -f docker-compose.infra.yml up -d

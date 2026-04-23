@@ -51,7 +51,7 @@ services:
     image: ghcr.io/mlflow/mlflow:v2.18.0
     container_name: vc-mlflow
     ports:
-      - "5000:5000"
+      - "5001:5000"
     volumes:
       - mlflow-data:/mlflow
     command: >
