@@ -50,6 +50,10 @@ SEARCH_PRECEDENTS_SCHEMA: dict[str, Any] = {
             "type": "STRING",
             "description": "Legal domain: 'small_claims' | 'traffic'",
         },
+        "vector_store_id": {
+            "type": "STRING",
+            "description": "Domain vector store ID for the PAIR circuit-breaker fallback (injected by runner)",
+        },
         "max_results": {
             "type": "INTEGER",
             "description": "Maximum number of precedents to return",
@@ -102,18 +106,23 @@ class SearchPrecedentsTool:
     ) -> Any:
         """Execute the search_precedents tool with the given arguments.
 
-        Args:
-            args: Dictionary of keyword arguments matching the parameters_schema.
-            tool_context: Optional SAM tool context (unused).
+        Args-first / state-fallback for vector_store_id (D11):
+        1. Use vector_store_id from args if provided (in-process path).
+        2. Fall back to tool_context.state["domain_vector_store_id"] (mesh path).
+        3. If absent, proceed without it (PAIR is PAIR-primary; fallback uses allow_global_fallback).
 
-        Returns:
-            List of precedent dicts from the PAIR Search API. Source
-            metadata (pair_status, source_failed, fallback_used) is
-            stashed on tool_context.state under PRECEDENT_META_STATE_KEY
-            when a context is provided, so the orchestrator can lift it
-            into CaseState.precedent_source_metadata.
+        Source metadata is stashed on tool_context.state under PRECEDENT_META_STATE_KEY
+        so the orchestrator can lift it into CaseState.precedent_source_metadata.
         """
         from src.tools.search_precedents import search_precedents_with_meta
+
+        # Args-first / state-fallback
+        if "vector_store_id" not in args or not args.get("vector_store_id"):
+            state = getattr(tool_context, "state", None)
+            if isinstance(state, dict):
+                vsid = state.get("domain_vector_store_id")
+                if vsid:
+                    args = {**args, "vector_store_id": vsid}
 
         search_result = await search_precedents_with_meta(**args)
 

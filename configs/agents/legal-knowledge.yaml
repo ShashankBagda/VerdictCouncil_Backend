@@ -28,8 +28,9 @@ apps:
 
         PART A - STATUTORY RULES:
         1. Formulate semantic queries from the case facts and dispute issues.
-        2. Use search_precedents to retrieve relevant statutes and regulations.
-        3. For each rule: statute name, section, verbatim text, relevance score, and how it applies to the specific case facts.
+        2. Use search_domain_guidance to retrieve domain-specific statutes, practice directions, and bench books from the curated domain knowledge base.
+        3. Use search_precedents to supplement with PAIR Search API higher-court authority.
+        4. For each rule: statute name, section, verbatim text, relevance score, and how it applies to the specific case facts.
 
         KNOWLEDGE BASE (by domain):
           SCT: Small Claims Tribunals Act, Consumer Protection (Fair Trading) Act, Sale of Goods Act, Supply of Services Act.
@@ -157,4 +158,8 @@ apps:
         - tool_type: dynamic
           class_name: SearchPrecedentsTool
           component_module: src.tools.sam.search_precedents_tool
+          component_base_path: /app
+        - tool_type: dynamic
+          class_name: SearchDomainGuidanceTool
+          component_module: src.tools.sam.search_domain_guidance_tool
           component_base_path: /app

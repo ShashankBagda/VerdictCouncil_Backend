@@ -21,6 +21,8 @@ from src.shared.audit import append_audit_entry
 from src.shared.case_state import CaseState, CaseStatusEnum
 from src.shared.config import settings
 from src.shared.validation import FieldOwnershipError, validate_field_ownership
+from src.tools.exceptions import CriticalToolFailure, DegradableToolError
+from src.tools.search_precedents import PrecedentSearchError  # noqa: F401 — register as degradable
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +54,7 @@ AGENT_TOOLS: dict[str, list[str]] = {
     "evidence-analysis": ["parse_document", "cross_reference"],
     "fact-reconstruction": ["timeline_construct"],
     "witness-analysis": ["generate_questions"],
-    "legal-knowledge": ["search_precedents"],
+    "legal-knowledge": ["search_precedents", "search_domain_guidance"],
     "argument-construction": ["confidence_calc"],
     "hearing-analysis": [],
     "hearing-governance": [],
@@ -209,6 +211,10 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
                         "type": "string",
                         "description": "Legal domain: 'small_claims' | 'traffic'",
                     },
+                    "vector_store_id": {
+                        "type": "string",
+                        "description": "Domain vector store ID (injected by runner; do not set)",
+                    },
                     "max_results": {
                         "type": "integer",
                         "description": "Maximum number of precedents to return",
@@ -216,6 +222,35 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
                     },
                 },
                 "required": ["query", "domain"],
+            },
+        },
+    },
+    "search_domain_guidance": {
+        "type": "function",
+        "function": {
+            "name": "search_domain_guidance",
+            "description": (
+                "Query the domain's curated knowledge base for statutes, practice directions, "
+                "bench books, and procedural rules. Domain-scoped — always hits the correct corpus."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Semantic query for guidance content",
+                    },
+                    "vector_store_id": {
+                        "type": "string",
+                        "description": "Domain vector store ID (injected by runner; do not set)",
+                    },
+                    "max_results": {
+                        "type": "integer",
+                        "description": "Maximum number of results to return",
+                        "default": 5,
+                    },
+                },
+                "required": ["query", "vector_store_id"],
             },
         },
     },
@@ -366,6 +401,11 @@ class PipelineRunner:
         self._config_cache: dict[str, dict[str, Any]] = {}
         self._pending_precedent_meta: dict[str, Any] | None = None
         self._document_pages_buffer: dict[str, list[str]] = {}  # openai_file_id → page texts
+        self._state_pages_cache: dict[str, list] = {}  # openai_file_id → pages from DB (D13)
+
+    def _get_cached_pages(self, file_id: str) -> list | None:
+        """Return pages from DB-hydrated state if available. None means cache miss."""
+        return self._state_pages_cache.get(file_id)
 
     @staticmethod
     def _parse_sam_yaml(raw: dict[str, Any]) -> dict[str, Any]:
@@ -469,14 +509,19 @@ class PipelineRunner:
             if tool_name == "parse_document":
                 from src.tools import parse_document
 
-                with tool_span("tool.parse_document", inputs={"args": list(arguments.keys())}):
-                    result = await parse_document(**arguments)
-                # Capture page texts for later DB write (US-008 citation drill-down)
                 file_id = arguments.get("file_id", "")
-                if file_id and isinstance(result, dict) and result.get("pages"):
-                    self._document_pages_buffer[file_id] = [
-                        p.get("text", "") for p in result["pages"]
-                    ]
+                # D13: return cached pages from state to skip redundant OpenAI call
+                cached_pages = self._get_cached_pages(file_id)
+                if cached_pages is not None:
+                    result = {"file_id": file_id, "pages": cached_pages}
+                else:
+                    with tool_span("tool.parse_document", inputs={"args": list(arguments.keys())}):
+                        result = await parse_document(**arguments)
+                    # Capture page texts for later DB write (US-008 citation drill-down)
+                    if file_id and isinstance(result, dict) and result.get("pages"):
+                        self._document_pages_buffer[file_id] = [
+                            p.get("text", "") for p in result["pages"]
+                        ]
             elif tool_name == "cross_reference":
                 from src.tools import cross_reference
 
@@ -503,15 +548,27 @@ class PipelineRunner:
                     self._pending_precedent_meta["pair_status"] = search_result.metadata.get(
                         "pair_status", self._pending_precedent_meta.get("pair_status")
                     )
+            elif tool_name == "search_domain_guidance":
+                from src.tools.search_domain_guidance import search_domain_guidance
+
+                with tool_span(
+                    "tool.search_domain_guidance", inputs={"args": list(arguments.keys())}
+                ):
+                    result = await search_domain_guidance(**arguments)
             elif tool_name == "confidence_calc":
                 from src.tools import confidence_calc
 
                 result = confidence_calc(**arguments)
             else:
                 result = {"error": f"Unknown tool: {tool_name}"}
-        except Exception as exc:
-            logger.exception("Tool call failed: %s", tool_name)
+        except CriticalToolFailure:
+            raise  # Bubble to _run_agent; gate marks case failed_retryable
+        except DegradableToolError as exc:
+            logger.warning("Degradable tool failure in %s: %s", tool_name, exc)
             result = {"error": str(exc)}
+        except Exception:
+            logger.exception("Unhandled tool error in %s — failing gate", tool_name)
+            raise  # Anything unexpected fails the gate, not the model's context
 
         return json.dumps(result, default=str)
 
@@ -522,6 +579,12 @@ class PipelineRunner:
         extra_instructions: str | None = None,
     ) -> CaseState:
         """Run a single agent step: call LLM, parse response, update state."""
+        # D13: Refresh pages cache from current state's raw_documents
+        self._state_pages_cache = {
+            d["openai_file_id"]: d["pages"]
+            for d in state.raw_documents
+            if d.get("openai_file_id") and d.get("pages")
+        }
         config = self._load_agent_config(agent_name)
         model = self._resolve_model(config)
         system_prompt = config.get("instruction", "")
@@ -567,6 +630,10 @@ class PipelineRunner:
             for tool_call in choice.message.tool_calls:
                 fn_name = tool_call.function.name
                 fn_args = json.loads(tool_call.function.arguments)
+                # Inject domain vector store id for retrieval tools (§5e)
+                if fn_name in ("search_precedents", "search_domain_guidance"):
+                    if state.domain_vector_store_id and "vector_store_id" not in fn_args:
+                        fn_args = {**fn_args, "vector_store_id": state.domain_vector_store_id}
                 tool_result = await self._execute_tool_call(fn_name, fn_args)
 
                 tool_calls_log.append(

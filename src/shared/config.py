@@ -33,6 +33,12 @@ class Settings(BaseSettings):
     # Per-judge knowledge base upload limits (bytes). 25MB default keeps us
     # under the 50MB ingress limit in k8s/base/ingress.yaml.
     kb_max_upload_bytes: int = 26214400
+    # Per-domain KB upload limit (bytes). 50MB default.
+    domain_kb_max_upload_bytes: int = 52428800
+    # Per-case document upload limit (bytes). 50MB default.
+    case_doc_max_upload_bytes: int = 52428800
+    # Feature flag — upload route ships disabled until stronger sanitizer lands.
+    domain_uploads_enabled: bool = False
 
     def model_post_init(self, __context: object) -> None:
         import warnings

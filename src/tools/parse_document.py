@@ -18,6 +18,15 @@ from src.shared.sanitization import sanitize_document_content
 
 logger = logging.getLogger(__name__)
 
+_client: openai.AsyncOpenAI | None = None
+
+
+def _get_client() -> openai.AsyncOpenAI:
+    global _client
+    if _client is None:
+        _client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
+    return _client
+
 
 class DocumentParseError(Exception):
     """Raised when document parsing fails."""
@@ -34,48 +43,37 @@ async def _extract_via_openai(
     extract_tables: bool,
     ocr_enabled: bool,
 ) -> dict:
-    """Call OpenAI chat completion to extract text from a file attachment."""
+    """Call OpenAI Responses API to extract text from a file attachment."""
     table_instruction = "Also extract all tables as structured data." if extract_tables else ""
     ocr_instruction = "This may be a scanned document - use OCR." if ocr_enabled else ""
 
-    response = await client.chat.completions.create(
+    response = await client.responses.create(
         model=settings.openai_model_lightweight,
-        messages=[
+        input=[
             {
-                "role": "system",
-                "content": (
-                    "Extract all text content from the provided document. "
+                "type": "input_file",
+                "file_id": file_id,
+            },
+            {
+                "type": "input_text",
+                "text": (
+                    "Extract all text content from this document. "
                     "Preserve paragraph structure and formatting. "
                     "If the document contains tables, extract each table as a "
-                    "JSON array of rows."
+                    "JSON array of rows. "
+                    f"{table_instruction} "
+                    f"{ocr_instruction} "
+                    "Return JSON with keys: "
+                    "text (full document text), "
+                    "pages (list of objects with page_number, text, and tables), "
+                    "tables (flat list of all tables, each with page_number and rows), "
+                    "page_count, word_count."
                 ),
             },
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "file",
-                        "file": {"file_id": file_id},
-                    },
-                    {
-                        "type": "text",
-                        "text": (
-                            "Extract all text from this document. "
-                            f"{table_instruction} "
-                            f"{ocr_instruction} "
-                            "Return JSON with keys: "
-                            "text (full document text), "
-                            "pages (list of objects with page_number, text, and tables), "
-                            "tables (flat list of all tables, each with page_number and rows), "
-                            "page_count, word_count."
-                        ),
-                    },
-                ],
-            },
         ],
-        response_format={"type": "json_object"},
+        text={"format": {"type": "json_object"}},
     )
-    return json.loads(response.choices[0].message.content)
+    return json.loads(response.output_text)
 
 
 async def parse_document(
@@ -84,6 +82,15 @@ async def parse_document(
     ocr_enabled: Annotated[bool, "Whether to enable OCR for scanned documents"] = False,
 ) -> dict:
     """Parse an uploaded document via the OpenAI Files API.
+
+    D13 NOTE: The in-process pipeline runner short-circuits this call when
+    pages for `file_id` are already hydrated in CaseState.raw_documents
+    (see runner.py:_execute_tool_call / _get_cached_pages).  This function
+    is only reached on a true cache miss, or when called directly by the
+    domain-upload route (which never has state).  No `state` parameter is
+    needed here because there is no SAM DynamicTool wrapping this function
+    — the tool is `function_name: parse_document` (in-process only), so
+    the mesh path never calls it.
 
     Args:
         file_id: OpenAI File ID of the uploaded document (e.g., "file-abc123").
@@ -98,7 +105,7 @@ async def parse_document(
     Raises:
         DocumentParseError: If parsing fails or no text is extracted.
     """
-    client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
+    client = _get_client()
 
     # Retrieve file metadata
     try:
