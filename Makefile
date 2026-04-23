@@ -1,9 +1,13 @@
-.PHONY: install lint typecheck test migrate reset-db infra-up infra-down solace-bootstrap dev clean openapi-snapshot openapi-check smoke-contract
+.PHONY: install prefetch-sanitizer lint typecheck test migrate reset-db infra-up infra-down solace-bootstrap dev clean openapi-snapshot openapi-check smoke-contract
 
 install: ## Install dependencies
 	python3.12 -m venv .venv
 	.venv/bin/pip install --upgrade pip
 	.venv/bin/pip install -e ".[dev]"
+	@$(MAKE) prefetch-sanitizer || echo "warn: sanitizer model prefetch failed (no internet?). First upload will be slow."
+
+prefetch-sanitizer: ## Pre-download the llm-guard DeBERTa-v3 classifier model (~415 MB, one-time)
+	.venv/bin/python -m scripts.prefetch_sanitizer_model
 
 lint: ## Run linter
 	.venv/bin/ruff check src/ tests/
