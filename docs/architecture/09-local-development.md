@@ -72,6 +72,13 @@ REDIS_URL=redis://localhost:6379/0
 # ──────────────────────────────────────────────
 OPENAI_API_KEY=sk-proj-your-key-here
 OPENAI_VECTOR_STORE_ID=vs_your-store-id
+
+# ──────────────────────────────────────────────
+# ADK Session Database (Google Agent Development Kit)
+# Separate DB from the main app to avoid schema conflicts.
+# Created automatically by docker/postgres-init/01_create_adk_db.sql
+# ──────────────────────────────────────────────
+ADK_DATABASE_URL=postgresql://vc_dev:vc_dev_password@localhost:5432/verdictcouncil_adk
 OPENAI_MODEL_LIGHTWEIGHT=gpt-5.4-nano
 OPENAI_MODEL_EFFICIENT_REASONING=gpt-5-mini
 OPENAI_MODEL_STRONG_REASONING=gpt-5
@@ -238,8 +245,8 @@ fact-reconstruction:  .venv/bin/solace-agent-mesh run configs/agents/fact-recons
 witness-analysis:     .venv/bin/solace-agent-mesh run configs/agents/witness-analysis.yaml
 legal-knowledge:      .venv/bin/solace-agent-mesh run configs/agents/legal-knowledge.yaml
 argument-construction: .venv/bin/solace-agent-mesh run configs/agents/argument-construction.yaml
-deliberation:         .venv/bin/solace-agent-mesh run configs/agents/deliberation.yaml
-governance-verdict:   .venv/bin/solace-agent-mesh run configs/agents/governance-verdict.yaml
+hearing-analysis:     .venv/bin/solace-agent-mesh run configs/agents/hearing-analysis.yaml
+hearing-governance:   .venv/bin/solace-agent-mesh run configs/agents/hearing-governance.yaml
 layer2-aggregator:    .venv/bin/solace-agent-mesh run configs/services/layer2-aggregator.yaml
 api:                  .venv/bin/uvicorn src.api.app:app --host 0.0.0.0 --port 8001 --reload
 ```
@@ -268,7 +275,7 @@ When working on a specific agent, you only need that agent and its upstream depe
 ```bash
 # Example: working on Legal Knowledge (Agent 6)
 # Needs: infrastructure + layer2-aggregator (to receive merged CaseState)
-# Does NOT need: Layer 4 agents (deliberation, governance-verdict)
+# Does NOT need: Layer 4 agents (hearing-analysis, hearing-governance)
 
 # Start infra
 docker compose -f docker-compose.infra.yml up -d
@@ -459,18 +466,18 @@ services:
     environment: *agent-env
     depends_on: *agent-deps
 
-  deliberation:
+  hearing-analysis:
     build: .
-    container_name: vc-deliberation
-    command: ["--config", "/app/configs/agents/deliberation.yaml"]
+    container_name: vc-hearing-analysis
+    command: ["--config", "/app/configs/agents/hearing-analysis.yaml"]
     env_file: .env
     environment: *agent-env
     depends_on: *agent-deps
 
-  governance-verdict:
+  hearing-governance:
     build: .
-    container_name: vc-governance-verdict
-    command: ["--config", "/app/configs/agents/governance-verdict.yaml"]
+    container_name: vc-hearing-governance
+    command: ["--config", "/app/configs/agents/hearing-governance.yaml"]
     env_file: .env
     environment: *agent-env
     depends_on: *agent-deps
@@ -580,8 +587,8 @@ kind runs its own container runtime, so Docker images must be loaded explicitly:
 AGENTS=(
   web-gateway case-processing complexity-routing
   evidence-analysis fact-reconstruction witness-analysis
-  legal-knowledge argument-construction deliberation
-  governance-verdict layer2-aggregator
+  legal-knowledge argument-construction hearing-analysis
+  hearing-governance layer2-aggregator
 )
 
 for agent in "${AGENTS[@]}"; do
@@ -791,8 +798,8 @@ kind-up: ## Create kind cluster and load images
 	@echo "Building and loading images..."
 	@for agent in web-gateway case-processing complexity-routing \
 		evidence-analysis fact-reconstruction witness-analysis \
-		legal-knowledge argument-construction deliberation \
-		governance-verdict layer2-aggregator; do \
+		legal-knowledge argument-construction hearing-analysis \
+		hearing-governance layer2-aggregator; do \
 		docker build -t verdictcouncil/$${agent}:local -f docker/$${agent}/Dockerfile . && \
 		kind load docker-image verdictcouncil/$${agent}:local --name vc-local; \
 	done
@@ -916,6 +923,11 @@ lsof -i :6379   # Redis
 lsof -i :55556  # Solace SMF
 lsof -i :8080   # Solace SEMP (also used by many dev tools)
 lsof -i :8002   # Web Gateway
+lsof -i :5001   # MLflow (host port)
+
+# MLflow uses host port 5001 (container port 5000) because macOS Control Center
+# (AirPlay Receiver) occupies port 5000 by default. Access MLflow at
+# http://localhost:5001 — not 5000.
 
 # If 8080 is taken by another service, remap Solace SEMP:
 # In docker-compose: "8081:8080" instead of "8080:8080"
@@ -941,10 +953,18 @@ docker compose -f docker-compose.infra.yml exec postgres pg_isready -U vc_dev
 # Run migrations with verbose output
 python -m alembic upgrade head --verbose
 
-# If schema is corrupted, reset (destroys data):
+# On a FRESH database (no tables yet), use reset-db instead of migrate.
+# SQLAlchemy 2.x has a bug where _on_table_create fires even with
+# create_type=False, causing the initial migration to fail with
+# "type already exists". reset-db drops the schema, recreates from
+# Base.metadata.create_all(), and stamps alembic to head:
+make reset-db
+
+# If schema is corrupted beyond repair, wipe and recreate:
 docker compose -f docker-compose.infra.yml down -v
 docker compose -f docker-compose.infra.yml up -d postgres
-# Wait for healthy, then re-migrate
+# Wait for healthy, then:
+make reset-db
 ```
 
 ### Docker Desktop Memory Pressure

@@ -1,6 +1,6 @@
 # VerdictCouncil — Backend
 
-FastAPI + 9-agent Solace Agent Mesh (SAM) backend for VerdictCouncil, a judicial AI decision-support system for Singapore lower courts (Small Claims Tribunal and Traffic Violations cases). Judges upload case materials, run multi-agent AI analysis, and review structured verdict recommendations.
+FastAPI + 9-agent Solace Agent Mesh (SAM) backend for VerdictCouncil, a judicial AI decision-support system for Singapore lower courts (Small Claims Tribunal and Traffic Violations cases). Judges upload case materials, run multi-agent AI analysis through a 4-gate human-review pipeline, and record their own judicial decisions.
 
 ## Table of Contents
 
@@ -45,8 +45,8 @@ From the orchestration root, `./dev.sh` starts all four layers. For deeper archi
 | **witness-analysis** | Assesses witness credibility, anticipates testimony for traffic cases, and flags material inconsistencies for the Judge to resolve at hearing. |
 | **legal-knowledge** | Retrieves applicable statutes and precedents via the curated knowledge base and PAIR Search API; supplies verbatim statutory text and binding higher-court authority. |
 | **argument-construction** | Constructs balanced prosecution/defence (traffic) or claimant/respondent (SCT) arguments for judicial evaluation, noting weaknesses on both sides. |
-| **deliberation** | Judicial reasoning core. Produces a step-by-step chain from evidence to conclusion, citing every source and flagging low-confidence steps for the presiding Judge. |
-| **governance-verdict** | Final governance gate. Audits pipeline output for bias and logical gaps, then produces a structured verdict recommendation with confidence score and alternatives. |
+| **hearing-analysis** | Hearing preparation core. Produces a step-by-step reasoning chain from evidence to a preliminary conclusion at Gate 3, citing every source and flagging low-confidence steps for the presiding Judge. |
+| **hearing-governance** | Final governance gate (Gate 4). Audits the full pipeline output for bias and logical gaps, then presents a governance summary for the presiding Judge to review before recording their own decision. Does not produce a verdict recommendation. |
 
 Full YAML configurations in `configs/agents/`. See [`docs/architecture/03-agent-configurations.md`](docs/architecture/03-agent-configurations.md) for detailed configuration and tool lists.
 
@@ -100,6 +100,7 @@ Copy `.env.example` and fill in the required values. The table below covers requ
 | `SOLACE_BROKER_USERNAME` | Agent credentials user, e.g. `vc-agent` |
 | `SOLACE_BROKER_PASSWORD` | Agent credentials password |
 | `DATABASE_URL` | PostgreSQL DSN, e.g. `postgresql://vc_dev:pwd@localhost:5432/verdictcouncil` |
+| `ADK_DATABASE_URL` | PostgreSQL DSN for the Google ADK session database (separate DB), e.g. `postgresql://vc_dev:pwd@localhost:5432/verdictcouncil_adk` |
 | `REDIS_URL` | Redis DSN, e.g. `redis://localhost:6379/0` |
 | `JWT_SECRET` | Secret for signing `vc_token` cookies — use a long random string in production |
 | `COOKIE_SECURE` | `true` in production (HTTPS); `false` for local HTTP |
@@ -120,9 +121,8 @@ All application routes live under `/api/v1/*`. Auth uses cookie-based JWT — th
 | Route group | Notes |
 |-------------|-------|
 | `auth` | Login, logout, session, password-reset |
-| `cases` | CRUD, status, pipeline trigger |
+| `cases` | CRUD, status, pipeline trigger, gate review (`/gates/{gate}/approve`) |
 | `case_data` | Documents, hearing notes |
-| `decisions` | Verdict recommendations |
 | `what_if` | Contestable Judgment Mode — scenario perturbation |
 | `judge` | Judge-specific tools |
 | `hearing_notes` / `hearing_pack` | Hearing preparation |
@@ -132,8 +132,6 @@ All application routes live under `/api/v1/*`. Auth uses cookie-based JWT — th
 | `health` | Readiness + liveness |
 | `precedents` | PAIR Search API proxy |
 | `knowledge-base` | Vector store upload/search (admin + senior_judge) |
-| `escalated-cases` | Cases flagged for human review |
-| `senior-inbox` | Senior judge review queue |
 | `admin` | System configuration |
 | `/metrics` | Prometheus scrape endpoint |
 
@@ -143,7 +141,7 @@ Full contract: [`docs/openapi.md`](docs/openapi.md) and [`docs/openapi.json`](do
 
 ## Database & Migrations
 
-PostgreSQL 16 via SQLAlchemy. Alembic at `alembic/` with 10 versioned migrations (`alembic/versions/`).
+PostgreSQL 16 via SQLAlchemy. Alembic at `alembic/` with versioned migrations in `alembic/versions/`. On a fresh database, use `make reset-db` (drops and recreates schema from models, then stamps Alembic to head) instead of `make migrate` to avoid a SQLAlchemy 2.x enum double-create bug in the initial migration.
 
 ```bash
 make migrate          # alembic upgrade head
