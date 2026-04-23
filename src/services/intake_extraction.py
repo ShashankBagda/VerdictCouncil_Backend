@@ -272,9 +272,14 @@ async def run_intake_extraction(
     )
 
     client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
+    # The efficient-reasoning model (gpt-5-mini) requires org verification on
+    # OpenAI's side; default to the lightweight tier that the rest of the
+    # app (parse_document, guardrails, vector_store_fallback, ...) already
+    # uses. Override via OPENAI_MODEL_INTAKE once the org is verified.
+    extractor_model = settings.openai_model_intake or settings.openai_model_lightweight
     try:
         response = await client.responses.create(
-            model=settings.openai_model_efficient_reasoning,
+            model=extractor_model,
             input=[
                 {"role": "system", "content": _EXTRACTION_SYSTEM_PROMPT},
                 {"role": "user", "content": _build_user_prompt(docs_with_text, correction)},
