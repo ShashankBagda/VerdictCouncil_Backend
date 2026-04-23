@@ -16,6 +16,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 from sqlalchemy import select
 
 from src.api.deps import CurrentUser, DBSession
+from src.models.user import UserRole
 from src.api.schemas.cases import (
     ArgumentResponse,
     DocumentResponse,
@@ -80,11 +81,13 @@ SUPPLEMENTARY_PRESERVED_STAGES = PIPELINE_AGENTS[:2]
 
 
 async def _get_case_or_404(case_id: UUID, db, current_user) -> Case:
-    """Load a case, raising 404 if not found."""
+    """Load a case, raising 404 if not found and 403 if not owned by this judge."""
     result = await db.execute(select(Case).where(Case.id == case_id))
     case = result.scalar_one_or_none()
     if not case:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
+    if current_user.role == UserRole.judge and case.created_by != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
     return case
 
 
