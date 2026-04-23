@@ -44,7 +44,7 @@ models:
 
 session_service: &default_session_service
   type: database
-  db_url: ${DATABASE_URL}
+  db_url: ${ADK_DATABASE_URL}
 
 # ──────────────────────────────────────────────
 # Artifact Service (Filesystem)

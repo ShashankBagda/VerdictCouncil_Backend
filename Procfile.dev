@@ -6,8 +6,8 @@ fact-reconstruction:  .venv/bin/solace-agent-mesh run configs/agents/fact-recons
 witness-analysis:     .venv/bin/solace-agent-mesh run configs/agents/witness-analysis.yaml
 legal-knowledge:      .venv/bin/solace-agent-mesh run configs/agents/legal-knowledge.yaml
 argument-construction: .venv/bin/solace-agent-mesh run configs/agents/argument-construction.yaml
-deliberation:         .venv/bin/solace-agent-mesh run configs/agents/deliberation.yaml
-governance-verdict:   .venv/bin/solace-agent-mesh run configs/agents/governance-verdict.yaml
+hearing-analysis:     .venv/bin/solace-agent-mesh run configs/agents/hearing-analysis.yaml
+hearing-governance:   .venv/bin/solace-agent-mesh run configs/agents/hearing-governance.yaml
 layer2-aggregator:    .venv/bin/solace-agent-mesh run configs/services/layer2-aggregator.yaml
 api:                  .venv/bin/uvicorn src.api.app:app --host 0.0.0.0 --port 8001 --reload
 arq-worker:           .venv/bin/arq src.workers.worker_settings.WorkerSettings
