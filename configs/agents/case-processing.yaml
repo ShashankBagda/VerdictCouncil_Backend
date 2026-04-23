@@ -46,6 +46,12 @@ apps:
           - doc_type: originating_process | statement_of_claim | defence | affidavit |
                       police_report | speed_camera_record | witness_statement |
                       invoice | receipt | contract | photograph | other
+          # The intake form now tags each upload with Document.kind
+          # (notice_of_traffic_offence, charge_sheet, police_report,
+          # witness_statement, speed_camera_record, medical_report,
+          # letter_of_mitigation, evidence_bundle, other). Trust the tag
+          # first — only fall back to content-based doc_type inference
+          # when kind is `evidence_bundle` or `other`.
           - submitting_party: which party submitted this document
           - key_facts: list of factual assertions extracted verbatim
           - monetary_amounts: all dollar figures with context

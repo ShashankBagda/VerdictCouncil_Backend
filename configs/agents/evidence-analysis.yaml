@@ -52,6 +52,10 @@ apps:
           Sub-type (examples): police_report | speed_camera | invoice | contract |
                                affidavit | photograph | cctv_footage | expert_report |
                                bank_statement | delivery_order | repair_receipt
+          # The intake form tags each upload with Document.kind (e.g.
+          # police_report, witness_statement, speed_camera_record). Use
+          # that kind as the sub-type directly; only infer from content
+          # when kind is `evidence_bundle` or `other`.
 
         DIMENSION 2 — STRENGTH ASSESSMENT:
           strong:   Multiple corroborating sources, from neutral party, contemporaneous record

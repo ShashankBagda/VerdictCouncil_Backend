@@ -69,6 +69,11 @@ Extract:
     judge is the authority. Traffic matters always have one; small-claims
     matters have none.
   - claim_amount: numeric SGD amount for small-claims matters, else null
+  - is_advisory_only: true when the notice explicitly says no summons
+    action will be taken (e.g. phrases like "no summons action will be
+    taken", "this letter serves as an advisory", "advisory notice for
+    traffic offence"); false when a summons or charge sheet is active.
+    Null when no notice/charge sheet is present to judge from.
 
 For every non-null field, add a citation: document_id (UUID), page (1-based
 int or null), and a short verbatim quote. Report self-rated confidence
@@ -92,6 +97,7 @@ _EXTRACTION_SCHEMA: dict[str, Any] = {
                 "parties",
                 "offence_code",
                 "claim_amount",
+                "is_advisory_only",
             ],
             "properties": {
                 "title": {"type": ["string", "null"]},
@@ -119,6 +125,7 @@ _EXTRACTION_SCHEMA: dict[str, Any] = {
                 },
                 "offence_code": {"type": ["string", "null"]},
                 "claim_amount": {"type": ["number", "null"]},
+                "is_advisory_only": {"type": ["boolean", "null"]},
             },
         },
         "confidences": {
@@ -131,6 +138,7 @@ _EXTRACTION_SCHEMA: dict[str, Any] = {
                 "parties",
                 "offence_code",
                 "claim_amount",
+                "is_advisory_only",
             ],
             "properties": {
                 k: {"type": "string", "enum": ["low", "medium", "high"]}
@@ -141,6 +149,7 @@ _EXTRACTION_SCHEMA: dict[str, Any] = {
                     "parties",
                     "offence_code",
                     "claim_amount",
+                    "is_advisory_only",
                 )
             },
         },
@@ -191,9 +200,12 @@ async def _document_text(db: AsyncSession, doc: Document) -> str:
 
 def _kind_label(kind: DocumentKind) -> str:
     return {
-        DocumentKind.notice_of_traffic_offence: "Notice of Traffic Offence / Summons",
+        DocumentKind.notice_of_traffic_offence: "Traffic Notice (Summons or Advisory)",
         DocumentKind.charge_sheet: "Charge Sheet",
-        DocumentKind.evidence_bundle: "Evidence Bundle",
+        DocumentKind.police_report: "Police Report",
+        DocumentKind.witness_statement: "Witness Statement / Affidavit",
+        DocumentKind.speed_camera_record: "Speed Camera Record",
+        DocumentKind.evidence_bundle: "Other Supporting Documents",
         DocumentKind.in_car_camera: "In-car camera footage (descriptive only)",
         DocumentKind.medical_report: "Medical Report",
         DocumentKind.letter_of_mitigation: "Letter of Mitigation",
@@ -331,6 +343,7 @@ def _empty_extraction(note: str) -> dict[str, Any]:
             "parties": [],
             "offence_code": None,
             "claim_amount": None,
+            "is_advisory_only": None,
         },
         "confidences": {
             "title": "low",
@@ -339,6 +352,7 @@ def _empty_extraction(note: str) -> dict[str, Any]:
             "parties": "low",
             "offence_code": "low",
             "claim_amount": "low",
+            "is_advisory_only": "low",
         },
         "citations": [],
         "notes": note,
