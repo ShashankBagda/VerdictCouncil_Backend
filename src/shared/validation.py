@@ -1,5 +1,19 @@
 from typing import Any
 
+# Fields the complexity-routing LLM should nest inside case_metadata but
+# sometimes emits at the top level of its JSON response.
+_COMPLEXITY_ROUTING_METADATA_FIELDS = frozenset(
+    {
+        "complexity",
+        "complexity_score",
+        "route",
+        "routing_factors",
+        "vulnerability_assessment",
+        "escalation_reason",
+        "pipeline_halt",
+    }
+)
+
 # Maps each agent to the CaseState fields it is allowed to write
 FIELD_OWNERSHIP: dict[str, set[str]] = {
     "case-processing": {
@@ -27,6 +41,31 @@ APPEND_ONLY_FIELDS = {"audit_log"}
 
 class FieldOwnershipError(Exception):
     pass
+
+
+def normalize_agent_output(agent_name: str, agent_output: dict[str, Any]) -> dict[str, Any]:
+    """Coerce LLM output into the expected CaseState shape before merging.
+
+    complexity-routing is instructed to nest its fields inside case_metadata,
+    but occasionally emits them at the top level.  Move any such stragglers
+    into case_metadata so they are not silently stripped by the ownership
+    check.
+    """
+    if agent_name != "complexity-routing":
+        return agent_output
+
+    stray = {k: v for k, v in agent_output.items() if k in _COMPLEXITY_ROUTING_METADATA_FIELDS}
+    if not stray:
+        return agent_output
+
+    output = dict(agent_output)
+    meta = dict(output.get("case_metadata") or {})
+    for k, v in stray.items():
+        if k not in meta:
+            meta[k] = v
+        del output[k]
+    output["case_metadata"] = meta
+    return output
 
 
 def validate_field_ownership(

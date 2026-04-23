@@ -57,6 +57,7 @@ from src.shared.config import settings
 from src.shared.validation import (
     FIELD_OWNERSHIP,
     FieldOwnershipError,
+    normalize_agent_output,
     validate_field_ownership,
 )
 
@@ -571,6 +572,8 @@ class MeshPipelineRunner:
         payload = parse_send_task_response(envelope)
         if not payload:
             raise RuntimeError(f"Empty/unparseable response from agent {agent_name!r}")
+
+        payload = normalize_agent_output(agent_name, payload)
 
         original_dict = prior_state.model_dump(mode="json")
         merged_dict = payload if "case_id" in payload else {**original_dict, **payload}
