@@ -68,19 +68,12 @@ def seed() -> None:
         admin = User(
             id=uuid.UUID("00000000-0000-4000-a000-000000000002"),
             name="Admin Marcus Lee",
-            email="admin.lee@verdictcouncil.dev",
+            email="admin@verdictcouncil.sg",
             role=UserRole.admin,
             password_hash=_hash_password("admin123"),
         )
-        clerk = User(
-            id=uuid.UUID("00000000-0000-4000-a000-000000000003"),
-            name="Clerk Priya Sharma",
-            email="clerk.sharma@verdictcouncil.dev",
-            role=UserRole.clerk,
-            password_hash=_hash_password("clerk123"),
-        )
 
-        session.add_all([judge, admin, clerk])
+        session.add_all([judge, admin])
         session.flush()
 
         # ------------------------------------------------------------------ Cases
@@ -91,7 +84,7 @@ def seed() -> None:
             jurisdiction_valid=True,
             complexity=CaseComplexity.low,
             route=CaseRoute.proceed_automated,
-            created_by=clerk.id,
+            created_by=judge.id,
         )
         case_small_claims_1 = Case(
             id=uuid.UUID("10000000-0000-4000-a000-000000000002"),
@@ -100,16 +93,16 @@ def seed() -> None:
             jurisdiction_valid=True,
             complexity=CaseComplexity.medium,
             route=CaseRoute.proceed_with_review,
-            created_by=clerk.id,
+            created_by=judge.id,
         )
         case_small_claims_2 = Case(
             id=uuid.UUID("10000000-0000-4000-a000-000000000003"),
             domain=CaseDomain.small_claims,
-            status=CaseStatus.decided,
+            status=CaseStatus.closed,
             jurisdiction_valid=True,
             complexity=CaseComplexity.low,
             route=CaseRoute.proceed_automated,
-            created_by=admin.id,
+            created_by=judge.id,
         )
 
         session.add_all([case_traffic, case_small_claims_1, case_small_claims_2])
@@ -198,7 +191,7 @@ def seed() -> None:
 
         session.commit()
         print("\nSeed data inserted successfully.")
-        print(f"  Users:     {judge.name}, {admin.name}, {clerk.name}")
+        print(f"  Users:     {judge.name}, {admin.name}")
         print(f"  Cases:     {case_traffic.id}, {case_small_claims_1.id}, {case_small_claims_2.id}")
         print(f"  Parties:   {len(parties)}")
         print("  Documents: 3")

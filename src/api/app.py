@@ -18,8 +18,7 @@ OPENAPI_TAGS = [
     },
     {
         "name": "cases",
-        "description": "CRUD operations for judicial cases. "
-        "Role-based access: clerks and judges create cases; admins see all.",
+        "description": "CRUD operations for judicial cases. Judges create and manage cases; admins have full visibility.",
     },
     {
         "name": "what-if",

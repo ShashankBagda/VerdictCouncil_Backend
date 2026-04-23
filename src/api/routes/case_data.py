@@ -41,8 +41,6 @@ from src.models.case import (
     Precedent,
     Witness,
 )
-from src.models.user import UserRole
-
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -82,13 +80,11 @@ SUPPLEMENTARY_PRESERVED_STAGES = PIPELINE_AGENTS[:2]
 
 
 async def _get_case_or_404(case_id: UUID, db, current_user) -> Case:
-    """Load a case with access check. Raises 404/403."""
+    """Load a case, raising 404 if not found."""
     result = await db.execute(select(Case).where(Case.id == case_id))
     case = result.scalar_one_or_none()
     if not case:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
-    if current_user.role == UserRole.clerk and case.created_by != current_user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
     return case
 
 

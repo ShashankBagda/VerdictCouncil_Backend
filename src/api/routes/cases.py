@@ -371,16 +371,11 @@ def _serialize_case_detail(case: Case) -> dict[str, Any]:
 
 
 async def _load_case_for_export(case_id: UUID, db, current_user: User) -> Case:
-    """Fetch a case and enforce clerk ownership. Raises 404/403."""
+    """Fetch a case, raising 404 if not found."""
     result = await db.execute(select(Case).where(Case.id == case_id))
     case = result.scalar_one_or_none()
     if not case:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
-    if current_user.role == UserRole.clerk and case.created_by != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to view this case",
-        )
     return case
 
 
@@ -390,7 +385,7 @@ async def _load_case_for_export(case_id: UUID, db, current_user: User) -> Case:
     status_code=status.HTTP_201_CREATED,
     operation_id="create_case",
     summary="Create a new case",
-    description="Create a new judicial case in the specified domain. Requires clerk or judge role.",
+    description="Create a new judicial case in the specified domain. Requires judge role.",
     responses={
         403: {"model": ErrorResponse, "description": "Insufficient permissions"},
         422: {"model": ValidationErrorResponse, "description": "Validation error"},
@@ -399,7 +394,7 @@ async def _load_case_for_export(case_id: UUID, db, current_user: User) -> Case:
 async def create_case(
     body: CaseCreateRequest,
     db: DBSession,
-    current_user: User = require_role(UserRole.clerk, UserRole.judge),
+    current_user: User = require_role(UserRole.judge),
 ) -> dict[str, Any]:
     case = Case(
         id=uuid4(),
@@ -450,7 +445,7 @@ async def list_cases(
 ) -> dict[str, Any]:
     query = select(Case)
 
-    if current_user.role in {UserRole.clerk, UserRole.judge}:
+    if current_user.role == UserRole.judge:
         query = query.where(Case.created_by == current_user.id)
 
     if status_filter:
@@ -551,12 +546,6 @@ async def get_case(
 
     if not case:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
-
-    if current_user.role == UserRole.clerk and case.created_by != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to view this case",
-        )
 
     return _serialize_case_detail(case)
 
@@ -860,12 +849,6 @@ async def process_case(
     case = result.scalar_one_or_none()
     if not case:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
-
-    if current_user.role == UserRole.clerk and case.created_by != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to run this case",
-        )
 
     if not case.documents:
         raise HTTPException(
