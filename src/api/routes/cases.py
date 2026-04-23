@@ -596,6 +596,7 @@ async def get_case(
             selectinload(Case.hearing_analyses),
             selectinload(Case.reopen_requests),
             selectinload(Case.audit_logs),
+            selectinload(Case.domain_ref),
         )
     )
     case = result.scalar_one_or_none()
