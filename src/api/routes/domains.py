@@ -342,10 +342,17 @@ async def upload_domain_document(
     if not domain:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Domain not found")
     if not domain.vector_store_id:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Domain vector store not provisioned",
-        )
+        from src.services.knowledge_base import ensure_domain_vector_store
+
+        try:
+            await ensure_domain_vector_store(db, str(domain_id))
+            await db.refresh(domain)
+        except Exception as exc:
+            logger.error("Failed to provision vector store for domain %s: %s", domain.code, exc)
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Domain vector store could not be provisioned",
+            ) from exc
 
     content_type = file.content_type or ""
     if content_type not in _ALLOWED_MIME_TYPES:
