@@ -1335,6 +1335,86 @@ async def process_case(
     return MessageResponse(message="Pipeline started")
 
 
+# Statuses from which the pipeline can be restarted by a judge.
+_RESTARTABLE_STATUSES = (
+    CaseStatus.failed,
+    CaseStatus.failed_retryable,
+    CaseStatus.escalated,
+)
+
+
+@router.post(
+    "/{case_id}/restart",
+    response_model=MessageResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    operation_id="restart_case_pipeline",
+    summary="Restart a failed or escalated case pipeline",
+    description=(
+        "Reset a case in 'failed', 'failed_retryable', or 'escalated' status back to "
+        "'pending' and re-enqueue the full 9-agent pipeline. All prior analysis results "
+        "are retained in the database for audit purposes."
+    ),
+    responses={
+        403: {"model": ErrorResponse, "description": "Not authorized"},
+        404: {"model": ErrorResponse, "description": "Case not found"},
+        409: {"model": ErrorResponse, "description": "Case is not in a restartable state"},
+    },
+)
+async def restart_case_pipeline(
+    case_id: UUID,
+    db: DBSession,
+    current_user: User = require_role(UserRole.judge),
+) -> MessageResponse:
+    from src.models.pipeline_job import PipelineJobType
+    from src.workers.outbox import enqueue_outbox_job
+
+    result = await db.execute(
+        select(Case).where(Case.id == case_id).options(selectinload(Case.documents))
+    )
+    case = result.scalar_one_or_none()
+    if not case:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
+    if case.created_by != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+
+    if not case.documents:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Case has no uploaded documents — cannot restart pipeline",
+        )
+
+    flip = await db.execute(
+        update(Case)
+        .where(Case.id == case_id, Case.status.in_(_RESTARTABLE_STATUSES))
+        .values(status=CaseStatus.processing)
+        .returning(Case.id)
+    )
+    if flip.scalar_one_or_none() is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Case cannot be restarted from its current state. "
+                "Only 'failed', 'failed_retryable', or 'escalated' cases can be restarted."
+            ),
+        )
+
+    db.add(
+        AuditLog(
+            case_id=case_id,
+            agent_name="judge",
+            action="pipeline_restarted",
+            input_payload={
+                "restarted_by": str(current_user.id),
+                "previous_status": case.status.value,
+            },
+        )
+    )
+    await enqueue_outbox_job(db, case_id=case_id, job_type=PipelineJobType.case_pipeline)
+    await db.commit()
+
+    return MessageResponse(message="Pipeline restarted")
+
+
 _VALID_GATE_NAMES = {"gate1", "gate2", "gate3", "gate4"}
 
 _NEXT_GATE: dict[str, str | None] = {
