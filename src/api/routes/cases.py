@@ -551,6 +551,7 @@ async def list_cases(
         selectinload(Case.facts),
         selectinload(Case.reopen_requests),
         selectinload(Case.audit_logs),
+        selectinload(Case.domain_ref),
     )
     query = query.offset((page - 1) * per_page).limit(per_page)
     result = await db.execute(query)
