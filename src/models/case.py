@@ -34,6 +34,11 @@ class CaseDomain(str, enum.Enum):
 
 
 class CaseStatus(str, enum.Enum):
+    # Pre-pipeline intake states (docs-as-source-of-truth flow).
+    # draft → extracting → awaiting_intake_confirmation → pending.
+    draft = "draft"
+    extracting = "extracting"
+    awaiting_intake_confirmation = "awaiting_intake_confirmation"
     pending = "pending"
     processing = "processing"
     ready_for_review = "ready_for_review"
@@ -50,6 +55,18 @@ class CaseStatus(str, enum.Enum):
     awaiting_review_gate2 = "awaiting_review_gate2"
     awaiting_review_gate3 = "awaiting_review_gate3"
     awaiting_review_gate4 = "awaiting_review_gate4"
+
+
+class DocumentKind(str, enum.Enum):
+    # Traffic-court document kinds. "other" is the back-compat default for
+    # pre-existing rows and for domains without a typed slot schema.
+    notice_of_traffic_offence = "notice_of_traffic_offence"
+    charge_sheet = "charge_sheet"
+    evidence_bundle = "evidence_bundle"
+    in_car_camera = "in_car_camera"
+    medical_report = "medical_report"
+    letter_of_mitigation = "letter_of_mitigation"
+    other = "other"
 
 
 class CaseComplexity(str, enum.Enum):
@@ -152,6 +169,9 @@ class Case(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     latest_run_id: Mapped[str | None] = mapped_column(String(36))
     gate_state: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     judicial_decision: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # Proposed fields produced by the intake extraction service before the
+    # judge confirms. Shape: {fields, confidences, citations[], model, ran_at}.
+    intake_extraction: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_by: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
     )
@@ -215,6 +235,13 @@ class Document(UUIDPrimaryKeyMixin, Base):
     openai_file_id: Mapped[str | None] = mapped_column(String(255))
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
     file_type: Mapped[str | None] = mapped_column(String(100))
+    # Typed slot this document was uploaded against. Drives intake extraction
+    # (e.g. only notice_of_traffic_offence / charge_sheet are treated as
+    # authoritative for party + offence facts). `other` is the back-compat
+    # default for untyped uploads.
+    kind: Mapped[DocumentKind] = mapped_column(
+        Enum(DocumentKind), nullable=False, server_default=DocumentKind.other.value
+    )
     pages: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     uploaded_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id")
