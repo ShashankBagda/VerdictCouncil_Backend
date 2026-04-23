@@ -60,8 +60,13 @@ class CaseStatus(str, enum.Enum):
 class DocumentKind(str, enum.Enum):
     # Traffic-court document kinds. "other" is the back-compat default for
     # pre-existing rows and for domains without a typed slot schema.
+    # `in_car_camera` is retained for back-compat with pre-migration rows
+    # only; new intakes do not expose it (no image/video uploads).
     notice_of_traffic_offence = "notice_of_traffic_offence"
     charge_sheet = "charge_sheet"
+    police_report = "police_report"
+    witness_statement = "witness_statement"
+    speed_camera_record = "speed_camera_record"
     evidence_bundle = "evidence_bundle"
     in_car_camera = "in_car_camera"
     medical_report = "medical_report"
