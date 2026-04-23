@@ -341,7 +341,7 @@ async def _ingest_domain_document(
                 )
                 doc.openai_file_id = oa_file.id
                 doc.status = DomainDocumentStatus.uploading
-                await db.flush()
+                await db.commit()
             except Exception as exc:
                 doc.status = DomainDocumentStatus.failed
                 doc.error_reason = f"OpenAI upload failed: {exc}"
@@ -355,7 +355,7 @@ async def _ingest_domain_document(
                     run_classifier=settings.classifier_sanitizer_enabled,
                 )
                 doc.status = DomainDocumentStatus.parsed
-                await db.flush()
+                await db.commit()
             except Exception as exc:
                 doc.status = DomainDocumentStatus.failed
                 doc.error_reason = f"Parse failed: {exc}"
@@ -383,7 +383,7 @@ async def _ingest_domain_document(
                 doc.sanitized_file_id = san_file.id
                 doc.status = DomainDocumentStatus.indexing
                 doc.sanitized = True
-                await db.flush()
+                await db.commit()
 
                 vs_file = await client.vector_stores.files.create_and_poll(
                     vector_store_id=vector_store_id,
