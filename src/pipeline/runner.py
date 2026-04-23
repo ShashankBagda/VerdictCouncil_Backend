@@ -28,7 +28,7 @@ from src.services.pipeline_events import publish_agent_event
 from src.shared.audit import append_audit_entry
 from src.shared.case_state import CaseState, CaseStatusEnum
 from src.shared.config import settings
-from src.shared.validation import FieldOwnershipError, validate_field_ownership
+from src.shared.validation import FieldOwnershipError, normalize_agent_output, validate_field_ownership
 from src.tools.exceptions import CriticalToolFailure, DegradableToolError
 from src.tools.search_precedents import PrecedentSearchError  # noqa: F401 — register as degradable
 
@@ -142,6 +142,15 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
                 "properties": {
                     "segments": {
                         "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "doc_id": {"type": "string"},
+                                "text": {"type": "string"},
+                                "page": {"type": "integer"},
+                                "paragraph": {"type": "integer"},
+                            },
+                        },
                         "description": (
                             "List of document segments to compare. "
                             "Each segment: {doc_id, text, page, paragraph}"
@@ -172,6 +181,16 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
                 "properties": {
                     "events": {
                         "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "date": {"type": "string"},
+                                "description": {"type": "string"},
+                                "source_ref": {"type": "string"},
+                                "parties": {"type": "string"},
+                                "location": {"type": "string"},
+                            },
+                        },
                         "description": (
                             "List of events to order. Each event: "
                             "{date, description, source_ref, parties, location}"
@@ -199,10 +218,12 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
                     },
                     "weaknesses": {
                         "type": "array",
+                        "items": {"type": "string"},
                         "description": "List of identified weaknesses or gaps to probe",
                     },
                     "question_types": {
                         "type": "array",
+                        "items": {"type": "string"},
                         "description": (
                             "Types of questions: 'factual_clarification' | 'evidence_gap' | "
                             "'credibility_probe' | 'legal_interpretation'"
@@ -324,8 +345,6 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
             },
         },
     },
-}
-
     # ── Orchestrator management tools ─────────────────────────────────────
     "pipeline_status": {
         "type": "function",
@@ -1057,6 +1076,8 @@ class PipelineRunner:
 
         # Validate critical output fields have expected structure
         _validate_agent_output_structure(agent_name, agent_output)
+
+        agent_output = normalize_agent_output(agent_name, agent_output)
 
         # Merge agent output into CaseState (respecting field ownership)
         original_dict = state.model_dump()
