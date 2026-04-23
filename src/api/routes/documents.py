@@ -27,9 +27,7 @@ async def get_document_excerpt(
     current_user: User = require_role(UserRole.judge),
 ) -> dict:
     result = await db.execute(
-        select(Document)
-        .where(Document.id == document_id)
-        .options(selectinload(Document.case))
+        select(Document).where(Document.id == document_id).options(selectinload(Document.case))
     )
     doc = result.scalar_one_or_none()
     if doc is None or doc.case is None or doc.case.created_by != current_user.id:
