@@ -321,7 +321,7 @@ async def _ingest_domain_document(
     actor_id: UUID,
 ) -> None:
     """Background pipeline: upload → parse → sanitize → index."""
-    from openai import AsyncOpenAI
+    from openai import AsyncOpenAI, NotFoundError as OpenAINotFoundError
 
     from src.services.database import async_session
     from src.tools.parse_document import parse_document
@@ -385,11 +385,40 @@ async def _ingest_domain_document(
                 doc.status = DomainDocumentStatus.indexing
                 doc.sanitized = True
                 await db.commit()
+            except Exception as exc:
+                doc.status = DomainDocumentStatus.failed
+                doc.error_reason = f"Sanitized file upload failed: {exc}"
+                await db.commit()
+                logger.error("Ingest sanitized upload failed for doc %s: %s", doc_id, exc)
+                return
 
+            current_vs_id = vector_store_id
+            try:
                 vs_file = await client.vector_stores.files.create_and_poll(
-                    vector_store_id=vector_store_id,
+                    vector_store_id=current_vs_id,
                     file_id=san_file.id,
                 )
+            except OpenAINotFoundError:
+                # Vector store was deleted or belongs to another environment — re-provision.
+                logger.warning(
+                    "Vector store %s not found; re-provisioning for domain %s",
+                    current_vs_id,
+                    domain_id,
+                )
+                try:
+                    from src.services.knowledge_base import ensure_domain_vector_store
+
+                    current_vs_id, _ = await ensure_domain_vector_store(db, str(domain_id))
+                    vs_file = await client.vector_stores.files.create_and_poll(
+                        vector_store_id=current_vs_id,
+                        file_id=san_file.id,
+                    )
+                except Exception as exc:
+                    doc.status = DomainDocumentStatus.failed
+                    doc.error_reason = f"Indexing failed after vector store re-provisioning: {exc}"
+                    await db.commit()
+                    logger.error("Ingest re-provision failed for doc %s: %s", doc_id, exc)
+                    return
             except Exception as exc:
                 doc.status = DomainDocumentStatus.failed
                 doc.error_reason = f"Indexing failed: {exc}"
