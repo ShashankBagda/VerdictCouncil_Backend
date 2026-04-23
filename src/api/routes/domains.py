@@ -499,7 +499,7 @@ async def upload_domain_document(
         uploaded_by=current_user.id,
     )
     db.add(doc)
-    await db.flush()
+    await db.commit()
     await db.refresh(doc)
 
     background_tasks.add_task(
