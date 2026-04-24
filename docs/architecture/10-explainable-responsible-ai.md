@@ -2,6 +2,8 @@
 
 VerdictCouncil is a decision-support system for a **judicial** context — the highest-stakes use of AI this course will touch. Every design decision in the backend is filtered through an Explainable & Responsible AI (ERAI) lens. This document maps our practices to each life-cycle stage and to the IMDA Model AI Governance Framework.
 
+> **Live vs target.** This document describes the canonical architecture that underwrites our ERAI posture (per-agent container topology, NetworkPolicy, HMAC-signed inter-service calls, etc.). The MVP ship state is mono-process; see the **Implementation Status** callouts in [Part 2 §2.2](02-system-architecture.md#22-orchestration-platform), [Part 6 §6.6](06-cicd-pipeline.md#66-kubernetes-manifests), and [Part 8 §8.3.3](08-infrastructure-setup.md#833-node-pool-sizing) for the current gap between canonical and deployed. Controls marked below that depend on the per-agent topology (privilege separation via NetworkPolicy, HMAC-signed dispatch, per-agent NetworkPolicy lateral-movement containment) are in the target tier; logical privilege separation is preserved even in mono-process mode via the `_merge_case` reducer and per-agent schema validation, but the network-layer enforcement is target work.
+
 ---
 
 ## 10.1 Core commitments (non-negotiable)

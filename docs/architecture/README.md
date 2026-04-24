@@ -44,4 +44,5 @@ NUS Master of Software Engineering | Agentic AI Architecture Module | v7.0 (Apri
 - [Part 10: Explainable & Responsible AI](10-explainable-responsible-ai.md) — ERAI alignment, fairness, IMDA Model AI Governance mapping.
 - [Part 11: AI Security Risk Register](11-ai-security-risk-register.md) — identified risks × mitigations × owners.
 - [Part 12: Testing Summary](12-testing-summary.md) — unit, integration, evaluation, SAST/SCA/DAST results.
+- **Part 13: Reflection** — deferred; authored closer to submission as part of the group report package, not the standing architecture docs.
 - [Appendices](appendices.md) — cost model, environment variables, glossary.

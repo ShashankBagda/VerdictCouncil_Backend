@@ -145,7 +145,7 @@ command: ["python", "-m", "src.agents.main"]
 args: ["--agent", "<agent-name>", "--port", "<agent-port>"]
 ```
 
-The `src.agents.main` module is a thin FastAPI wrapper that serves `POST /invoke` + `GET /health` for one agent per container, selected by `--agent`. Each agent runs on a distinct port (`:9101`–`:9109`) and is fronted by its own ClusterIP Service. **Implementation status:** the agent wrapper module and the nine Services/Deployments are the production target; the MVP deploy ships API + Orchestrator only, with `DISPATCH_MODE=local` so the Orchestrator invokes agent handlers in-process.
+**Target:** a `src.agents.main` module (not yet in the repo) will be a thin FastAPI wrapper serving `POST /invoke` + `GET /health` for one agent per container, selected by `--agent`. Each agent will run on a distinct port (`:9101`–`:9109`) and be fronted by its own ClusterIP Service. **Implementation status today:** the agent wrapper module does not exist yet; the MVP deploy ships API + Orchestrator only, with `DISPATCH_MODE=local` so the Orchestrator invokes agent handlers as in-process Python calls via the existing node modules (`src/pipeline/graph/nodes/*.py`).
 
 ### Image naming
 
