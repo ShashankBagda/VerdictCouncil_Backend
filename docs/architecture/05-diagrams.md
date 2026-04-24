@@ -41,9 +41,9 @@ erDiagram
         uuid case_id FK
         varchar openai_file_id
         varchar filename
+        varchar file_type
         enum kind "notice_of_traffic_offence | charge_sheet | police_report | witness_statement | speed_camera_record | medical_report | letter_of_mitigation | evidence_bundle | other"
-        varchar document_type
-        jsonb parsed_content
+        jsonb pages
         uuid uploaded_by FK
         timestamp uploaded_at
     }
@@ -62,11 +62,12 @@ erDiagram
         uuid id PK
         uuid case_id FK
         date event_date
+        time event_time
         text description
         uuid source_document_id FK
+        enum confidence "high | medium | low | disputed"
         enum status "agreed | disputed"
-        float confidence
-        jsonb conflicting_versions
+        jsonb corroboration
     }
 
     witnesses {
@@ -114,26 +115,24 @@ erDiagram
     hearing_analyses {
         uuid id PK
         uuid case_id FK
-        uuid run_id
-        jsonb established_facts
-        jsonb applicable_law
-        jsonb application
-        jsonb argument_evaluation
-        jsonb witness_impact
-        jsonb precedent_alignment
         text preliminary_conclusion
         int confidence_score
+        jsonb reasoning_chain
         jsonb uncertainty_flags
-        jsonb fairness_check
+        timestamp created_at
+        timestamp updated_at
     }
 
     hearing_notes {
         uuid id PK
         uuid case_id FK
-        uuid author_id FK
+        uuid judge_id FK
         text content
-        boolean locked
+        varchar section_reference
+        varchar note_type
+        boolean is_locked
         timestamp created_at
+        timestamp updated_at
     }
 
     what_if_scenarios {
@@ -485,6 +484,7 @@ classDiagram
         +precedents: list~dict~
         +arguments: dict
         +hearing_analyses: list~HearingAnalysis~
+        +fairness_check: FairnessCheck|None
         +judicial_decision: dict
         +audit_log: list~AuditEntry~
     }

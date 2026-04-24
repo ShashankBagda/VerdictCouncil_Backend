@@ -178,22 +178,20 @@ Each section below documents the agent's contract, not its prompt text. The "Pro
 - **Model tier:** `frontier` (`gpt-5.4`)
 - **Tools:** none
 - **Reads:** `arguments`, `evidence_analysis`, `extracted_facts`, `witnesses`, `legal_rules`, `precedents`, `case_metadata`
-- **Writes:** appends one entry to `hearing_analyses[]`:
+- **Writes:** appends one entry to `hearing_analyses[]`. The Pydantic model declares four formal fields (`model_config = ConfigDict(extra="allow")`):
   ```
   HearingAnalysis(
-      run_id,
-      established_facts,
-      applicable_law,
-      application = [{element, evidence, satisfied}],
-      argument_evaluation,
-      witness_impact,
-      precedent_alignment,
-      preliminary_conclusion,
-      confidence_score,
-      uncertainty_flags,
-      # fairness_check: written by hearing-governance
+      preliminary_conclusion: str | None,
+      confidence_score: int | None,
+      reasoning_chain: list[dict],
+      uncertainty_flags: list[dict],
+      # extra fields below are allowed-but-unstructured; the agent produces
+      # them inside reasoning_chain or as top-level extras:
+      #   established_facts, applicable_law, application, argument_evaluation,
+      #   witness_impact, precedent_alignment
   )
   ```
+  The corresponding SQLAlchemy table `hearing_analyses` has columns for the four formal fields only; the extras round-trip through `reasoning_chain` (JSONB). See `src/models/case.py::HearingAnalysis`.
 - **Prompt summary:** Produce the judge-facing hearing analysis that walks through established facts → applicable law → application to facts → argument evaluation → preliminary conclusion, with explicit uncertainty flags. This is the Gate-3 artefact the judge reviews before the hearing.
 - **Retry:** self-loop allowed via `gate2_join`-style router if the schema check fails (missing `preliminary_conclusion` or `application[]`). Retry cap enforced via `retry_counts["hearing-analysis"]`.
 
@@ -203,7 +201,7 @@ Each section below documents the agent's contract, not its prompt text. The "Pro
 - **Model tier:** `frontier` (`gpt-5.4`)
 - **Tools:** none
 - **Reads:** the most recent `hearing_analyses[-1]`, `arguments`, `evidence_analysis`, `witnesses`, `legal_rules`, `precedents`, `case_metadata`, `parties`
-- **Writes:** nests a `FairnessCheck` object inside `hearing_analyses[-1].fairness_check`; updates `status` to `ready_for_review` or `escalated` depending on audit outcome
+- **Writes:** `CaseState.fairness_check` (top-level field, not nested inside `hearing_analyses`); updates `status` to `ready_for_review` or `escalated` depending on audit outcome
 - **Output schema:** Strict — `FairnessCheck(critical_issues_found: bool, audit_passed: bool, issues: list[str], recommendations: list[str])` via OpenAI structured-output strict mode (`extra="forbid"` in `src/shared/case_state.py`).
 - **Prompt summary:** Audit the hearing analysis for balance, unsupported claims, logical fallacies, demographic bias, evidence completeness, and precedent cherry-picking. Raise `critical_issues_found=true` if the reasoning cannot be trusted without judge remediation.
 - **Outgoing edges (conditional):** `critical_issues_found` → `terminal` with `halt.reason = "fairness_audit"`; otherwise → `END`.

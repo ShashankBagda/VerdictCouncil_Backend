@@ -172,8 +172,14 @@ class CaseState:
     # --- Arguments (written by argument-construction) ---
     arguments: dict
 
-    # --- Hearing analysis + fairness (written by hearing-analysis / hearing-governance) ---
-    hearing_analyses: list[HearingAnalysis]    # one entry per run; fairness_check nested inside
+    # --- Hearing analysis (written by hearing-analysis) ---
+    hearing_analyses: list[HearingAnalysis]    # one entry per run; 4 formal fields
+                                               # (preliminary_conclusion, confidence_score,
+                                               # reasoning_chain, uncertainty_flags) with
+                                               # extra="allow" for free-form agent output
+
+    # --- Fairness audit (written by hearing-governance) ---
+    fairness_check: FairnessCheck | None       # strict schema; no extra fields
 
     # --- Judge decision (written after Gate 4 via API, not a graph node) ---
     judicial_decision: dict
