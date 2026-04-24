@@ -234,7 +234,7 @@ erDiagram
 
 ## 5.2 Sequence Diagram — Full Pipeline Flow
 
-Live pipeline runs are enqueued by the API onto an arq queue and executed by the worker. The graph is a single in-process LangGraph StateGraph; there is no inter-process messaging between agents.
+Live pipeline runs are enqueued by the API onto an arq queue and executed by the Orchestrator. In remote dispatch mode each `Orchestrator → <agent>` arrow below is an HTTPS `POST /invoke` to that agent's ClusterIP Service. `asyncio.gather` provides fan-out for Gate 2; the `_merge_case` reducer provides fan-in for `gate2_join`. In local dispatch mode (dev only) the Orchestrator calls agent handlers as in-process function calls — the sequence below is otherwise identical.
 
 ```mermaid
 sequenceDiagram
@@ -243,7 +243,7 @@ sequenceDiagram
     participant PG as PostgreSQL
     participant RQ as Redis (arq queue)
     participant W as arq worker
-    participant GR as GraphRunner
+    participant GR as Orchestrator (LangGraph)
     participant CP as case-processing
     participant CR as complexity-routing
     participant GD as gate2_dispatch
@@ -381,7 +381,7 @@ sequenceDiagram
 
 ## 5.3 Physical Architecture Diagram
 
-Single Docker image, two runtime flavours (`api` and `arq-worker`). All state lives in DO Managed Postgres + DO Managed Redis; no pod-local persistence required.
+Canonical topology: **nine agent microservices + one Orchestrator + one API**, all behind the same NGINX Ingress. Each agent is its own Deployment + ClusterIP Service. A single polyvalent container image (`verdictcouncil:<tag>`) ships every role; `command`/`args` on each Deployment selects the entrypoint.
 
 ```mermaid
 flowchart TB
@@ -392,48 +392,74 @@ flowchart TB
 
     subgraph Managed["DigitalOcean Managed Services"]
         PG["Managed PostgreSQL 16<br/>verdictcouncil"]
-        RD["Managed Redis 7"]
+        RD["Managed Redis 7<br/>arq queue + caches"]
     end
 
     subgraph K8s["Kubernetes Cluster — namespace: verdictcouncil"]
         ING["NGINX Ingress<br/>HTTPS :443"]
 
-        subgraph Runtime["Application Runtime"]
-            API["vc-api (Deployment)<br/>uvicorn src.api.app:app<br/>:8001<br/>HPA on CPU/RPS"]
-            WRK["vc-arq-worker (Deployment)<br/>arq src.workers.worker_settings<br/>HPA on queue depth"]
+        subgraph Edge["Edge"]
+            API["vc-api (Deployment)<br/>uvicorn src.api.app:app<br/>HPA on CPU/RPS"]
+        end
+
+        subgraph Orchestrator_g["Orchestrator"]
+            ORC["vc-orchestrator (Deployment)<br/>arq + LangGraph runner<br/>HPA on queue depth"]
+        end
+
+        subgraph Agents["Agent Services (9 Deployments + 9 ClusterIP Services)"]
+            A1["case-processing (:9101)"]
+            A2["complexity-routing (:9102)"]
+            A3["evidence-analysis (:9103)"]
+            A4["fact-reconstruction (:9104)"]
+            A5["witness-analysis (:9105)"]
+            A6["legal-knowledge (:9106)"]
+            A7["argument-construction (:9107)"]
+            A8["hearing-analysis (:9108)"]
+            A9["hearing-governance (:9109)"]
         end
 
         subgraph Observability["Observability"]
             ML["MLflow tracking server<br/>:5001"]
-            PROM["Prometheus scrape<br/>/metrics on :8001"]
+            PROM["Prometheus scrape<br/>/metrics on each pod"]
         end
 
-        subgraph Jobs["One-shot Jobs"]
+        subgraph Jobs["One-shot / Scheduled"]
             MIG["alembic-migrate (Job)"]
             WATCH["stuck-case-watchdog (CronJob)"]
         end
-
-        subgraph Services["ClusterIP Services"]
-            APISVC["vc-api-svc"]
-            MLSVC["mlflow-svc"]
-        end
     end
 
-    ING -->|HTTPS| APISVC
-    APISVC --> API
-
+    ING -->|HTTPS| API
     API --> PG
     API --> RD
-    API --> MLSVC
-    API -.->|HTTPS| OAI
+    API -.->|enqueue| RD
+    API --> ML
 
-    WRK --> PG
-    WRK --> RD
-    WRK --> MLSVC
-    WRK -.->|HTTPS| OAI
-    WRK -.->|HTTPS| PAIR
+    ORC --> PG
+    ORC --> RD
+    ORC --> ML
 
-    MLSVC --> ML
+    ORC -.->|POST /invoke (HTTPS + HMAC)| A1
+    ORC -.->|POST /invoke| A2
+    ORC -.->|POST /invoke| A3
+    ORC -.->|POST /invoke| A4
+    ORC -.->|POST /invoke| A5
+    ORC -.->|POST /invoke| A6
+    ORC -.->|POST /invoke| A7
+    ORC -.->|POST /invoke| A8
+    ORC -.->|POST /invoke| A9
+
+    A1 -.->|HTTPS| OAI
+    A2 -.->|HTTPS| OAI
+    A3 -.->|HTTPS| OAI
+    A4 -.->|HTTPS| OAI
+    A5 -.->|HTTPS| OAI
+    A6 -.->|HTTPS| OAI
+    A6 -.->|HTTPS| PAIR
+    A7 -.->|HTTPS| OAI
+    A8 -.->|HTTPS| OAI
+    A9 -.->|HTTPS| OAI
+
     MIG --> PG
     WATCH --> PG
     WATCH --> RD
@@ -441,10 +467,10 @@ flowchart TB
 
 **Notes:**
 
-- The API and worker ship from the same image. The Procfile in dev runs both locally via honcho; in K8s they're two separate Deployments with different `command` overrides.
-- The worker reaches the PAIR API; the API does not (precedent search only happens inside `legal-knowledge`, which runs in the worker).
-- MLflow is optional in local dev (`MLFLOW_ENABLED=false` by default); in production it's an internal ClusterIP.
-- There is no message broker, no per-agent pod, and no fan-in aggregator service. All nine agents run in-process inside the arq worker as LangGraph nodes.
+- **Canonical path:** API (`vc-api`) accepts user actions and writes `pipeline_jobs`; arq claims the job in the Orchestrator (`vc-orchestrator`), which executes the LangGraph and invokes each agent via HTTP. Agents are stateless.
+- **Only `legal-knowledge` talks to PAIR.** Every agent talks to OpenAI; no agent talks to any other agent.
+- **Orchestrator holds the HMAC secret** used to sign `/invoke` calls; agents reject unsigned requests. NetworkPolicy restricts `/invoke` ingress to the Orchestrator pod.
+- **Implementation status:** the MVP deployment packages all ten services into a single image and runs them under honcho locally (`DISPATCH_MODE=local`). The per-agent Deployments depicted here are the production target and the canonical architecture. See [Part 6](06-cicd-pipeline.md) for the matrix rollout and [Part 8](08-infrastructure-setup.md) for manifests.
 
 ---
 

@@ -1,8 +1,10 @@
 # Part 3: Agent Configurations
 
-This document describes the nine reasoning agents that run as LangGraph nodes in the VerdictCouncil pipeline. Each agent is an `async def` function in `src/pipeline/graph/nodes/` that reads `CaseState`, calls an `langchain-openai.ChatOpenAI` model with a system prompt and bound tools, validates the response against a Pydantic schema, and returns a partial `CaseState` update.
+This document describes the nine reasoning agents that run as LangGraph nodes in the VerdictCouncil pipeline. Each agent is an `async def` function in `src/pipeline/graph/nodes/` that reads `CaseState`, calls a `langchain-openai.ChatOpenAI` model with a system prompt and bound tools, validates the response against a Pydantic schema, and returns a partial `CaseState` update.
 
 The pipeline topology (edges between agents, conditional routing, parallel fan-out) is defined declaratively in `src/pipeline/graph/builder.py`. See [Part 2 §2.5](02-system-architecture.md#25-pipeline-flow) for the flow diagram.
+
+**Deployment shape.** Each agent is packaged as its own container image role and deployed as a distinct Kubernetes Deployment + Service in production. The Orchestrator invokes agents over HTTPS `POST /invoke` with an HMAC-signed `CaseState` payload; see [Part 2 §2.2](02-system-architecture.md#22-orchestration-platform) for the inter-service protocol and [Part 8](08-infrastructure-setup.md) for the K8s manifests. In local dev the Orchestrator calls the same handler function in-process to skip the HTTP hop (`DISPATCH_MODE=local`).
 
 ---
 

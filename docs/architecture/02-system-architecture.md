@@ -35,25 +35,64 @@ We consolidated to 9 agents using four guiding principles:
 
 ---
 
-## 2.2 Orchestration Platform: LangGraph
+## 2.2 Orchestration Platform
 
-VerdictCouncil runs on **[LangGraph](https://langchain-ai.github.io/langgraph/)**, a Python library for building stateful, graph-based agent workflows. The graph is constructed once in `src/pipeline/graph/builder.py` and executed in-process by either the FastAPI request handler (for synchronous previews) or the arq worker (for full pipeline runs).
+VerdictCouncil is a **nine-agent microservices system** coordinated by a central **Orchestrator**. Each reasoning agent runs as its own Kubernetes Deployment backed by a distinct container image; the Orchestrator holds the pipeline graph and invokes agents over HTTP. Agents communicate only with the Orchestrator — there are no direct agent-to-agent calls — and all persistent state (shared case state, checkpoints, domain projections) lives in DO Managed Postgres with DO Managed Redis as the queue + cache.
 
-LangGraph replaced the previous Solace Agent Mesh (SAM) + Google ADK stack in the responsible-AI refactor. The selection criteria were:
+This topology was chosen over a monolithic deploy because it matches the grading/assessment requirement of one agent per container, lets each agent scale independently (in particular the frontier-tier agents, which dominate cost and latency), and keeps blast radius small when one agent misbehaves. The previous Solace Agent Mesh + Google ADK stack was removed in the responsible-AI refactor; LangGraph was selected for the Orchestrator because its typed shared state + conditional-edge semantics map cleanly onto this microservices topology.
 
-**Typed shared state.** A `GraphState` TypedDict (defined in `src/pipeline/graph/state.py`) flows through every node. Nodes read the fields they need and return partial updates; a custom reducer (`_merge_case`) safely merges the outputs of parallel branches back into the shared `CaseState` without losing data.
+### Orchestrator
 
-**In-process node dispatch.** Nodes are plain `async def` functions. There is no message broker, no serialization hop between nodes, and no cross-process IPC during a single pipeline run. Latency and token overhead are lower than the broker-based predecessor; the audit trail is preserved via the checkpointer + `audit_log` rather than broker message logs.
+- **Runs the LangGraph `StateGraph`** (`src/pipeline/graph/builder.py`). Node implementations dispatch to remote agent services rather than executing the agent logic locally.
+- **Owns checkpointing.** `AsyncPostgresSaver` persists `GraphState` after every agent response — the substrate for crash recovery, what-if rewind, and audit replay.
+- **Owns routing.** Conditional edges (escalation, retry, halt) evaluate typed fields of `CaseState`; no agent decides the next hop.
+- **Owns parallelism.** For Gate 2, the Orchestrator fires four concurrent HTTP requests (`asyncio.gather`) and applies the `_merge_case` reducer to the combined responses — see §2.5.1.
+- **Claims work from arq.** Live runs are enqueued via an outbox (`pipeline_jobs` in Postgres) that the arq worker drains.
 
-**Native conditional routing.** `add_conditional_edges(source, router_fn, {key: target})` declares branching at graph-build time. Routing functions are ordinary Python, so escalation and halt logic (see §2.6) lives next to the code it gates instead of being split across YAML topic subscriptions.
+### Agent services
 
-**Native parallel fan-out.** Declaring `add_edge(source, a); add_edge(source, b); add_edge(source, c)` fans out from `source` to all three targets, which execute concurrently. Fan-in is handled by a join node whose `_merge_case` reducer composes the parallel results (see §2.5.1).
+Each of the nine agents is a stateless FastAPI microservice with a uniform contract:
 
-**Postgres checkpointing.** `AsyncPostgresSaver` from `langgraph-checkpoint-postgres` persists the full `GraphState` to Postgres after every node. This is the substrate for crash recovery, audit replay, and what-if rewind — see `src/pipeline/graph/checkpointer.py`.
+```
+POST /invoke
+Request body: {
+  "run_id":            str,
+  "case":              CaseState,       # Pydantic, src/shared/case_state.py
+  "extra_instructions": str | null      # set by Orchestrator on retry
+}
+Response body: {
+  "partial_state":  CaseState,          # fields owned by this agent only
+  "audit_entry":    AuditEntry          # appended to CaseState.audit_log
+}
+```
 
-**OpenAI integration via `langchain-openai`.** Agent nodes use `ChatOpenAI` with tool binding and structured output (JSON mode for most agents, strict schema mode for `hearing-governance`). A thin wrapper in `src/pipeline/graph/nodes/common.py:_run_agent_node` standardises prompt assembly, tool dispatch, schema validation, and MLflow tracing.
+Agents are:
 
-**Runtime topology.** The FastAPI service (`src/api/app.py` on port 8001) accepts user actions and enqueues pipeline jobs; the arq worker (`src/workers/worker_settings.py`) claims jobs from the Postgres outbox and invokes the graph. Both processes share the same Docker image — the Procfile differs only in the entrypoint command.
+- **Stateless.** No per-request state survives across invocations; retry safety comes from the Orchestrator's checkpoint, not from agent-local memory.
+- **Idempotent within a `run_id`.** If the Orchestrator retries an invocation, the agent re-runs the LLM call; `audit_log` dedupe is handled by the `_merge_case` reducer on return.
+- **OpenAI-aware.** Each agent uses `langchain-openai.ChatOpenAI` with model, tools, and prompt resolved from `src/pipeline/graph/prompts.py`. Tools come from `src/pipeline/graph/tools.py::make_tools(case_state)` bound per request.
+- **Health-gated.** Each agent exposes `GET /health` for K8s liveness / readiness.
+
+### Communication protocol
+
+- **Transport:** HTTPS (internal, ClusterIP). Target adds mTLS via service mesh.
+- **Encoding:** JSON; `CaseState` round-trips through Pydantic's `.model_dump_json()` / `.model_validate_json()` to guarantee schema stability across versions (see `CaseState.schema_version`).
+- **Auth:** short-lived HMAC header signed with a per-deployment secret (Orchestrator → agent only; agents never call each other).
+- **Timeouts:** Orchestrator applies a per-agent timeout (default 180 s; frontier-tier agents get 300 s). On timeout, the Orchestrator records a failure `AuditEntry` and either retries (via `retry_counts` / `extra_instructions`) or halts via the conditional edge.
+- **Back-pressure:** if an agent pod is slow, the Orchestrator waits in place — the arq job timeout (900 s per run) is the ultimate ceiling. The PAIR tool inside `legal-knowledge` has its own circuit breaker (`src/shared/circuit_breaker.py`) to shed load on the external PAIR API.
+
+### Why LangGraph despite the remote dispatch
+
+LangGraph still earns its place even though the nodes are not executed locally:
+
+- **Typed shared state.** `GraphState` + the `_merge_case` reducer guarantee safe merges when the Orchestrator waits on the four concurrent Gate-2 responses.
+- **Conditional edges.** Halt / retry / escalate logic lives in graph builder code, not scattered across agents.
+- **Checkpointer.** `AsyncPostgresSaver` is a drop-in durable substrate that works regardless of how nodes dispatch.
+- **Homogeneous agent skeleton.** Each agent's `/invoke` handler delegates to `src/pipeline/graph/nodes/common.py::_run_agent_node`, so prompt assembly, tool dispatch, schema validation, and MLflow tracing are identical across agents.
+
+### Implementation status
+
+**The MVP deployment runs all nine agents plus the Orchestrator from a single polyvalent container image** (`verdictcouncil:<tag>`) with a `--agent` entrypoint flag selecting which role the container plays; per-agent Deployments on DOKS are described in [Part 6](06-cicd-pipeline.md) and [Part 8](08-infrastructure-setup.md). In local development the Orchestrator can skip the HTTP hop and invoke agent handlers as Python function calls for speed (`DISPATCH_MODE=local`) — this is the `make dev` / `honcho` path. Production defaults to `DISPATCH_MODE=remote`. Regardless of dispatch mode the logical architecture is unchanged: the Orchestrator is the only component that sees the graph; agents only see their own `/invoke` payload.
 
 ---
 
@@ -198,7 +237,7 @@ class CaseState:
 
 ## 2.5 Pipeline Flow
 
-The full graph is built in `src/pipeline/graph/builder.py:build_graph()`. Every run enters through `pre_run_guardrail`, which checks submitted content for prompt injection and either halts or dispatches to `start_agent` (normally `case-processing` for new cases; `gate2_dispatch`, `argument-construction`, or similar for rerun / what-if modes).
+The Orchestrator builds the graph in `src/pipeline/graph/builder.py:build_graph()`. Every run enters through `pre_run_guardrail`, which checks submitted content for prompt injection, then the Orchestrator dispatches to `start_agent` (normally `case-processing` for new cases; `gate2_dispatch`, `argument-construction`, or similar for rerun / what-if modes). Each arrow in the diagram below that targets a named agent is an HTTPS `POST /invoke` to that agent's Service in remote dispatch mode.
 
 ```
                               START
@@ -271,20 +310,20 @@ No agent ever invokes another agent directly — transitions are declarative edg
 
 ## 2.5.1 Gate-2 Fan-In Barrier (`gate2_join`)
 
-LangGraph fans out from `gate2_dispatch` to four parallel nodes (evidence-analysis, fact-reconstruction, witness-analysis, legal-knowledge) via four outgoing edges. LangGraph handles the barrier automatically: `gate2_join` only fires after all four have returned, and the `_merge_case` reducer composes their partial `CaseState` updates into a single merged state.
+The Orchestrator fans out from `gate2_dispatch` by firing four concurrent HTTPS calls (`asyncio.gather`) to the evidence-analysis, fact-reconstruction, witness-analysis, and legal-knowledge Services. The barrier semantics are enforced by `gate2_join`, which LangGraph only runs once all four responses have returned; the `_merge_case` reducer composes their partial `CaseState` payloads.
 
 ### Responsibilities of `gate2_join`
 
-Defined in `src/pipeline/graph/nodes/gate2_join.py`. Runs synchronously in-process after the parallel branches complete:
+Defined in `src/pipeline/graph/nodes/gate2_join.py`. Runs synchronously inside the Orchestrator after all four remote invocations complete (or after any of them times out):
 
 1. **Validate.** Inspect the merged `CaseState` to confirm each Gate-2 agent produced its expected fields (`evidence_analysis.evidence_items`, `extracted_facts.facts`, `witnesses.witnesses`, `legal_rules` + `precedents`).
-2. **Decide retry vs advance.** If a field is empty or fails validation, route the conditional edge back to the owning agent with an `extra_instructions[agent]` entry explaining what went wrong. The retry is guarded by `retry_counts[agent]`; exceeding the cap halts the pipeline with an escalation reason.
-3. **Advance.** When all four outputs validate, route to `argument-construction`.
-4. **Halt.** Any unrecoverable condition (schema mismatch, repeated failure, downstream-blocking data quality issue) sets `state["halt"]` and routes to `terminal`.
+2. **Decide retry vs advance.** If a field is empty or fails validation, route the conditional edge back to the owning agent with an `extra_instructions[agent]` entry — the Orchestrator re-issues `POST /invoke` to that agent only. The retry is guarded by `retry_counts[agent]`; exceeding the cap halts the pipeline with an escalation reason.
+3. **Advance.** When all four outputs validate, route to `argument-construction` (the Orchestrator then calls the `argument-construction` Service).
+4. **Halt.** Any unrecoverable condition (schema mismatch, repeated failure, per-agent HTTP timeout with exhausted retries, downstream-blocking data quality issue) sets `state["halt"]` and routes to `terminal`.
 
 ### Why this replaces the prior Layer2Aggregator
 
-The previous SAM-based design required a dedicated out-of-process **Layer2Aggregator** service to subscribe to three response topics and manually track per-case completion. With LangGraph the aggregator is a single node inside the graph: the barrier semantics come from the runtime, and the merge semantics come from the typed reducer. No separate pod, no Redis bookkeeping, no broker timeout — just a function.
+The previous Solace-based design required a dedicated out-of-process Layer2Aggregator service to subscribe to three response topics and manually track per-case completion, with Redis bookkeeping for idempotency and broker-specific timeout handling. In the current design the Orchestrator **is** the aggregator: the barrier is `asyncio.gather` + the typed `_merge_case` reducer, timeouts are native HTTP timeouts, and idempotency comes from the graph checkpointer. No separate aggregator pod, no broker, no bespoke bookkeeping.
 
 ---
 
@@ -332,18 +371,20 @@ else:
 
 ### Error Handling
 
-Failure inside a node propagates through LangGraph as an exception. The graph runner (`src/pipeline/graph/runner.py`) catches it, writes an error `AuditEntry`, sets `state["halt"]`, and routes the pipeline to `terminal`.
+Failure during a remote invocation propagates to the Orchestrator. The graph runner (`src/pipeline/graph/runner.py`) catches it, writes an error `AuditEntry`, sets `state["halt"]`, and routes the pipeline to `terminal`.
 
 ```
 Failure scenarios:
-├── LLM API timeout / 5xx      → retries inside _run_agent_node (exponential backoff), then HALT
-├── Tool execution failure      → log tool error in audit_log, HALT (never skip a tool call)
-├── JSON schema validation      → agent output rejected, HALT with the schema error attached
-├── Payload size exceeded       → HALT, case flagged for manual processing
-└── Worker crash                → checkpointer resumes from the last committed node when arq retries the job
+├── Agent HTTP 5xx / connection reset   → Orchestrator retries with backoff (up to per-agent cap), then HALT
+├── Agent HTTP timeout (per-agent SLA)  → Orchestrator records timeout AuditEntry, HALT or retry per policy
+├── LLM API timeout / 5xx (inside agent)→ Agent retries internally (_run_agent_node backoff), then returns 502 to Orchestrator
+├── Tool execution failure              → Agent logs tool error in audit_log, returns 500; Orchestrator HALTs (never skip a tool call)
+├── JSON schema validation              → Orchestrator rejects the agent's partial_state, HALTs with the schema error attached
+├── Payload size exceeded               → HALT at Orchestrator, case flagged for manual processing
+└── Orchestrator pod crash              → arq retries the job; checkpointer resumes from the last committed node
 ```
 
-The checkpointer guarantees at-least-once execution per node from the point of failure. Nodes are idempotent against the `audit_log` (dedup by entry equality) so a resumed run does not double-count.
+The checkpointer guarantees at-least-once execution per node from the point of failure. Agent invocations are idempotent against the `audit_log` (dedup by entry equality) so a resumed run does not double-count.
 
 ---
 
@@ -357,7 +398,15 @@ The pipeline topology (which agents run, in what order) is fixed at deployment t
 
 ### Privilege Separation
 
-Agents that process untrusted content (case-processing, evidence-analysis) have no ability to modify the execution plan. They write only to their designated `CaseState` fields (enforced by the `_merge_case` reducer and per-agent schemas) and cannot invoke the next node directly — the graph runtime owns transitions. Even if an attacker successfully injects instructions into an evidence document, the compromised agent cannot skip the Governance audit or redirect the pipeline.
+Agents that process untrusted content (case-processing, evidence-analysis) have no ability to modify the execution plan. Each agent service only knows how to handle its own `/invoke` endpoint; agents never call each other and do not know the graph topology. They write only to their designated `CaseState` fields (enforced by the `_merge_case` reducer and per-agent schemas) and cannot invoke the next node — the Orchestrator owns transitions. Even if an attacker successfully injects instructions into an evidence document, the compromised agent cannot skip the Governance audit, redirect the pipeline, or reach peer agents.
+
+### Inter-service Auth
+
+The Orchestrator → agent channel is hardened at three layers:
+
+1. **Network.** Agent Services are ClusterIP-only (no external ingress). NetworkPolicy restricts ingress on `/invoke` to the Orchestrator namespace.
+2. **Transport.** HTTPS (terminated at a service mesh sidecar); target adds mTLS with SPIFFE identities.
+3. **Application.** Each request carries an `X-VC-Signature` HMAC over `(run_id, agent_name, body_sha256)` keyed by a per-deployment secret held in the Orchestrator pod. Agents reject unsigned requests.
 
 ### Content Isolation
 
@@ -405,7 +454,8 @@ The pipeline pauses after each of four gates for judge review before proceeding.
 | Output corruption | Pydantic schema validation + OpenAI strict-schema mode for governance | Pipeline |
 | Bias injection | Governance fairness audit (`hearing-governance`) | Agent |
 | Audit trail tampering | Checkpointer-backed `CaseState.audit_log` + MLflow cross-check | Platform |
-| Unauthorized escalation bypass | Halt conditions enforced by conditional edges | Graph |
-| Replay attacks | `run_id` + session-hash JWT + API rate limiting | Pipeline |
+| Unauthorized escalation bypass | Halt conditions enforced by conditional edges in the Orchestrator | Graph |
+| Cross-agent lateral movement | Agents are ClusterIP-only, no peer discovery, HMAC-signed Orchestrator→agent requests | Network |
+| Replay attacks | `run_id` + session-hash JWT + API rate limiting + per-request HMAC over body hash | Pipeline |
 
 ---

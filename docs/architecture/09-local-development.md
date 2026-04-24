@@ -1,6 +1,8 @@
 # Part 9: Local Development
 
-This guide covers running the full VerdictCouncil backend on a developer's machine. After the responsible-AI refactor, local dev is one flow rather than three: dockerised infrastructure + natively run API and worker processes. No Solace broker, no per-agent containers.
+This guide covers running the full VerdictCouncil backend on a developer's machine.
+
+**Dev mode vs production topology.** The canonical architecture is per-agent containers invoked by a central Orchestrator over HTTP (see [Part 2 §2.2](02-system-architecture.md#22-orchestration-platform) and [Part 5 §5.3](05-diagrams.md#53-physical-architecture-diagram)). Locally we skip the HTTP hop for velocity: `DISPATCH_MODE=local` causes the Orchestrator to invoke each agent handler as a Python function call in-process. Infrastructure (Postgres, Redis, MLflow) still runs in Docker. The logical topology is unchanged — only the transport between the Orchestrator and agent handlers differs.
 
 For frontend + backend together, the orchestration root exposes `./dev.sh` which does all of this plus the Vite dev server — see the [root README](../../../README.md).
 

@@ -8,8 +8,10 @@
 > |---|---|---|
 > | Staging trigger | Push to `development` | Push to `release/**` |
 > | Production trigger | Push to `main` | Push to `main` (unchanged) + `v*` tag |
-> | Image strategy | Single image, shared between API and worker runtimes | Same (no change planned) |
-> | Worker deployment | Not yet deployed to K8s; runs in local dev only | `arq-worker` Deployment in `k8s/base/` |
+> | Image strategy | Single polyvalent image; role selected by entrypoint | Same image today; optional per-agent split later |
+> | Cluster topology | API only | API + Orchestrator + 9 agent Services |
+> | Orchestrator deployment | Runs locally via honcho (DISPATCH_MODE=local) | Dedicated `orchestrator` Deployment in `k8s/base/` |
+> | Agent Services | Not yet on K8s | 9 Deployments + 9 ClusterIP Services + NetworkPolicy |
 > | Smoke / canary tests | Not implemented | Post-deploy smoke (staging) + canary (prod) |
 > | Coverage gate | `--cov-fail-under=65` enforced | 80 |
 > | SAST / SCA / DAST | Advisory (`continue-on-error: true`) | SAST hard fail; DAST gated on a live FastAPI + Postgres |
@@ -127,17 +129,23 @@ ENTRYPOINT ["uvicorn"]
 CMD ["src.api.app:app", "--host", "0.0.0.0", "--port", "8001"]
 ```
 
-K8s overrides:
+K8s overrides per Deployment (canonical target: one Deployment per role):
 
 ```yaml
-# api-service (live in k8s/base/deployment-api-service.yaml)
+# vc-api
 command: ["uvicorn"]
 args: ["src.api.app:app", "--host", "0.0.0.0", "--port", "8001"]
 
-# arq-worker (target — not yet in k8s/base/)
+# vc-orchestrator
 command: ["arq"]
 args: ["src.workers.worker_settings.WorkerSettings"]
+
+# vc-agent-<name> (9 deployments; entrypoint differs only by --agent)
+command: ["python", "-m", "src.agents.main"]
+args: ["--agent", "<agent-name>", "--port", "<agent-port>"]
 ```
+
+The `src.agents.main` module is a thin FastAPI wrapper that serves `POST /invoke` + `GET /health` for one agent per container, selected by `--agent`. Each agent runs on a distinct port (`:9101`–`:9109`) and is fronted by its own ClusterIP Service. **Implementation status:** the agent wrapper module and the nine Services/Deployments are the production target; the MVP deploy ships API + Orchestrator only, with `DISPATCH_MODE=local` so the Orchestrator invokes agent handlers in-process.
 
 ### Image naming
 
@@ -369,40 +377,122 @@ spec:
             failureThreshold: 3
 ```
 
-### arq Worker Deployment (target — not yet in `k8s/base/`)
+### Orchestrator Deployment (target — not yet in `k8s/base/`)
 
 ```yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: arq-worker
+  name: orchestrator
   namespace: verdictcouncil
-  labels: {app: verdictcouncil, component: arq-worker}
+  labels: {app: verdictcouncil, component: orchestrator}
 spec:
-  replicas: 1
+  replicas: 2
   selector:
-    matchLabels: {app: verdictcouncil, component: arq-worker}
+    matchLabels: {app: verdictcouncil, component: orchestrator}
   template:
     metadata:
-      labels: {app: verdictcouncil, component: arq-worker}
+      labels: {app: verdictcouncil, component: orchestrator}
     spec:
       containers:
-        - name: arq-worker
+        - name: orchestrator
           image: verdictcouncil:latest
           command: ["arq"]
           args: ["src.workers.worker_settings.WorkerSettings"]
+          env:
+            - name: DISPATCH_MODE
+              value: remote
+            - name: AGENT_HMAC_SECRET
+              valueFrom:
+                secretKeyRef: {name: verdictcouncil-secrets, key: AGENT_HMAC_SECRET}
           envFrom:
             - secretRef: {name: verdictcouncil-secrets}
           resources:
             requests: {cpu: 500m, memory: 512Mi}
             limits:   {cpu: 2,    memory: 2Gi}
-          # arq workers have no HTTP probe — check via prometheus_push or a file-based readiness marker
+          # arq workers have no HTTP probe — readiness inferred from queue heartbeat
 ```
 
-Rationale for keeping the worker separate from the API:
+Rationale for keeping the Orchestrator separate from the API:
+
 - Pipeline runs spike CPU/memory while API stays steady; scaling independently is cheaper.
-- A stuck worker must not take the API (and therefore the frontend) down.
+- A stuck Orchestrator must not take the API (and therefore the frontend) down.
 - Logs are easier to reason about when job spans stay inside one container.
+
+### Agent Services (target — 9 Deployments + 9 Services)
+
+One Deployment per agent, parameterised only by `--agent`, `--port`, and resource requests (frontier-tier agents get more memory). Example for `evidence-analysis`:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-evidence-analysis
+  namespace: verdictcouncil
+  labels: {app: verdictcouncil, component: agent, agent: evidence-analysis}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: verdictcouncil, component: agent, agent: evidence-analysis}
+  template:
+    metadata:
+      labels: {app: verdictcouncil, component: agent, agent: evidence-analysis}
+    spec:
+      containers:
+        - name: agent
+          image: verdictcouncil:latest
+          command: ["python", "-m", "src.agents.main"]
+          args: ["--agent", "evidence-analysis", "--port", "9103"]
+          ports: [{containerPort: 9103}]
+          envFrom:
+            - secretRef: {name: verdictcouncil-secrets}
+          resources:
+            requests: {cpu: 500m, memory: 512Mi}
+            limits:   {cpu: 2,    memory: 2Gi}
+          livenessProbe:
+            httpGet: {path: /health, port: 9103}
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet: {path: /health, port: 9103}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent-evidence-analysis
+  namespace: verdictcouncil
+spec:
+  type: ClusterIP
+  selector: {app: verdictcouncil, component: agent, agent: evidence-analysis}
+  ports:
+    - port: 9103
+      targetPort: 9103
+```
+
+The target roster of nine Deployments:
+
+| Agent | Port | Model tier | Requests | Limits |
+|---|---|---|---|---|
+| `case-processing` | 9101 | lightweight | 250m / 256Mi | 500m / 512Mi |
+| `complexity-routing` | 9102 | lightweight | 250m / 256Mi | 500m / 512Mi |
+| `evidence-analysis` | 9103 | strong | 500m / 512Mi | 2 / 2Gi |
+| `fact-reconstruction` | 9104 | strong | 500m / 512Mi | 2 / 2Gi |
+| `witness-analysis` | 9105 | efficient | 500m / 512Mi | 1 / 1Gi |
+| `legal-knowledge` | 9106 | strong | 500m / 512Mi | 2 / 2Gi |
+| `argument-construction` | 9107 | frontier | 500m / 768Mi | 2 / 3Gi |
+| `hearing-analysis` | 9108 | frontier | 500m / 768Mi | 2 / 3Gi |
+| `hearing-governance` | 9109 | frontier | 500m / 768Mi | 2 / 3Gi |
+
+**NetworkPolicy.** Each agent Deployment has an associated NetworkPolicy allowing ingress on its port only from pods labelled `component: orchestrator`. No other pod (including the API) can reach agent `/invoke` endpoints.
+
+### Build strategy for per-agent images
+
+Today every container runs the same `verdictcouncil:<tag>` image and selects its role via the entrypoint. This keeps the build matrix to one image and keeps image-layer cache hits high across roles. Two evolutions are planned once needed:
+
+1. **Per-agent slim images.** Split out a matrix that produces one image per agent with only the tools that agent imports (e.g. `verdictcouncil-legal-knowledge` would include httpx + the PAIR client but not WeasyPrint). Expected payoff: smaller image size, faster cold starts.
+2. **Layer-cache-optimised staged builds.** A shared base layer (`python + openai + langgraph + pydantic`) and per-agent top layers. Keeps image count at ten but reduces registry storage.
 
 ### Ingress (live)
 
@@ -492,7 +582,11 @@ Production and staging both use `verdictcouncil-secrets` (populated by the deplo
 
 ### HorizontalPodAutoscaler (target)
 
-Not in base yet. When the worker Deployment lands, scale it on queue depth (via a Prometheus adapter metric published by arq) and scale the API on CPU + RPS.
+Not in base yet. Target:
+
+- **vc-api** scales on CPU + RPS (NGINX metrics via Prometheus adapter).
+- **vc-orchestrator** scales on arq queue depth.
+- **Per-agent HPAs** scale each agent on a queue-free signal — request concurrency at the Service + p95 latency. Frontier-tier agents scale more aggressively because they sit on the critical path.
 
 ---
 
@@ -529,15 +623,17 @@ flowchart TB
     end
 
     subgraph DOKS_STAGING[DOKS — verdictcouncil-staging]
-        APIS[api-service Deployment]
-        WRKS[arq-worker Deployment — target]
+        APIS[vc-api]
+        ORCS[vc-orchestrator — target]
+        A_S[9 agent Deployments — target]
         WDS[stuck-case-watchdog CronJob]
         INGS[Ingress → staging-api.verdictcouncil.sg]
     end
 
     subgraph DOKS_PROD[DOKS — verdictcouncil]
-        APIP[api-service Deployment]
-        WRKP[arq-worker Deployment — target]
+        APIP[vc-api]
+        ORCP[vc-orchestrator — target]
+        A_P[9 agent Deployments — target]
         WDP[stuck-case-watchdog CronJob]
         INGP[Ingress → api.verdictcouncil.sg]
     end
@@ -556,14 +652,16 @@ flowchart TB
     GHA -->|kubectl apply + rollout| DOKS_PROD
 
     APIS --> PGS
-    WRKS --> PGS
     APIS --> RDS
-    WRKS --> RDS
+    ORCS --> PGS
+    ORCS --> RDS
+    ORCS -.->|POST /invoke| A_S
 
     APIP --> PGP
-    WRKP --> PGP
     APIP --> RDP
-    WRKP --> RDP
+    ORCP --> PGP
+    ORCP --> RDP
+    ORCP -.->|POST /invoke| A_P
 
     INGS --> APIS
     INGP --> APIP
