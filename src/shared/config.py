@@ -74,10 +74,10 @@ class Settings(BaseSettings):
     # integration suite is green.
     use_mesh_runner: bool = False
     # Runner selection: "mesh" | "graph" | "shadow".
-    # "graph" uses the LangGraph StateGraph runner.
-    # "shadow" runs both and diffs outputs via MLflow (graph result is discarded; mesh result returned).
-    # "mesh" is the default until shadow parity ≥ 95% is confirmed.
-    runner: Literal["mesh", "graph", "shadow"] = "mesh"
+    # "graph" uses the LangGraph StateGraph runner (default).
+    # "shadow" runs both and diffs outputs via MLflow (mesh result returned).
+    # "mesh" remains available for rollback via RUNNER=mesh env var.
+    runner: Literal["mesh", "graph", "shadow"] = "graph"
     precedent_cache_ttl_seconds: int = 86400
     pair_api_url: str = "https://search.pair.gov.sg/api/v1/search"
     pair_circuit_breaker_threshold: int = 3
