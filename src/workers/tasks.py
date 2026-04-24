@@ -171,6 +171,7 @@ async def run_gate_job(ctx: dict[str, Any], job_id: str) -> None:  # noqa: ARG00
         async with async_session() as db:
             from sqlalchemy import select as _select
             from sqlalchemy.orm import joinedload as _joinedload
+
             from src.tools.exceptions import RetiredDomainError
 
             case_result = await db.execute(

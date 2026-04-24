@@ -58,7 +58,9 @@ async def list_active_domains(
     db: DBSession,
     current_user: CurrentUser,
 ) -> list[PublicDomainResponse]:
-    result = await db.execute(select(Domain).where(Domain.is_active.is_(True)).order_by(Domain.name))
+    result = await db.execute(
+        select(Domain).where(Domain.is_active.is_(True)).order_by(Domain.name)
+    )
     return [
         PublicDomainResponse(
             id=d.id,
@@ -330,7 +332,8 @@ async def _ingest_domain_document(
     actor_id: UUID,
 ) -> None:
     """Background pipeline: upload → parse → sanitize → index."""
-    from openai import AsyncOpenAI, NotFoundError as OpenAINotFoundError
+    from openai import AsyncOpenAI
+    from openai import NotFoundError as OpenAINotFoundError
 
     from src.services.database import async_session
     from src.tools.parse_document import parse_document
@@ -479,7 +482,7 @@ async def _ingest_domain_document(
         404: {"model": ErrorResponse, "description": "Domain not found"},
         413: {"model": ErrorResponse, "description": "File too large"},
         415: {"model": ErrorResponse, "description": "Unsupported file type"},
-        503: {"model": ErrorResponse, "description": "Uploads temporarily disabled or vector store unavailable"},
+        503: {"model": ErrorResponse, "description": "Uploads temporarily disabled or vector store unavailable"},  # noqa: E501
     },
 )
 async def upload_domain_document(

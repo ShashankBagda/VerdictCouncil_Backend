@@ -67,9 +67,11 @@ async def test_search_domain_guidance_raises_on_none_vector_store_id():
 async def test_fail_closed_does_not_call_openai():
     """When vector_store_id is empty, OpenAI must not be called — no network on fail-closed."""
     mock_client = _mock_openai_client()
-    with patch("src.tools.search_domain_guidance._get_client", return_value=mock_client):
-        with pytest.raises(DomainGuidanceUnavailable):
-            await search_domain_guidance("query", vector_store_id="")
+    with (
+        patch("src.tools.search_domain_guidance._get_client", return_value=mock_client),
+        pytest.raises(DomainGuidanceUnavailable),
+    ):
+        await search_domain_guidance("query", vector_store_id="")
     mock_client.responses.create.assert_not_awaited()
 
 
@@ -199,7 +201,7 @@ async def test_openai_api_error_raises_domain_guidance_unavailable():
 @pytest.mark.asyncio
 async def test_search_domain_guidance_respects_max_results():
     """Results are capped at max_results even if OpenAI returns more."""
-    results = [_mock_file_search_result(f"doc_{i}.pdf", 0.9 - i * 0.1, f"Text {i}") for i in range(10)]
+    results = [_mock_file_search_result(f"doc_{i}.pdf", 0.9 - i * 0.1, f"Text {i}") for i in range(10)]  # noqa: E501
     search_call = _mock_file_search_call(results)
     response = _mock_response([search_call])
     mock_client = _mock_openai_client(response)

@@ -17,9 +17,10 @@ import os
 import uuid
 
 import pytest
-from alembic import command
 from alembic.config import Config
 from sqlalchemy import inspect, text
+
+from alembic import command
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("INTEGRATION_TESTS") != "1",
@@ -76,7 +77,7 @@ async def test_migration_0019_upgrade_seeds_small_claims_and_traffic():
 
     async with async_session() as session:
         result = await session.execute(
-            text("SELECT code FROM domains WHERE code IN ('small_claims', 'traffic_violation') ORDER BY code")
+            text("SELECT code FROM domains WHERE code IN ('small_claims', 'traffic_violation') ORDER BY code")  # noqa: E501
         )
         codes = [r[0] for r in result.fetchall()]
 
@@ -128,9 +129,9 @@ async def test_migration_0019_upgrade_adds_domain_id_to_cases():
 @pytest.mark.asyncio
 async def test_migration_0019_backfill_sets_domain_id():
     """Existing cases with domain='small_claims' must have domain_id set after backfill."""
-    from src.services.database import async_session
     from src.models.case import Case, CaseDomain, CaseStatus
     from src.models.user import User, UserRole
+    from src.services.database import async_session
 
     cfg = _alembic_cfg()
     # Apply migration up to 0018 to insert a test row, then upgrade to 0019
@@ -193,7 +194,7 @@ async def test_migration_0019_downgrade_removes_domains_table():
         remaining = [r[0] for r in result.fetchall()]
 
     assert "domains" not in remaining, "domains table must be dropped on downgrade"
-    assert "domain_documents" not in remaining, "domain_documents table must be dropped on downgrade"
+    assert "domain_documents" not in remaining, "domain_documents table must be dropped on downgrade"  # noqa: E501
 
 
 @pytest.mark.asyncio

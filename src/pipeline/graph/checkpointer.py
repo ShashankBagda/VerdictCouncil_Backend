@@ -17,10 +17,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_checkpointer: "AsyncPostgresSaver | None" = None
+_checkpointer: AsyncPostgresSaver | None = None
 
 
-async def get_checkpointer() -> "AsyncPostgresSaver":
+async def get_checkpointer() -> AsyncPostgresSaver:
     """Return the singleton AsyncPostgresSaver, creating it on first call."""
     global _checkpointer
     if _checkpointer is not None:

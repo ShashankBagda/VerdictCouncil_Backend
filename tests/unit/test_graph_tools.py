@@ -10,7 +10,6 @@ from src.pipeline.graph.prompts import AGENT_TOOLS
 from src.pipeline.graph.tools import PrecedentMetaSideChannel, make_tools
 from src.shared.case_state import CaseState
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

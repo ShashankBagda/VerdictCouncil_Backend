@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from src.pipeline.graph.builder import (
     _route_after_case_processing,
     _route_after_complexity_routing,
@@ -17,9 +15,9 @@ from src.shared.case_state import (
     CaseStatusEnum,
     EvidenceAnalysis,
     ExtractedFacts,
+    FairnessCheck,
     HearingAnalysis,
     Witnesses,
-    FairnessCheck,
 )
 
 

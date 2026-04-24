@@ -225,7 +225,7 @@ async def test_ingest_parse_failure_marks_doc_failed():
 
 @pytest.mark.asyncio
 async def test_only_sanitized_file_goes_into_vector_store():
-    """The original OpenAI file must not be added to the vector store — only the sanitized artifact."""
+    """The original OpenAI file must not be added to the vector store — only the sanitized artifact."""  # noqa: E501
     from src.api.routes.domains import _ingest_domain_document
 
     admin = _make_admin()

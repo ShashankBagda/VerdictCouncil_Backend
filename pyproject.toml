@@ -66,6 +66,9 @@ ignore = [
     "B008",   # FastAPI uses function calls in defaults (Depends, Query)
 ]
 
+[tool.ruff.lint.per-file-ignores]
+"src/pipeline/graph/prompts.py" = ["E501"]  # prompt strings intentionally exceed line limit
+
 [tool.mypy]
 python_version = "3.12"
 strict = true

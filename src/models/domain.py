@@ -59,7 +59,7 @@ class DomainDocument(UUIDPrimaryKeyMixin, Base):
     filename: Mapped[str] = mapped_column(String(500), nullable=False)
     mime_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
     size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    sanitized: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false", default=False)
+    sanitized: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false", default=False)  # noqa: E501
     status: Mapped[DomainDocumentStatus] = mapped_column(
         String(20), nullable=False, server_default=DomainDocumentStatus.pending.value
     )

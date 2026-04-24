@@ -106,7 +106,6 @@ async def _reconcile_one(client, doc: DomainDocument) -> None:
 
 async def _check_vector_store_file(client, db, doc: DomainDocument) -> None:
     """Poll the vector store file status and advance or fail the document."""
-    from sqlalchemy import select
 
     from src.models.domain import Domain
 
@@ -133,7 +132,9 @@ async def _check_vector_store_file(client, db, doc: DomainDocument) -> None:
     elif vs_file.status in {"failed", "cancelled"}:
         doc.status = DomainDocumentStatus.failed
         doc.error_reason = f"OpenAI vector store file status: {vs_file.status}"
-        logger.warning("DomainDocument %s reconciled → failed (VS status=%s)", doc.id, vs_file.status)
+        logger.warning(
+            "DomainDocument %s reconciled → failed (VS status=%s)", doc.id, vs_file.status
+        )
     else:
         # Still in progress — leave it for the next reconciliation pass
         logger.debug(

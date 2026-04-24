@@ -33,7 +33,6 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 import pytest
-
 from src.pipeline._a2a_client import build_send_task_request, new_task_id
 from src.pipeline._solace_a2a_client import REPLY_TO_PROPERTY, SolaceA2AClient
 from src.services.layer2_aggregator.a2a import (

@@ -18,7 +18,10 @@ OPENAPI_TAGS = [
     },
     {
         "name": "cases",
-        "description": "CRUD operations for judicial cases. Judges create and manage cases; admins have full visibility.",
+        "description": (
+            "CRUD operations for judicial cases. "
+            "Judges create and manage cases; admins have full visibility."
+        ),
     },
     {
         "name": "what-if",
@@ -66,7 +69,7 @@ OPENAPI_TAGS = [
     },
     {
         "name": "domains",
-        "description": "Domain management: create/retire domains, upload per-domain guidance documents.",
+        "description": "Domain management: create/retire domains, upload per-domain guidance documents.",  # noqa: E501
     },
 ]
 

@@ -41,7 +41,6 @@ from src.services.case_report_data import build_case_report_data
 from src.services.hearing_pack import assemble_pack
 from src.services.pdf_export import render_case_report_pdf
 from src.services.pipeline_events import subscribe as subscribe_pipeline_events
-from src.shared.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -578,7 +577,7 @@ async def create_case_draft(
     response_model=CaseResponse,
     status_code=status.HTTP_200_OK,
     operation_id="confirm_case_intake",
-    summary="Judge confirms extracted fields — transitions draft/awaiting_intake_confirmation → pending",
+    summary="Judge confirms extracted fields — transitions draft/awaiting_intake_confirmation → pending",  # noqa: E501
 )
 async def confirm_case_intake(
     case_id: UUID,
@@ -1173,7 +1172,6 @@ async def _run_case_pipeline(case_id: UUID) -> None:
     from src.models.case import CaseStatus as CaseStatusModel
     from src.services.database import async_session
     from src.shared.case_state import CaseState
-    from src.shared.config import settings
 
     async with async_session() as db:
         from sqlalchemy.orm import joinedload as _joinedload

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from src.pipeline.graph.prompts import (
     AGENT_MODEL_TIER,
     AGENT_ORDER,
@@ -21,7 +19,6 @@ from src.shared.case_state import (
     ExtractedFacts,
     Witnesses,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -235,7 +232,7 @@ class TestMergeCaseAuditLog:
     def test_audit_log_parallel_accumulation(self):
         """Each L2 agent appends its own entry; all four must survive."""
         state = _base()
-        for agent in ["evidence-analysis", "fact-reconstruction", "witness-analysis", "legal-knowledge"]:
+        for agent in ["evidence-analysis", "fact-reconstruction", "witness-analysis", "legal-knowledge"]:  # noqa: E501
             entry = self._entry(agent, "completed")
             update = CaseState(audit_log=[entry])
             state = _merge_case(state, update)

@@ -9,7 +9,6 @@ node; the caller folds this into CaseState.precedent_source_metadata at exit.
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 from langchain_core.tools import tool
@@ -97,7 +96,7 @@ class _GenerateQuestionsInput(BaseModel):
 
 class _ConfidenceCalcInput(BaseModel):
     evidence_strengths: list[str] = Field(
-        description="Strength labels per evidence item: 'strong' | 'moderate' | 'weak' | 'insufficient'"
+        description="Strength labels per evidence item: 'strong' | 'moderate' | 'weak' | 'insufficient'"  # noqa: E501
     )
     fact_statuses: list[str] = Field(
         description="Status labels per extracted fact: 'established' | 'disputed' | 'unverified'"

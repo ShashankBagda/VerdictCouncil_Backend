@@ -19,7 +19,6 @@ import pytest
 
 from src.services.pipeline_events import _is_terminal_event
 
-
 # ---------------------------------------------------------------------------
 # _is_terminal_event
 # ---------------------------------------------------------------------------
@@ -202,8 +201,9 @@ class TestNodeCoreSSEEvents:
     async def test_started_then_completed_progress_events(self):
         """publish_progress must be called: started → completed, in order."""
         import json
+        from unittest.mock import MagicMock
+
         from langchain_core.messages import AIMessage
-        from unittest.mock import AsyncMock, MagicMock, patch
 
         from src.pipeline.graph.nodes.common import _run_agent_node
 
@@ -237,8 +237,9 @@ class TestNodeCoreSSEEvents:
     async def test_agent_completed_event_emitted(self):
         """publish_agent_event must include an agent_completed entry."""
         import json
+        from unittest.mock import MagicMock
+
         from langchain_core.messages import AIMessage
-        from unittest.mock import AsyncMock, MagicMock, patch
 
         from src.pipeline.graph.nodes.common import _run_agent_node
 
@@ -272,8 +273,9 @@ class TestNodeCoreSSEEvents:
     async def test_started_event_carries_correct_agent_name(self):
         """The started PipelineProgressEvent must name the correct agent."""
         import json
+        from unittest.mock import MagicMock
+
         from langchain_core.messages import AIMessage
-        from unittest.mock import AsyncMock, MagicMock, patch
 
         from src.pipeline.graph.nodes.common import _run_agent_node
 

@@ -20,6 +20,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from langchain_openai import ChatOpenAI
 
 from src.api.schemas.pipeline_events import PipelineProgressEvent
+from src.db.pipeline_state import persist_case_state
 from src.pipeline.graph.prompts import (
     AGENT_MODEL_TIER,
     AGENT_ORDER,
@@ -27,7 +28,6 @@ from src.pipeline.graph.prompts import (
     MODEL_TIER_MAP,
 )
 from src.pipeline.graph.state import GraphState
-from src.db.pipeline_state import persist_case_state
 from src.pipeline.graph.tools import make_tools
 from src.pipeline.observability import agent_run
 from src.services.database import async_session

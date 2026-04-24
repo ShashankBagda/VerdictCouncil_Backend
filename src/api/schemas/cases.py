@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, time
-from typing import Any
-from uuid import UUID
-
 import logging
 import warnings
+from datetime import date, datetime, time
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
@@ -90,9 +88,8 @@ class CaseCreateRequest(BaseModel):
                     "SCT claim_amount above $20,000 requires consent_to_higher_claim_limit."
                 )
 
-        if domain_code == CaseDomain.traffic_violation.value:
-            if not self.offence_code:
-                raise ValueError("Traffic cases require offence_code.")
+        if domain_code == CaseDomain.traffic_violation.value and not self.offence_code:
+            raise ValueError("Traffic cases require offence_code.")
 
         return self
 
@@ -356,7 +353,7 @@ class CaseDetailResponse(CaseResponse):
     )
     domain_has_vector_store: bool = Field(
         False,
-        description="True when the case's domain has an active vector store (admin-uploaded materials).",
+        description="True when the case's domain has an active vector store (admin-uploaded materials).",  # noqa: E501
     )
 
 

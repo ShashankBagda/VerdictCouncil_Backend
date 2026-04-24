@@ -12,7 +12,6 @@ from src.tools.search_precedents import (
     search_precedents_with_meta,
 )
 
-
 # ------------------------------------------------------------------ #
 # Cache key isolation
 # ------------------------------------------------------------------ #

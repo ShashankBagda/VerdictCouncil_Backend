@@ -40,7 +40,8 @@ async def vector_store_search(
 
     Fail-closed semantics:
     - vector_store_id provided → use it.
-    - vector_store_id=None + allow_global_fallback=True + global id configured → use global, log WARN.
+    - vector_store_id=None + allow_global_fallback=True + global id configured
+      → use global, log WARN.
     - vector_store_id=None + allow_global_fallback=False → raise VectorStoreError immediately.
     - All other None combinations → raise VectorStoreError.
 

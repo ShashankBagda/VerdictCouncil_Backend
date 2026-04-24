@@ -16,7 +16,6 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 from sqlalchemy import select
 
 from src.api.deps import CurrentUser, DBSession
-from src.models.user import UserRole
 from src.api.schemas.cases import (
     ArgumentResponse,
     DocumentResponse,
@@ -43,6 +42,7 @@ from src.models.case import (
     Precedent,
     Witness,
 )
+from src.models.user import UserRole
 
 # Typed slots that kick off intake extraction as soon as one is uploaded.
 # Judges can still drop evidence bundles or letters of mitigation into a
@@ -190,13 +190,13 @@ def _derive_overall_status(case: Case, agents: list[dict]) -> str:
         return "completed"
     # Gate-pause statuses — pass through the enum value string so the
     # frontend can render gate review panels and stop polling.
-    _GATE_PAUSE_STATUSES = {
+    gate_pause_statuses = {
         CaseStatus.awaiting_review_gate1,
         CaseStatus.awaiting_review_gate2,
         CaseStatus.awaiting_review_gate3,
         CaseStatus.awaiting_review_gate4,
     }
-    if case.status in _GATE_PAUSE_STATUSES:
+    if case.status in gate_pause_statuses:
         return case.status.value
     # Derive from agent states for actively-processing cases
     if any(a["status"] == "failed" for a in agents):
