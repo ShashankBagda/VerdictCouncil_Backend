@@ -20,6 +20,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from langchain_openai import ChatOpenAI
 
 from src.api.schemas.pipeline_events import PipelineProgressEvent
+from src.db.pipeline_state import persist_case_state
 from src.pipeline.graph.prompts import (
     AGENT_MODEL_TIER,
     AGENT_ORDER,
@@ -27,7 +28,6 @@ from src.pipeline.graph.prompts import (
     MODEL_TIER_MAP,
 )
 from src.pipeline.graph.state import GraphState
-from src.db.pipeline_state import persist_case_state
 from src.pipeline.graph.tools import make_tools
 from src.pipeline.observability import agent_run
 from src.services.database import async_session
@@ -94,9 +94,7 @@ async def _run_agent_node(agent_name: str, state: GraphState) -> dict[str, Any]:
     # ------------------------------------------------------------------
     system_prompt = AGENT_PROMPTS[agent_name]
     if extra:
-        system_prompt = (
-            f"{system_prompt}\n\nAdditional instructions from judge:\n{extra}"
-        )
+        system_prompt = f"{system_prompt}\n\nAdditional instructions from judge:\n{extra}"
 
     # ------------------------------------------------------------------
     # Model + tools
@@ -170,9 +168,7 @@ async def _run_agent_node(agent_name: str, state: GraphState) -> dict[str, Any]:
                     tool = _find_tool(tools, fn_name)
                     result_raw = await tool.ainvoke(fn_args)
                 except Exception as exc:
-                    logger.warning(
-                        "Tool '%s' raised in agent '%s': %s", fn_name, agent_name, exc
-                    )
+                    logger.warning("Tool '%s' raised in agent '%s': %s", fn_name, agent_name, exc)
                     result_raw = {"error": str(exc)}
 
                 result_str = json.dumps(result_raw, default=str)
@@ -189,12 +185,8 @@ async def _run_agent_node(agent_name: str, state: GraphState) -> dict[str, Any]:
                     },
                 )
 
-                tool_calls_log.append(
-                    {"tool": fn_name, "arguments": fn_args, "result": result_raw}
-                )
-                tool_result_msgs.append(
-                    ToolMessage(content=result_str, tool_call_id=tc_id)
-                )
+                tool_calls_log.append({"tool": fn_name, "arguments": fn_args, "result": result_raw})
+                tool_result_msgs.append(ToolMessage(content=result_str, tool_call_id=tc_id))
 
             messages.extend(tool_result_msgs)
 
@@ -204,9 +196,7 @@ async def _run_agent_node(agent_name: str, state: GraphState) -> dict[str, Any]:
                     "case_id": case_id,
                     "agent": agent_name,
                     "event": "thinking",
-                    "content": (
-                        f"→ {model_name} · continuing after {len(tool_calls_log)} tool call(s)"
-                    ),
+                    "content": (f"→ {model_name} · continuing after {len(tool_calls_log)} tool call(s)"),
                     "ts": datetime.now(UTC).isoformat(),
                 },
             )
@@ -237,9 +227,7 @@ async def _run_agent_node(agent_name: str, state: GraphState) -> dict[str, Any]:
     try:
         agent_output = json.loads(raw_content)
     except json.JSONDecodeError:
-        logger.error(
-            "Agent '%s' returned non-JSON: %s", agent_name, raw_content[:500]
-        )
+        logger.error("Agent '%s' returned non-JSON: %s", agent_name, raw_content[:500])
         agent_output = {}
 
     agent_output = normalize_agent_output(agent_name, agent_output)
@@ -291,9 +279,7 @@ async def _run_agent_node(agent_name: str, state: GraphState) -> dict[str, Any]:
         action="agent_response",
         input_payload={"state_keys": list(original_dict.keys())},
         output_payload=agent_output,
-        system_prompt=(
-            system_prompt[:200] + "..." if len(system_prompt) > 200 else system_prompt
-        ),
+        system_prompt=(system_prompt[:200] + "..." if len(system_prompt) > 200 else system_prompt),
         llm_response={"content": raw_content[:1000]},
         tool_calls=tool_calls_log or None,
         model=model_name,

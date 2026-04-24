@@ -109,8 +109,7 @@ async def register(body: RegisterRequest, db: DBSession) -> User:
     response_model=MessageResponse,
     operation_id="login",
     summary="Authenticate and receive session cookie",
-    description="Verify credentials and set an httpOnly `vc_token` JWT cookie. "
-    "The cookie is valid for 24 hours.",
+    description="Verify credentials and set an httpOnly `vc_token` JWT cookie. The cookie is valid for 24 hours.",
     responses={
         401: {"model": ErrorResponse, "description": "Invalid email or password"},
         422: {"model": ValidationErrorResponse, "description": "Validation error"},
@@ -163,9 +162,7 @@ async def logout(
     vc_token: str | None = Cookie(default=None),
 ) -> dict:
     if vc_token:
-        result = await db.execute(
-            select(Session).where(Session.jwt_token_hash == _hash_jwt_token(vc_token))
-        )
+        result = await db.execute(select(Session).where(Session.jwt_token_hash == _hash_jwt_token(vc_token)))
         session = result.scalar_one_or_none()
         if session:
             await db.delete(session)
@@ -191,14 +188,10 @@ async def session_info(
     if not vc_token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
 
-    result = await db.execute(
-        select(Session).where(Session.jwt_token_hash == _hash_jwt_token(vc_token))
-    )
+    result = await db.execute(select(Session).where(Session.jwt_token_hash == _hash_jwt_token(vc_token)))
     session = result.scalar_one_or_none()
     if not session:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Session revoked or expired"
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session revoked or expired")
 
     return {
         "user": UserResponse.model_validate(current_user).model_dump(mode="json"),
@@ -225,14 +218,10 @@ async def extend_session(
     if not vc_token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
 
-    result = await db.execute(
-        select(Session).where(Session.jwt_token_hash == _hash_jwt_token(vc_token))
-    )
+    result = await db.execute(select(Session).where(Session.jwt_token_hash == _hash_jwt_token(vc_token)))
     session = result.scalar_one_or_none()
     if not session:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Session revoked or expired"
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session revoked or expired")
 
     new_token = _create_token(current_user)
     new_expires_at = datetime.now(UTC) + timedelta(hours=TOKEN_EXPIRY_HOURS)
@@ -308,9 +297,7 @@ async def request_password_reset(
 )
 async def verify_password_reset(body: PasswordResetVerifyBody, db: DBSession) -> dict:
     token_hash = _hash_jwt_token(body.token)
-    result = await db.execute(
-        select(PasswordResetToken).where(PasswordResetToken.token_hash == token_hash)
-    )
+    result = await db.execute(select(PasswordResetToken).where(PasswordResetToken.token_hash == token_hash))
     reset_token = result.scalar_one_or_none()
 
     now = datetime.now(UTC)

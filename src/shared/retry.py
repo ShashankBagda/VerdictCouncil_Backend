@@ -42,9 +42,7 @@ def retry_with_backoff(
                         str(e),
                     )
                     await asyncio.sleep(delay)
-            raise MaxRetriesError(
-                f"{func.__name__} failed after {max_retries} retries"
-            ) from last_exception
+            raise MaxRetriesError(f"{func.__name__} failed after {max_retries} retries") from last_exception
 
         return wrapper
 

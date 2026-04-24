@@ -46,9 +46,7 @@ class TestLegalKnowledgeToolParity:
         raw = _load_yaml_with_includes(CONFIGS_DIR / "legal-knowledge.yaml")
         tool_classes = _extract_tool_class_names(raw)
         missing = REQUIRED_TOOLS - tool_classes
-        assert not missing, (
-            f"legal-knowledge missing required tools: {missing}"
-        )
+        assert not missing, f"legal-knowledge missing required tools: {missing}"
 
     def test_search_domain_guidance_tool_module_path(self):
         raw = _load_yaml_with_includes(CONFIGS_DIR / "legal-knowledge.yaml")

@@ -16,9 +16,7 @@ from src.models.case import EvidenceStrength, EvidenceType, FactConfidence, Fact
 
 
 class DisputeFactRequest(BaseModel):
-    reason: str = Field(
-        ..., description="Reason for disputing the fact", min_length=1, max_length=1000
-    )
+    reason: str = Field(..., description="Reason for disputing the fact", min_length=1, max_length=1000)
 
 
 class DisputeFactResponse(BaseModel):
@@ -83,6 +81,4 @@ class FairnessAuditResponse(BaseModel):
         default_factory=list,
         description="Fairness check outputs from governance agent audit logs",
     )
-    has_fairness_data: bool = Field(
-        ..., description="Whether any fairness data exists for this case"
-    )
+    has_fairness_data: bool = Field(..., description="Whether any fairness data exists for this case")

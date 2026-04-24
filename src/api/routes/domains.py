@@ -246,9 +246,7 @@ async def retire_domain(
     if hard:
         from src.models.case import Case
 
-        live_count_result = await db.execute(
-            select(Case).where(Case.domain_id == domain_id)
-        )
+        live_count_result = await db.execute(select(Case).where(Case.domain_id == domain_id))
         if live_count_result.scalars().first():
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -313,9 +311,7 @@ async def list_domain_documents(
     if not domain:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Domain not found")
     result = await db.execute(
-        select(DomainDocument)
-        .where(DomainDocument.domain_id == domain_id)
-        .order_by(DomainDocument.uploaded_at.desc())
+        select(DomainDocument).where(DomainDocument.domain_id == domain_id).order_by(DomainDocument.uploaded_at.desc())
     )
     return list(result.scalars().all())
 
@@ -330,7 +326,8 @@ async def _ingest_domain_document(
     actor_id: UUID,
 ) -> None:
     """Background pipeline: upload → parse → sanitize → index."""
-    from openai import AsyncOpenAI, NotFoundError as OpenAINotFoundError
+    from openai import AsyncOpenAI
+    from openai import NotFoundError as OpenAINotFoundError
 
     from src.services.database import async_session
     from src.tools.parse_document import parse_document
@@ -380,9 +377,7 @@ async def _ingest_domain_document(
                 await db.commit()
                 return
 
-            sanitized_text = "\n".join(
-                f"--- Page {i + 1} ---\n{p.get('text', '')}" for i, p in enumerate(pages)
-            )
+            sanitized_text = "\n".join(f"--- Page {i + 1} ---\n{p.get('text', '')}" for i, p in enumerate(pages))
             sanitized_filename = f"{filename.rsplit('.', 1)[0]}.sanitized.txt"
 
             try:
@@ -417,9 +412,7 @@ async def _ingest_domain_document(
                 try:
                     from src.services.knowledge_base import ensure_domain_vector_store
 
-                    current_vs_id, _ = await ensure_domain_vector_store(
-                        db, str(domain_id), force_recreate=True
-                    )
+                    current_vs_id, _ = await ensure_domain_vector_store(db, str(domain_id), force_recreate=True)
                     vs_file = await client.vector_stores.files.create_and_poll(
                         vector_store_id=current_vs_id,
                         file_id=san_file.id,
@@ -522,10 +515,7 @@ async def upload_domain_document(
     if len(content) > settings.domain_kb_max_upload_bytes:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=(
-                f"File exceeds maximum size of "
-                f"{settings.domain_kb_max_upload_bytes // 1024 // 1024} MiB"
-            ),
+            detail=(f"File exceeds maximum size of {settings.domain_kb_max_upload_bytes // 1024 // 1024} MiB"),
         )
 
     filename = file.filename or "document"
@@ -576,9 +566,7 @@ async def delete_domain_document(
     current_user: User = require_role(UserRole.admin),
 ) -> DomainDocument:
     result = await db.execute(
-        select(DomainDocument).where(
-            DomainDocument.id == doc_id, DomainDocument.domain_id == domain_id
-        )
+        select(DomainDocument).where(DomainDocument.id == doc_id, DomainDocument.domain_id == domain_id)
     )
     doc = result.scalar_one_or_none()
     if not doc:

@@ -51,8 +51,7 @@ def _strip_volatile(state_dict: dict[str, Any]) -> dict[str, Any]:
     # Sanitize audit_log entries
     if "audit_log" in cleaned and cleaned["audit_log"]:
         cleaned["audit_log"] = [
-            {k: v for k, v in entry.items() if k not in _VOLATILE_AUDIT_KEYS}
-            for entry in cleaned["audit_log"]
+            {k: v for k, v in entry.items() if k not in _VOLATILE_AUDIT_KEYS} for entry in cleaned["audit_log"]
         ]
 
     # Sanitize orchestration metadata
@@ -61,15 +60,13 @@ def _strip_volatile(state_dict: dict[str, Any]) -> dict[str, Any]:
         orch = meta["orchestration"]
         cleaned["case_metadata"] = {
             **meta,
-            "orchestration": {
-                k: v for k, v in orch.items() if k not in _VOLATILE_ORCHESTRATION_KEYS
-            },
+            "orchestration": {k: v for k, v in orch.items() if k not in _VOLATILE_ORCHESTRATION_KEYS},
         }
 
     return cleaned
 
 
-def _compute_match_ratio(diff: "DeepDiff") -> float:
+def _compute_match_ratio(diff: DeepDiff) -> float:
     """Estimate field-match ratio from a DeepDiff result (0.0–1.0)."""
     if not diff:
         return 1.0
@@ -93,9 +90,7 @@ class ShadowRunner:
         mesh_task = asyncio.create_task(self._run_mesh(case_state))
         graph_task = asyncio.create_task(self._run_graph(case_state))
 
-        mesh_result, graph_result = await asyncio.gather(
-            mesh_task, graph_task, return_exceptions=True
-        )
+        mesh_result, graph_result = await asyncio.gather(mesh_task, graph_task, return_exceptions=True)
 
         if isinstance(mesh_result, Exception):
             logger.error("Shadow: mesh runner failed: %s", mesh_result)
@@ -135,9 +130,7 @@ class ShadowRunner:
             )
         )
 
-        mesh_result, graph_result = await asyncio.gather(
-            mesh_task, graph_task, return_exceptions=True
-        )
+        mesh_result, graph_result = await asyncio.gather(mesh_task, graph_task, return_exceptions=True)
 
         if isinstance(mesh_result, Exception):
             logger.error("Shadow gate %s: mesh failed: %s", gate_name, mesh_result)
@@ -146,9 +139,7 @@ class ShadowRunner:
             raise mesh_result
 
         if isinstance(graph_result, Exception):
-            logger.warning(
-                "Shadow gate %s: graph failed: %s — returning mesh result", gate_name, graph_result
-            )
+            logger.warning("Shadow gate %s: graph failed: %s — returning mesh result", gate_name, graph_result)
             return mesh_result  # type: ignore[return-value]
 
         await self._log_diff(
@@ -190,9 +181,7 @@ class ShadowRunner:
                 significant_digits=3,
             )
             match_ratio = _compute_match_ratio(diff)
-            diff_field_count = sum(
-                len(v) for v in diff.to_dict().values() if isinstance(v, dict)
-            )
+            diff_field_count = sum(len(v) for v in diff.to_dict().values() if isinstance(v, dict))
 
             import mlflow
 
@@ -209,9 +198,7 @@ class ShadowRunner:
                 mlflow.log_metric("match_ratio", match_ratio)
                 mlflow.log_metric("diff_field_count", diff_field_count)
 
-                diff_json = json.dumps(
-                    diff.to_dict(), default=str, indent=2
-                )
+                diff_json = json.dumps(diff.to_dict(), default=str, indent=2)
                 with mlflow.start_run(run.info.run_id):
                     mlflow.log_text(diff_json, "shadow_diff.json")
 

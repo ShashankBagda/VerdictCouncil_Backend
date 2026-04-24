@@ -37,9 +37,7 @@ class HookContext:
 class PipelineHook(Protocol):
     async def before_run(self, state: CaseState, ctx: HookContext) -> HookResult: ...
 
-    async def after_agent(
-        self, agent_name: str, state: CaseState, ctx: HookContext
-    ) -> HookResult: ...
+    async def after_agent(self, agent_name: str, state: CaseState, ctx: HookContext) -> HookResult: ...
 
     async def after_run(self, state: CaseState, ctx: HookContext) -> HookResult: ...
 
@@ -156,17 +154,13 @@ class DocumentPagesHydrationHook:
         from src.services.database import async_session
 
         file_ids = [
-            d.get("openai_file_id")
-            for d in state.raw_documents
-            if d.get("openai_file_id") and not d.get("pages")
+            d.get("openai_file_id") for d in state.raw_documents if d.get("openai_file_id") and not d.get("pages")
         ]
         if not file_ids:
             return HookResult(state=state)
 
         async with async_session() as db:
-            result = await db.execute(
-                select(Document).where(Document.openai_file_id.in_(file_ids))
-            )
+            result = await db.execute(select(Document).where(Document.openai_file_id.in_(file_ids)))
             docs_by_file_id = {d.openai_file_id: d for d in result.scalars().all()}
 
         new_raw = []
@@ -180,9 +174,7 @@ class DocumentPagesHydrationHook:
 
         return HookResult(state=state.model_copy(update={"raw_documents": new_raw}))
 
-    async def after_agent(
-        self, agent_name: str, state: CaseState, ctx: HookContext
-    ) -> HookResult:
+    async def after_agent(self, agent_name: str, state: CaseState, ctx: HookContext) -> HookResult:
         return HookResult(state=state)
 
     async def after_run(self, state: CaseState, ctx: HookContext) -> HookResult:

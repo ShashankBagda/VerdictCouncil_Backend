@@ -85,6 +85,5 @@ def validate_field_ownership(
             continue
         if updated[key] != original.get(key) and key not in allowed:
             raise FieldOwnershipError(
-                f"Agent '{agent_name}' is not allowed to write to field '{key}'. "
-                f"Allowed fields: {allowed}"
+                f"Agent '{agent_name}' is not allowed to write to field '{key}'. Allowed fields: {allowed}"
             )

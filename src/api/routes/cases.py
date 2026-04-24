@@ -37,11 +37,11 @@ from src.models.case import (
     Party,
 )
 from src.models.user import User, UserRole
+from src.pipeline.sam_status_translator import translate_sam_status
 from src.services.case_report_data import build_case_report_data
 from src.services.hearing_pack import assemble_pack
 from src.services.pdf_export import render_case_report_pdf
 from src.services.pipeline_events import subscribe as subscribe_pipeline_events
-from src.pipeline.sam_status_translator import translate_sam_status
 from src.shared.config import settings
 
 logger = logging.getLogger(__name__)
@@ -171,9 +171,7 @@ def _build_jurisdiction_summary(case: Case) -> dict[str, Any]:
         limit = 30000 if case.consent_to_higher_claim_limit else 20000
         if case.claim_amount > limit:
             failure = True
-            reasons.append(
-                f"Claim amount ${case.claim_amount:,.0f} exceeds the ${limit:,.0f} SCT limit."
-            )
+            reasons.append(f"Claim amount ${case.claim_amount:,.0f} exceeds the ${limit:,.0f} SCT limit.")
         elif case.claim_amount == limit:
             warning = True
             reasons.append(
@@ -182,9 +180,7 @@ def _build_jurisdiction_summary(case: Case) -> dict[str, Any]:
                 "SCT threshold and needs judge review."
             )
         else:
-            reasons.append(
-                f"Claim amount ${case.claim_amount:,.0f} is within the ${limit:,.0f} SCT limit."
-            )
+            reasons.append(f"Claim amount ${case.claim_amount:,.0f} is within the ${limit:,.0f} SCT limit.")
         if earliest_fact_date and case.filed_date:
             limitation_days = (case.filed_date - earliest_fact_date).days
             if limitation_days > 730:
@@ -376,9 +372,7 @@ def _serialize_case_detail(case: Case) -> dict[str, Any]:
             "hearing_analyses": list(case.hearing_analyses or []),
             "audit_logs": list(case.audit_logs or []),
             "domain_has_vector_store": bool(
-                case.domain_ref
-                and case.domain_ref.is_active
-                and case.domain_ref.vector_store_id
+                case.domain_ref and case.domain_ref.is_active and case.domain_ref.vector_store_id
             ),
         }
     )
@@ -430,9 +424,7 @@ async def create_case(
             )
     elif body.domain is not None:
         result = await db.execute(
-            select(DomainModel)
-            .where(DomainModel.code == body.domain.value)
-            .with_for_update(read=True)
+            select(DomainModel).where(DomainModel.code == body.domain.value).with_for_update(read=True)
         )
         domain_row = result.scalar_one_or_none()
         if domain_row is None:
@@ -520,9 +512,7 @@ async def create_case_draft(
                 detail=f"Domain {body.domain_id} not found",
             )
     elif body.domain is not None:
-        result = await db.execute(
-            select(DomainModel).where(DomainModel.code == body.domain.value)
-        )
+        result = await db.execute(select(DomainModel).where(DomainModel.code == body.domain.value))
         domain_row = result.scalar_one_or_none()
         if domain_row is None:
             raise HTTPException(
@@ -805,9 +795,7 @@ async def stream_intake_events(
         # already finished still sees the latest extraction without polling.
         if case.intake_extraction is not None:
             snap = {
-                "type": "done"
-                if case.status == CaseStatus.awaiting_intake_confirmation
-                else "status",
+                "type": "done" if case.status == CaseStatus.awaiting_intake_confirmation else "status",
                 "phase": "reconnect_snapshot",
                 "extraction": case.intake_extraction,
                 "ts": datetime.now(UTC).isoformat(),
@@ -832,18 +820,20 @@ async def stream_intake_events(
                     return
                 remaining = SSE_WATCHDOG_SECONDS - (time.monotonic() - stream_start)
                 if remaining <= 0:
-                    yield "data: " + json.dumps(
-                        {
-                            "type": "error",
-                            "message": "watchdog_timeout",
-                            "ts": datetime.now(UTC).isoformat(),
-                        }
-                    ) + "\n\n"
+                    yield (
+                        "data: "
+                        + json.dumps(
+                            {
+                                "type": "error",
+                                "message": "watchdog_timeout",
+                                "ts": datetime.now(UTC).isoformat(),
+                            }
+                        )
+                        + "\n\n"
+                    )
                     return
                 try:
-                    payload = await asyncio.wait_for(
-                        queue.get(), timeout=min(SSE_HEARTBEAT_SECONDS, remaining)
-                    )
+                    payload = await asyncio.wait_for(queue.get(), timeout=min(SSE_HEARTBEAT_SECONDS, remaining))
                 except TimeoutError:
                     if producer_done.is_set() and queue.empty():
                         return
@@ -1003,8 +993,7 @@ async def get_case(
     operation_id="export_case_report_pdf",
     summary="Export the case as a PDF report",
     description=(
-        "Render a case summary PDF covering parties, evidence, facts, "
-        "arguments, verdict, and fairness report."
+        "Render a case summary PDF covering parties, evidence, facts, arguments, verdict, and fairness report."
     ),
     responses={
         403: {"model": ErrorResponse, "description": "Not authorized to view this case"},
@@ -1035,8 +1024,7 @@ async def export_case_report_pdf(
     operation_id="export_hearing_pack",
     summary="Export the hearing pack zip for a case",
     description=(
-        "Assemble a zip archive of manifest, case summary, evidence, "
-        "facts, arguments, and verdict for in-court review."
+        "Assemble a zip archive of manifest, case summary, evidence, facts, arguments, and verdict for in-court review."
     ),
     responses={
         403: {"model": ErrorResponse, "description": "Not authorized to view this case"},
@@ -1128,11 +1116,10 @@ async def stream_pipeline_status(
                 producer_done.set()
 
         solace_subscription = None
-        case_status_pattern = (
-            f"{settings.namespace}/case/{case_id}/status/>"
-        )
+        case_status_pattern = f"{settings.namespace}/case/{case_id}/status/>"
         try:
             from src.pipeline.mesh_runner_factory import get_a2a_client
+
             a2a_client = await get_a2a_client()
             solace_subscription = a2a_client.subscribe_status(case_status_pattern)
             await solace_subscription.start()
@@ -1165,9 +1152,7 @@ async def stream_pipeline_status(
                 await queue.put(json.dumps(translated))
 
         producer_task = asyncio.create_task(_redis_producer())
-        solace_task: asyncio.Task | None = (
-            asyncio.create_task(_solace_producer()) if solace_subscription else None
-        )
+        solace_task: asyncio.Task | None = asyncio.create_task(_solace_producer()) if solace_subscription else None
         stream_start = time.monotonic()
 
         try:
@@ -1267,9 +1252,7 @@ async def _run_case_pipeline(case_id: UUID) -> None:
         ]
 
         domain_vector_store_id = (
-            case.domain_ref.vector_store_id
-            if case.domain_ref and case.domain_ref.is_active
-            else None
+            case.domain_ref.vector_store_id if case.domain_ref and case.domain_ref.is_active else None
         )
 
         initial_state = CaseState(
@@ -1317,9 +1300,7 @@ async def _run_case_pipeline(case_id: UUID) -> None:
     except Exception:
         logger.exception("Pipeline run failed for case_id=%s", case_id)
         async with async_session() as db:
-            db_case = (
-                await db.execute(select(Case).where(Case.id == case_id))
-            ).scalar_one_or_none()
+            db_case = (await db.execute(select(Case).where(Case.id == case_id))).scalar_one_or_none()
             if db_case:
                 db_case.status = CaseStatusModel.failed
                 await db.commit()
@@ -1395,9 +1376,7 @@ async def process_case(
     db: DBSession,
     current_user: CurrentUser,
 ) -> MessageResponse:
-    result = await db.execute(
-        select(Case).where(Case.id == case_id).options(selectinload(Case.documents))
-    )
+    result = await db.execute(select(Case).where(Case.id == case_id).options(selectinload(Case.documents)))
     case = result.scalar_one_or_none()
     if not case:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
@@ -1464,9 +1443,7 @@ async def restart_case_pipeline(
     from src.models.pipeline_job import PipelineJobType
     from src.workers.outbox import enqueue_outbox_job
 
-    result = await db.execute(
-        select(Case).where(Case.id == case_id).options(selectinload(Case.documents))
-    )
+    result = await db.execute(select(Case).where(Case.id == case_id).options(selectinload(Case.documents)))
     case = result.scalar_one_or_none()
     if not case:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
@@ -1726,9 +1703,7 @@ async def update_suggested_questions(
             detail=f"Invalid side: {body.side}",
         ) from None
 
-    result = await db.execute(
-        select(Argument).where(Argument.case_id == case_id, Argument.side == side)
-    )
+    result = await db.execute(select(Argument).where(Argument.case_id == case_id, Argument.side == side))
     argument = result.scalar_one_or_none()
     if not argument:
         raise HTTPException(

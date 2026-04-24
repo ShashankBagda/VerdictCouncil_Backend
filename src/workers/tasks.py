@@ -117,9 +117,9 @@ async def run_gate_job(ctx: dict[str, Any], job_id: str) -> None:  # noqa: ARG00
             persist_case_state,
         )
         from src.models.case import Case
-        from src.pipeline.runner import PipelineRunner
         from src.pipeline.graph.runner import GraphPipelineRunner
         from src.pipeline.graph.shadow import ShadowRunner
+        from src.pipeline.runner import PipelineRunner
         from src.services.database import async_session
         from src.services.pipeline_events import publish_progress
         from src.shared.case_state import CaseState, CaseStatusEnum
@@ -157,9 +157,7 @@ async def run_gate_job(ctx: dict[str, Any], job_id: str) -> None:  # noqa: ARG00
                 from sqlalchemy.orm import joinedload as _joinedload
 
                 case_result = await db.execute(
-                    _select(Case)
-                    .where(Case.id == case_id)
-                    .options(_joinedload(Case.domain_ref))
+                    _select(Case).where(Case.id == case_id).options(_joinedload(Case.domain_ref))
                 )
                 case = case_result.scalar_one_or_none()
                 if case is None:
@@ -174,12 +172,11 @@ async def run_gate_job(ctx: dict[str, Any], job_id: str) -> None:  # noqa: ARG00
         async with async_session() as db:
             from sqlalchemy import select as _select
             from sqlalchemy.orm import joinedload as _joinedload
+
             from src.tools.exceptions import RetiredDomainError
 
             case_result = await db.execute(
-                _select(Case)
-                .where(Case.id == case_id)
-                .options(_joinedload(Case.domain_ref))
+                _select(Case).where(Case.id == case_id).options(_joinedload(Case.domain_ref))
             )
             live_case = case_result.scalar_one_or_none()
             if live_case is None:
@@ -191,14 +188,10 @@ async def run_gate_job(ctx: dict[str, Any], job_id: str) -> None:  # noqa: ARG00
             if not live_case.domain_ref.is_active or not live_case.domain_ref.vector_store_id:
                 live_case.status_value = "failed_retryable"
                 await db.commit()
-                raise RetiredDomainError(
-                    f"Domain {live_case.domain_ref.code} retired mid-case; aborting gate resume"
-                )
+                raise RetiredDomainError(f"Domain {live_case.domain_ref.code} retired mid-case; aborting gate resume")
 
             # Always overwrite from live DB — never use stale checkpoint value
-            state = state.model_copy(
-                update={"domain_vector_store_id": live_case.domain_ref.vector_store_id}
-            )
+            state = state.model_copy(update={"domain_vector_store_id": live_case.domain_ref.vector_store_id})
 
         # Force status to processing before handing to run_gate
         state = state.model_copy(update={"status": CaseStatusEnum.processing})
@@ -212,7 +205,8 @@ async def run_gate_job(ctx: dict[str, Any], job_id: str) -> None:  # noqa: ARG00
 
         if isinstance(runner, (GraphPipelineRunner, ShadowRunner)):
             final_state = await runner.run_gate(
-                state, gate_name,
+                state,
+                gate_name,
                 start_agent=start_agent,
                 extra_instructions=instructions,
             )
@@ -234,15 +228,9 @@ async def run_gate_job(ctx: dict[str, Any], job_id: str) -> None:  # noqa: ARG00
                 from src.models.case import Document
 
                 for file_id, pages in runner._document_pages_buffer.items():
-                    await db.execute(
-                        sa_update(Document)
-                        .where(Document.openai_file_id == file_id)
-                        .values(pages=pages)
-                    )
+                    await db.execute(sa_update(Document).where(Document.openai_file_id == file_id).values(pages=pages))
 
-            await persist_case_results(
-                db, case_id, final_state, gate_state_payload=gate_state_payload
-            )
+            await persist_case_results(db, case_id, final_state, gate_state_payload=gate_state_payload)
 
         async with async_session() as db:
             await persist_case_state(
@@ -272,9 +260,7 @@ async def run_intake_extraction_job(ctx: dict[str, Any], job_id: str) -> None:  
 
         correction = (job.payload or {}).get("correction")
         async with async_session() as db:
-            await run_intake_extraction(
-                db, case_id=job.case_id, correction=correction
-            )
+            await run_intake_extraction(db, case_id=job.case_id, correction=correction)
 
     await _run_with_outbox(job_id, PipelineJobType.intake_extraction, _runner)
 

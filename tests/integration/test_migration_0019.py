@@ -17,9 +17,10 @@ import os
 import uuid
 
 import pytest
-from alembic import command
 from alembic.config import Config
 from sqlalchemy import inspect, text
+
+from alembic import command
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("INTEGRATION_TESTS") != "1",
@@ -94,10 +95,7 @@ async def test_migration_0019_seeded_domains_are_inactive():
 
     async with async_session() as session:
         result = await session.execute(
-            text(
-                "SELECT code, is_active FROM domains "
-                "WHERE code IN ('small_claims', 'traffic_violation')"
-            )
+            text("SELECT code, is_active FROM domains WHERE code IN ('small_claims', 'traffic_violation')")
         )
         rows = {r[0]: r[1] for r in result.fetchall()}
 
@@ -128,9 +126,9 @@ async def test_migration_0019_upgrade_adds_domain_id_to_cases():
 @pytest.mark.asyncio
 async def test_migration_0019_backfill_sets_domain_id():
     """Existing cases with domain='small_claims' must have domain_id set after backfill."""
-    from src.services.database import async_session
     from src.models.case import Case, CaseDomain, CaseStatus
     from src.models.user import User, UserRole
+    from src.services.database import async_session
 
     cfg = _alembic_cfg()
     # Apply migration up to 0018 to insert a test row, then upgrade to 0019
@@ -161,9 +159,7 @@ async def test_migration_0019_backfill_sets_domain_id():
     command.upgrade(cfg, "0019")
 
     async with async_session() as session:
-        result = await session.execute(
-            text("SELECT domain_id FROM cases WHERE id = :cid").bindparams(cid=str(case_id))
-        )
+        result = await session.execute(text("SELECT domain_id FROM cases WHERE id = :cid").bindparams(cid=str(case_id)))
         domain_id_val = result.scalar()
 
     assert domain_id_val is not None, "Backfill must set domain_id for existing small_claims case"
@@ -185,10 +181,7 @@ async def test_migration_0019_downgrade_removes_domains_table():
 
     async with async_session() as session:
         result = await session.execute(
-            text(
-                "SELECT table_name FROM information_schema.tables "
-                "WHERE table_name IN ('domains', 'domain_documents')"
-            )
+            text("SELECT table_name FROM information_schema.tables WHERE table_name IN ('domains', 'domain_documents')")
         )
         remaining = [r[0] for r in result.fetchall()]
 

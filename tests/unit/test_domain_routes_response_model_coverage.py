@@ -12,8 +12,7 @@ def test_all_routes_have_response_model():
     """Every route registered on the domains router must declare a response_model."""
     for route in domains.router.routes:
         assert getattr(route, "response_model", None) is not None, (
-            f"Route {route.path} is missing response_model — "
-            "this may expose unintended fields to clients"
+            f"Route {route.path} is missing response_model — this may expose unintended fields to clients"
         )
 
 

@@ -29,9 +29,7 @@ class PipelineCheckpoint(Base):
     run_id: Mapped[str] = mapped_column(Text, nullable=False)
     agent_name: Mapped[str] = mapped_column(Text, nullable=False)
     case_state: Mapped[dict] = mapped_column(JSONB, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     __table_args__ = (
         PrimaryKeyConstraint("case_id", "run_id", name="pk_pipeline_checkpoints"),

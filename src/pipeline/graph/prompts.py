@@ -48,15 +48,15 @@ GATE2_PARALLEL_AGENTS: list[str] = [
 # ---------------------------------------------------------------------------
 
 AGENT_MODEL_TIER: dict[str, str] = {
-    "case-processing": "lightweight",       # gpt54_nano_model
-    "complexity-routing": "lightweight",    # gpt54_nano_model
-    "evidence-analysis": "strong",          # gpt5_model
-    "fact-reconstruction": "strong",        # gpt5_model
-    "witness-analysis": "efficient",        # gpt5_mini_model
-    "legal-knowledge": "strong",            # gpt5_model
-    "argument-construction": "frontier",    # gpt54_model
-    "hearing-analysis": "frontier",         # gpt54_model
-    "hearing-governance": "frontier",       # gpt54_model
+    "case-processing": "lightweight",  # gpt54_nano_model
+    "complexity-routing": "lightweight",  # gpt54_nano_model
+    "evidence-analysis": "strong",  # gpt5_model
+    "fact-reconstruction": "strong",  # gpt5_model
+    "witness-analysis": "efficient",  # gpt5_mini_model
+    "legal-knowledge": "strong",  # gpt5_model
+    "argument-construction": "frontier",  # gpt54_model
+    "hearing-analysis": "frontier",  # gpt54_model
+    "hearing-governance": "frontier",  # gpt54_model
 }
 
 # Maps model tier names to Settings attribute names (from runner.py MODEL_TIER_MAP)
@@ -239,7 +239,6 @@ GUARDRAILS:
 - If parse_document fails for a document: record error, continue processing other documents,
   flag the failed document in case_metadata.parsing_failures for downstream awareness.
 """,
-
     "complexity-routing": """\
 You are the Complexity & Routing Agent for VerdictCouncil.
 You are the pipeline's first decision gate. Your routing decision determines whether AI processing continues, proceeds with judicial oversight, or halts for human review.
@@ -348,7 +347,6 @@ GUARDRAILS:
   to justice speed; every under-escalation creates due process risk. Balance carefully.
 - This is a HALT POINT: if route='escalate_human', STOP pipeline here.
 """,
-
     "evidence-analysis": """\
 You are the Evidence Analysis Agent for VerdictCouncil. You serve the presiding judicial officer with IMPARTIAL, rigorous analysis.
 You are the pipeline's forensic engine. Your analysis is the factual foundation that every downstream agent builds upon.
@@ -513,7 +511,6 @@ GUARDRAILS:
 - If cross_reference fails: flag the failure, describe what could not be cross-referenced,
   and proceed without that analysis. Do NOT fabricate cross-reference results.
 """,
-
     "fact-reconstruction": """\
 You are the Fact Reconstruction Agent for VerdictCouncil.
 You build the factual foundation that the Judge will use to conduct the hearing. Facts you miss or misrepresent
@@ -664,7 +661,6 @@ GUARDRAILS:
 - If timeline_construct fails: manually order facts by date, flag the tool failure,
   proceed with the manual ordering. Do NOT omit the timeline.
 """,
-
     "witness-analysis": """\
 You are the Witness Analysis Agent for VerdictCouncil.
 You assess witness credibility to help the Judge evaluate testimony at hearing. You do NOT determine truth.
@@ -825,7 +821,6 @@ GUARDRAILS:
 - For SCT cases: assess BOTH claimant and respondent statements as 'testimonial evidence'
   using the identical PEAR framework.
 """,
-
     "legal-knowledge": """\
 You are the Legal Knowledge Agent for VerdictCouncil.
 You are the pipeline's legal authority engine. You provide the statutory and precedential framework
@@ -1027,7 +1022,6 @@ GUARDRAILS:
 - Must label authority tier for every citation — the Judge must know what is binding.
 - Must check temporal validity — superseded statutes and overruled cases must be flagged.
 """,
-
     "argument-construction": """\
 You are the Argument Construction Agent for VerdictCouncil. You serve the JUDGE, not either party.
 All output is INTERNAL. Your task is to construct the strongest possible version of BOTH sides' arguments
@@ -1188,7 +1182,6 @@ GUARDRAILS:
   rather than fabricating arguments. Sparse facts → lower confidence assessments.
 - MUST cite confidence_calc results if available for the overall strength scores.
 """,
-
     "hearing-analysis": """\
 You are the Hearing Analysis Agent for VerdictCouncil. You produce the structured pre-hearing analysis
 that the Judge reads before the hearing begins. This is the most Judge-facing output in the pipeline.
@@ -1388,7 +1381,6 @@ GUARDRAILS:
 - If upstream agents have produced incomplete data: flag the gap in uncertainty_flags
   and note which step is affected. Do NOT fill gaps with fabricated analysis.
 """,
-
     "hearing-governance": """\
 You are the Hearing Governance Agent for VerdictCouncil. You are the FINAL GATE before the hearing analysis reaches the Judge.
 You do not analyse the case. You audit the quality, fairness, and integrity of the analysis produced by all upstream agents.

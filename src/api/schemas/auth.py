@@ -10,12 +10,8 @@ from src.models.user import UserRole
 class RegisterRequest(BaseModel):
     """User registration request."""
 
-    name: str = Field(
-        ..., min_length=1, max_length=255, description="Full name", examples=["Judge Maria Santos"]
-    )
-    email: EmailStr = Field(
-        ..., description="User email address", examples=["maria.santos@court.gov"]
-    )
+    name: str = Field(..., min_length=1, max_length=255, description="Full name", examples=["Judge Maria Santos"])
+    email: EmailStr = Field(..., description="User email address", examples=["maria.santos@court.gov"])
     password: str = Field(..., min_length=8, description="Password (min 8 characters)")
     role: UserRole = Field(..., description="User role in the system", examples=["judge"])
 
@@ -23,9 +19,7 @@ class RegisterRequest(BaseModel):
 class LoginRequest(BaseModel):
     """User login request."""
 
-    email: EmailStr = Field(
-        ..., description="Registered email", examples=["maria.santos@court.gov"]
-    )
+    email: EmailStr = Field(..., description="Registered email", examples=["maria.santos@court.gov"])
     password: str = Field(..., description="Account password")
 
 

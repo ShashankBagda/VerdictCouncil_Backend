@@ -297,11 +297,7 @@ async def test_full_pipeline_runs_all_nine_agents_via_mesh():
                 # Find the mesh task id from the stashed run meta
                 # Sub-task correlation gives us run_id
                 sub_task_value = next(
-                    iter(
-                        v.decode()
-                        for k, v in redis.store.items()
-                        if k.startswith("vc:aggregator:sub_task:")
-                    )
+                    iter(v.decode() for k, v in redis.store.items() if k.startswith("vc:aggregator:sub_task:"))
                 )
                 _agent_key, case_id, run_id = sub_task_value.split("|")
                 mesh_task_id = f"layer2-{case_id}-{run_id}"
@@ -454,9 +450,7 @@ async def test_parse_agent_response_emits_agent_response_audit_entry():
     result = runner._parse_agent_response(envelope, prior, "witness-analysis")
 
     audit_entries = [e for e in result.audit_log if e.action == "agent_response"]
-    assert len(audit_entries) == 1, (
-        "exactly one agent_response entry should be appended per successful parse"
-    )
+    assert len(audit_entries) == 1, "exactly one agent_response entry should be appended per successful parse"
     entry = audit_entries[0]
     assert entry.agent == "witness-analysis"
     assert entry.output_payload == fragment  # raw agent payload, unfiltered
@@ -500,11 +494,7 @@ async def test_run_id_invariant_defaults_to_state_run_id():
                 merged["extracted_facts"] = {}
                 merged["witnesses"] = {}
                 sub_val = next(
-                    iter(
-                        v.decode()
-                        for k, v in redis.store.items()
-                        if k.startswith("vc:aggregator:sub_task:")
-                    )
+                    iter(v.decode() for k, v in redis.store.items() if k.startswith("vc:aggregator:sub_task:"))
                 )
                 _k, case_id, rid = sub_val.split("|")
                 return _send_task_response(f"layer2-{case_id}-{rid}", merged)
@@ -544,11 +534,7 @@ async def test_checkpoint_opens_short_lived_session_per_call():
                 merged["extracted_facts"] = {}
                 merged["witnesses"] = {}
                 sub_val = next(
-                    iter(
-                        v.decode()
-                        for k, v in redis.store.items()
-                        if k.startswith("vc:aggregator:sub_task:")
-                    )
+                    iter(v.decode() for k, v in redis.store.items() if k.startswith("vc:aggregator:sub_task:"))
                 )
                 _k, case_id, rid = sub_val.split("|")
                 return _send_task_response(f"layer2-{case_id}-{rid}", merged)
@@ -569,9 +555,7 @@ async def test_checkpoint_opens_short_lived_session_per_call():
     await runner.run(state)
 
     # One checkpoint per L1 agent (2) + L2 aggregator (1) + L3 agents (4) = 7.
-    assert session_factory.call_count == 7, (
-        f"expected 7 short-lived sessions, got {session_factory.call_count}"
-    )
+    assert session_factory.call_count == 7, f"expected 7 short-lived sessions, got {session_factory.call_count}"
 
 
 # ---------------------------------------------------------------------------
@@ -655,11 +639,7 @@ async def test_governance_critical_issues_no_longer_halt_mesh_pipeline(monkeypat
                 merged["extracted_facts"] = {}
                 merged["witnesses"] = {}
                 sub_val = next(
-                    iter(
-                        v.decode()
-                        for k, v in redis.store.items()
-                        if k.startswith("vc:aggregator:sub_task:")
-                    )
+                    iter(v.decode() for k, v in redis.store.items() if k.startswith("vc:aggregator:sub_task:"))
                 )
                 _k, case_id, rid = sub_val.split("|")
                 return _send_task_response(f"layer2-{case_id}-{rid}", merged)
@@ -770,8 +750,7 @@ async def test_terminal_event_emitted_on_l2_barrier_timeout(monkeypatch):
 
     terminals = _terminal_events(publish_mock)
     assert len(terminals) == 1, (
-        f"expected exactly one terminal event, got {len(terminals)}: "
-        f"{[t.detail for t in terminals]}"
+        f"expected exactly one terminal event, got {len(terminals)}: {[t.detail for t in terminals]}"
     )
     assert terminals[0].detail == {
         "reason": "l2_barrier_timeout",

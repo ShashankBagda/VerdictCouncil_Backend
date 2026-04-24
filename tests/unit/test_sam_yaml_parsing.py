@@ -52,9 +52,7 @@ class TestAgentYamlLoading:
         raw = _load_yaml_with_includes(config_path)
         has_sam = "apps" in raw
         has_legacy = "model_tier" in raw
-        assert has_sam or has_legacy, (
-            f"{agent_name}.yaml missing both 'apps' (SAM) and 'model_tier' (legacy)"
-        )
+        assert has_sam or has_legacy, f"{agent_name}.yaml missing both 'apps' (SAM) and 'model_tier' (legacy)"
 
 
 class TestParseSamYaml:

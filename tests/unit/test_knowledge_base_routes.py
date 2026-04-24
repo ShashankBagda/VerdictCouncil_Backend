@@ -315,9 +315,7 @@ async def test_search_returns_hits():
     body = resp.json()
     assert body["items"][0]["file_id"] == "file-a"
     assert body["items"][0]["score"] == 0.9
-    search_mock.assert_awaited_once_with(
-        vector_store_id="vs_judge", query="fair use", max_results=3
-    )
+    search_mock.assert_awaited_once_with(vector_store_id="vs_judge", query="fair use", max_results=3)
 
 
 async def test_search_404_when_uninitialized():

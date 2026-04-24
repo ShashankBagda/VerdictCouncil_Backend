@@ -41,9 +41,7 @@ def _make_case(case_id: uuid.UUID, jurisdiction_valid: bool | None = None) -> Ma
     return case
 
 
-def _make_audit(
-    case_id: uuid.UUID, payload: dict, agent_name: str = "case-processing"
-) -> MagicMock:
+def _make_audit(case_id: uuid.UUID, payload: dict, agent_name: str = "case-processing") -> MagicMock:
     entry = MagicMock(spec=AuditLog)
     entry.id = uuid.uuid4()
     entry.case_id = case_id

@@ -114,9 +114,7 @@ async def cross_reference(
     try:
         result = await _analyze_documents(client, documents_text, check_type)
     except json.JSONDecodeError as exc:
-        raise CrossReferenceError(
-            f"Failed to parse cross-reference analysis response: {exc}"
-        ) from exc
+        raise CrossReferenceError(f"Failed to parse cross-reference analysis response: {exc}") from exc
 
     # Ensure expected keys exist with proper defaults
     contradictions = result.get("contradictions", [])

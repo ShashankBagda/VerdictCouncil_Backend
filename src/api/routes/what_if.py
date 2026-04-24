@@ -59,9 +59,7 @@ async def _run_whatif_scenario(scenario_id: uuid.UUID) -> None:
 
     async with async_session() as db:
         try:
-            result = await db.execute(
-                select(WhatIfScenario).where(WhatIfScenario.id == scenario_id)
-            )
+            result = await db.execute(select(WhatIfScenario).where(WhatIfScenario.id == scenario_id))
             scenario = result.scalar_one_or_none()
             if not scenario:
                 return
@@ -157,9 +155,7 @@ async def _run_stability_computation(stability_id: uuid.UUID) -> None:
 
     async with async_session() as db:
         try:
-            result = await db.execute(
-                select(StabilityScore).where(StabilityScore.id == stability_id)
-            )
+            result = await db.execute(select(StabilityScore).where(StabilityScore.id == stability_id))
             stability = result.scalar_one_or_none()
             if not stability:
                 return
@@ -208,9 +204,7 @@ async def _run_stability_computation(stability_id: uuid.UUID) -> None:
             stability.run_id = case.latest_run_id
 
             controller = WhatIfController(await get_mesh_runner())
-            score_result = await controller.compute_stability_score(
-                case_state, n=stability.perturbation_count
-            )
+            score_result = await controller.compute_stability_score(case_state, n=stability.perturbation_count)
 
             stability.score = score_result["score"]
             stability.classification = StabilityClassification(score_result["classification"])
@@ -264,9 +258,7 @@ async def submit_whatif_scenario(
     if case.status != CaseStatus.ready_for_review:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                f"Case must be in 'ready_for_review' status. Current status: '{case.status.value}'"
-            ),
+            detail=(f"Case must be in 'ready_for_review' status. Current status: '{case.status.value}'"),
         )
 
     if not case.latest_run_id:

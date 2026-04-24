@@ -34,15 +34,11 @@ async def pre_run_guardrail(state: GraphState) -> dict[str, Any]:
             from src.services.database import async_session
 
             file_ids = [
-                d.get("openai_file_id")
-                for d in case.raw_documents
-                if d.get("openai_file_id") and not d.get("pages")
+                d.get("openai_file_id") for d in case.raw_documents if d.get("openai_file_id") and not d.get("pages")
             ]
             if file_ids:
                 async with async_session() as db:
-                    result = await db.execute(
-                        select(Document).where(Document.openai_file_id.in_(file_ids))
-                    )
+                    result = await db.execute(select(Document).where(Document.openai_file_id.in_(file_ids)))
                     docs_by_file_id = {d.openai_file_id: d for d in result.scalars().all()}
 
                 new_raw = []

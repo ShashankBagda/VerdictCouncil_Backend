@@ -82,8 +82,7 @@ def _broker_reachable(url: str, timeout: float = 1.0) -> bool:
 def _require_broker() -> None:
     if not _broker_reachable(BROKER_URL):
         pytest.skip(
-            f"Solace broker not reachable at {BROKER_URL} — "
-            "run `make infra-up` before running mesh smoke tests"
+            f"Solace broker not reachable at {BROKER_URL} — run `make infra-up` before running mesh smoke tests"
         )
 
 
@@ -127,9 +126,7 @@ async def _echo_subscriber(
 
     wildcard = f"{namespace}/a2a/v1/agent/request/>"
     receiver = (
-        service.create_direct_message_receiver_builder()
-        .with_subscriptions([TopicSubscription.of(wildcard)])
-        .build()
+        service.create_direct_message_receiver_builder().with_subscriptions([TopicSubscription.of(wildcard)]).build()
     )
     await asyncio.to_thread(receiver.start)
 

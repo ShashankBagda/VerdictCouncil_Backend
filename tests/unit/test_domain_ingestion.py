@@ -190,9 +190,7 @@ async def test_ingest_parse_failure_marks_doc_failed():
     mock_client = MagicMock()
     mock_client.files = MagicMock(create=AsyncMock(return_value=oa_file))
     mock_client.vector_stores = MagicMock(
-        files=MagicMock(
-            create_and_poll=AsyncMock(side_effect=AssertionError("should not be called"))
-        )
+        files=MagicMock(create_and_poll=AsyncMock(side_effect=AssertionError("should not be called")))
     )
 
     with (
@@ -254,9 +252,7 @@ async def test_only_sanitized_file_goes_into_vector_store():
 
     mock_client = MagicMock()
     mock_client.files = MagicMock(create=AsyncMock(side_effect=[oa_file, san_file]))
-    mock_client.vector_stores = MagicMock(
-        files=MagicMock(create_and_poll=AsyncMock(return_value=vs_file))
-    )
+    mock_client.vector_stores = MagicMock(files=MagicMock(create_and_poll=AsyncMock(return_value=vs_file)))
 
     parse_result = {
         "pages": [{"page_number": 1, "text": "Sanitized page content"}],
@@ -375,9 +371,7 @@ async def test_ingest_records_classifier_hits_in_admin_event():
 
     mock_client = MagicMock()
     mock_client.files = MagicMock(create=AsyncMock(side_effect=[oa_file, san_file]))
-    mock_client.vector_stores = MagicMock(
-        files=MagicMock(create_and_poll=AsyncMock(return_value=vs_file))
-    )
+    mock_client.vector_stores = MagicMock(files=MagicMock(create_and_poll=AsyncMock(return_value=vs_file)))
 
     parse_result = {
         "pages": [{"page_number": 1, "text": "clean text"}],
@@ -408,9 +402,7 @@ async def test_ingest_records_classifier_hits_in_admin_event():
 
     admin_events = [obj for obj in bg_session.added if isinstance(obj, AdminEvent)]
     assert admin_events, "No AdminEvent written to the session"
-    upload_event = next(
-        (e for e in admin_events if e.action == "domain_document_uploaded"), None
-    )
+    upload_event = next((e for e in admin_events if e.action == "domain_document_uploaded"), None)
     assert upload_event is not None, "domain_document_uploaded AdminEvent not found"
     assert upload_event.payload["regex_hits"] == 0
     assert upload_event.payload["classifier_hits"] == 1

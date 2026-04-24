@@ -154,7 +154,6 @@ async def test_sanitization_strips_injection_patterns(_openai_client):
 @pytest.mark.asyncio
 async def test_sanitize_text_called_once_per_page(_openai_client):
     """sanitize_text must be called exactly once per page, not once globally + once per page."""
-    from unittest.mock import call
 
     client = _openai_client
     client.files.retrieve = AsyncMock(return_value=_make_file_info())
@@ -173,7 +172,10 @@ async def test_sanitize_text_called_once_per_page(_openai_client):
 
     with (
         patch("src.tools.parse_document._get_client", return_value=client),
-        patch("src.tools.parse_document.sanitize_text", wraps=__import__("src.shared.sanitization", fromlist=["sanitize_text"]).sanitize_text) as mock_sanitize,
+        patch(
+            "src.tools.parse_document.sanitize_text",
+            wraps=__import__("src.shared.sanitization", fromlist=["sanitize_text"]).sanitize_text,
+        ) as mock_sanitize,
     ):
         await parse_document("file-two-pages")
 

@@ -14,6 +14,4 @@ class HearingPackManifest(BaseModel):
     status: str
     generated_at: datetime
     files: list[str] = Field(..., description="Names of files included in this pack, in order")
-    counts: dict[str, int] = Field(
-        ..., description="Per-section row counts (parties, evidence, facts, arguments)"
-    )
+    counts: dict[str, int] = Field(..., description="Per-section row counts (parties, evidence, facts, arguments)")

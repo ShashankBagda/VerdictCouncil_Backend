@@ -30,20 +30,12 @@ class Domain(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     description: Mapped[str | None] = mapped_column(Text)
     vector_store_id: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
-    created_by: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
-    )
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     # Provisioning tracking
-    provisioning_started_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    provisioning_attempts: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default="0"
-    )
+    provisioning_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    provisioning_attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
 
-    documents: Mapped[list[DomainDocument]] = relationship(
-        back_populates="domain", cascade="all, delete-orphan"
-    )
+    documents: Mapped[list[DomainDocument]] = relationship(back_populates="domain", cascade="all, delete-orphan")
 
 
 class DomainDocument(UUIDPrimaryKeyMixin, Base):
@@ -64,14 +56,12 @@ class DomainDocument(UUIDPrimaryKeyMixin, Base):
         String(20), nullable=False, server_default=DomainDocumentStatus.pending.value
     )
     error_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
-    idempotency_key: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), nullable=False, default=uuid.uuid4
-    )
-    uploaded_by: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
-    )
+    idempotency_key: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, default=uuid.uuid4)
+    uploaded_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     uploaded_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False,
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
         default=lambda: datetime.now(UTC),
     )
 

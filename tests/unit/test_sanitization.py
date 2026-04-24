@@ -100,9 +100,11 @@ class TestClassifySyncStubbed:
         assert score == 1.0
 
     def test_scanner_init_failure_raises_runtime_error(self):
-        with patch(
-            "src.shared.sanitization._get_prompt_injection_scanner",
-            side_effect=RuntimeError("model init failed"),
+        with (
+            patch(
+                "src.shared.sanitization._get_prompt_injection_scanner",
+                side_effect=RuntimeError("model init failed"),
+            ),
+            pytest.raises(RuntimeError, match="model init failed"),
         ):
-            with pytest.raises(RuntimeError, match="model init failed"):
-                _classify_sync("any text")
+            _classify_sync("any text")

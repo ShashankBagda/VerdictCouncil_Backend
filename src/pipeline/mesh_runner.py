@@ -136,14 +136,10 @@ class MeshPipelineRunner:
         self._a2a = a2a_client
         self._session_factory = session_factory
         self._client = client or AsyncOpenAI(api_key=settings.openai_api_key)
-        self._redis = redis_client or redis.Redis.from_url(
-            settings.redis_url, decode_responses=False
-        )
+        self._redis = redis_client or redis.Redis.from_url(settings.redis_url, decode_responses=False)
         self._namespace = namespace.strip("/")
         self._agent_timeout = agent_timeout_seconds
-        self._hooks: list[PipelineHook] = (
-            hooks if hooks is not None else default_hooks(self._client)
-        )
+        self._hooks: list[PipelineHook] = hooks if hooks is not None else default_hooks(self._client)
 
     # ------------------------------------------------------------------
     # Public API — matches PipelineRunner
@@ -264,9 +260,7 @@ class MeshPipelineRunner:
                     current_agent = agent_name
                     state = await self._invoke_agent_sequential(agent_name, state, run_id)
                     await self._checkpoint(state, run_id, agent_name)
-                    state, halted = await self._run_after_agent_hooks(
-                        agent_name, state, ctx, run_id
-                    )
+                    state, halted = await self._run_after_agent_hooks(agent_name, state, ctx, run_id)
                     if halted:
                         return state
                 current_agent = "layer2-aggregator"
@@ -282,8 +276,7 @@ class MeshPipelineRunner:
                 l3_start = L3_AGENTS.index(start_agent)
             else:
                 raise ValueError(
-                    f"Unknown start_agent '{start_agent}'. "
-                    f"Must be one of {L1_AGENTS + L2_AGENTS + L3_AGENTS}"
+                    f"Unknown start_agent '{start_agent}'. Must be one of {L1_AGENTS + L2_AGENTS + L3_AGENTS}"
                 )
 
             for agent_name in L3_AGENTS[l3_start:]:
@@ -294,9 +287,7 @@ class MeshPipelineRunner:
                 if halted:
                     return state
         except TimeoutError as exc:
-            reason = (
-                "l2_barrier_timeout" if current_agent == "layer2-aggregator" else "agent_timeout"
-            )
+            reason = "l2_barrier_timeout" if current_agent == "layer2-aggregator" else "agent_timeout"
             await self._emit_terminal(
                 state,
                 reason=reason,
@@ -320,9 +311,7 @@ class MeshPipelineRunner:
     # Hook dispatch helpers
     # ------------------------------------------------------------------
 
-    async def _run_before_run_hooks(
-        self, state: CaseState, ctx: HookContext, run_id: str
-    ) -> tuple[CaseState, bool]:
+    async def _run_before_run_hooks(self, state: CaseState, ctx: HookContext, run_id: str) -> tuple[CaseState, bool]:
         for hook in self._hooks:
             result = await hook.before_run(state, ctx)
             state = result.state
@@ -386,9 +375,7 @@ class MeshPipelineRunner:
 
         mlflow_run_id: str | None = None
         mlflow_experiment_id: str | None = None
-        with agent_run(
-            agent_name=agent_name, case_id=str(state.case_id), run_id=run_id
-        ) as ml_handle:
+        with agent_run(agent_name=agent_name, case_id=str(state.case_id), run_id=run_id) as ml_handle:
             if ml_handle is not None:
                 mlflow_run_id, mlflow_experiment_id = ml_handle
 
@@ -406,9 +393,7 @@ class MeshPipelineRunner:
                     reply_to=reply_to,
                     status_topic=status_topic,
                 )
-                response = await self._a2a.await_response(
-                    task_id, timeout=self._agent_timeout
-                )
+                response = await self._a2a.await_response(task_id, timeout=self._agent_timeout)
             except Exception as exc:
                 await self._emit_progress(
                     agent_name,
@@ -477,9 +462,7 @@ class MeshPipelineRunner:
             )
             request_topic = _request_topic(self._namespace, agent_name)
             publish_coros.append(self._a2a.publish(request_topic, envelope, reply_to=agg_reply_to))
-            publish_meta.append(
-                {"topic": request_topic, "task_id": sub_task_id, "agent": agent_name}
-            )
+            publish_meta.append({"topic": request_topic, "task_id": sub_task_id, "agent": agent_name})
             await self._emit_progress(agent_name, state, "started")
 
         payload_hashes = await asyncio.gather(*publish_coros)
@@ -492,9 +475,7 @@ class MeshPipelineRunner:
             )
 
         try:
-            merged_response = await self._a2a.await_response(
-                mesh_task_id, timeout=L2_BARRIER_TIMEOUT_SECONDS
-            )
+            merged_response = await self._a2a.await_response(mesh_task_id, timeout=L2_BARRIER_TIMEOUT_SECONDS)
         except TimeoutError:
             # Per-L2 wire events stay here so each agent shows as failed in
             # the per-agent stream. The run-level terminal event is the
@@ -507,9 +488,7 @@ class MeshPipelineRunner:
         merged_dict = parse_send_task_response(merged_response)
         if not merged_dict:
             for agent_name in L2_AGENTS:
-                await self._emit_progress(
-                    agent_name, state, "failed", error="Empty L2 merged response"
-                )
+                await self._emit_progress(agent_name, state, "failed", error="Empty L2 merged response")
             raise RuntimeError("L2 aggregator returned empty merged state")
 
         merged_state = CaseState.model_validate(merged_dict)

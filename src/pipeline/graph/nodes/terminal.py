@@ -3,6 +3,7 @@
 Reached when any node sets state["halt"]. Ported from
 mesh_runner._emit_terminal (640-666).
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime

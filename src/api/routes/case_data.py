@@ -16,7 +16,6 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 from sqlalchemy import select
 
 from src.api.deps import CurrentUser, DBSession
-from src.models.user import UserRole
 from src.api.schemas.cases import (
     ArgumentResponse,
     DocumentResponse,
@@ -43,6 +42,7 @@ from src.models.case import (
     Precedent,
     Witness,
 )
+from src.models.user import UserRole
 
 # Typed slots that kick off intake extraction as soon as one is uploaded.
 # Judges can still drop evidence bundles or letters of mitigation into a
@@ -216,9 +216,7 @@ def _derive_current_agent(agents: list[dict[str, Any]]) -> str | None:
 
 
 def _derive_overall_elapsed_seconds(agents: list[dict[str, Any]]) -> int | None:
-    completed = [
-        agent["elapsed_seconds"] for agent in agents if agent.get("elapsed_seconds") is not None
-    ]
+    completed = [agent["elapsed_seconds"] for agent in agents if agent.get("elapsed_seconds") is not None]
     if not completed:
         return None
     return int(sum(completed))
@@ -352,16 +350,12 @@ async def upload_documents(
     # Draft intake: the first authoritative document triggers extraction.
     # Anything uploaded after the case has left intake is business-as-usual
     # (evidence / supplementary uploads for an already-pending case).
-    if case.status == CaseStatus.draft and any(
-        k in _INTAKE_TRIGGER_KINDS for k in resolved_kinds
-    ):
+    if case.status == CaseStatus.draft and any(k in _INTAKE_TRIGGER_KINDS for k in resolved_kinds):
         from src.models.pipeline_job import PipelineJobType
         from src.workers.outbox import enqueue_outbox_job
 
         case.status = CaseStatus.extracting
-        await enqueue_outbox_job(
-            db, case_id=case.id, job_type=PipelineJobType.intake_extraction
-        )
+        await enqueue_outbox_job(db, case_id=case.id, job_type=PipelineJobType.intake_extraction)
         await db.commit()
     else:
         await db.commit()
@@ -503,9 +497,7 @@ async def get_pipeline_status(
 ) -> dict:
     case = await _get_case_or_404(case_id, db, current_user)
 
-    result = await db.execute(
-        select(AuditLog).where(AuditLog.case_id == case_id).order_by(AuditLog.created_at.asc())
-    )
+    result = await db.execute(select(AuditLog).where(AuditLog.case_id == case_id).order_by(AuditLog.created_at.asc()))
     logs = list(result.scalars().all())
 
     agents = _derive_agent_status(case, logs)
@@ -557,9 +549,7 @@ async def get_case_timeline(
     current_user: CurrentUser,
 ) -> list[Fact]:
     await _get_case_or_404(case_id, db, current_user)
-    result = await db.execute(
-        select(Fact).where(Fact.case_id == case_id).order_by(Fact.event_date.asc().nullslast())
-    )
+    result = await db.execute(select(Fact).where(Fact.case_id == case_id).order_by(Fact.event_date.asc().nullslast()))
     return list(result.scalars().all())
 
 

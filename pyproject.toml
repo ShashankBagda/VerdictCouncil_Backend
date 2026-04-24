@@ -58,14 +58,21 @@ include = ["src*"]
 
 [tool.ruff]
 target-version = "py312"
-line-length = 100
+line-length = 120
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP", "B", "A", "SIM"]
 ignore = [
     "UP042",  # str+Enum pattern needed for Pydantic/SQLAlchemy compatibility
     "B008",   # FastAPI uses function calls in defaults (Depends, Query)
+    "N806",   # Allow UPPERCASE constants inside functions (gate/status sets)
+    "N818",   # Allow exception names without Error suffix (project convention)
+    "SIM102", # Allow nested if statements (clarity over brevity)
+    "SIM117", # Allow multiple nested with statements (clarity over brevity)
 ]
+
+[tool.ruff.lint.per-file-ignores]
+"src/pipeline/graph/prompts.py" = ["E501"]  # LLM prompt strings are intentionally long
 
 [tool.mypy]
 python_version = "3.12"

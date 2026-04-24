@@ -183,9 +183,7 @@ class Layer2Aggregator:
         while True:
             cursor, keys = await self.redis.scan(cursor, match=pattern, count=100)
             for created_key in keys:
-                created_key_str = (
-                    created_key.decode() if isinstance(created_key, bytes) else created_key
-                )
+                created_key_str = created_key.decode() if isinstance(created_key, bytes) else created_key
                 created_raw = await self.redis.get(created_key_str)
                 if not created_raw:
                     continue
@@ -205,8 +203,7 @@ class Layer2Aggregator:
                 missing = self.REQUIRED_AGENTS - stored_agents
 
                 logger.error(
-                    "Layer2Aggregator TIMEOUT for %s. "
-                    "Missing agents: %s. Setting case status to FAILED.",
+                    "Layer2Aggregator TIMEOUT for %s. Missing agents: %s. Setting case status to FAILED.",
                     parts,
                     sorted(missing),
                 )
@@ -233,9 +230,7 @@ class Layer2Aggregator:
 
         # Recover the original CaseState stored on first receipt
         original_raw = all_data.get(
-            b"_original_case_state"
-            if isinstance(next(iter(all_data.keys())), bytes)
-            else "_original_case_state"
+            b"_original_case_state" if isinstance(next(iter(all_data.keys())), bytes) else "_original_case_state"
         )
         original_case_state = json.loads(original_raw) if original_raw else {}
 
@@ -244,9 +239,7 @@ class Layer2Aggregator:
 
         # Merge only the designated agent output fields into the full CaseState
         for agent_key in self.REQUIRED_AGENTS:
-            raw = all_data.get(
-                agent_key.encode() if isinstance(next(iter(all_data.keys())), bytes) else agent_key
-            )
+            raw = all_data.get(agent_key.encode() if isinstance(next(iter(all_data.keys())), bytes) else agent_key)
             if raw:
                 fragment = json.loads(raw)
                 # Update the designated CaseState field with the agent's output
@@ -265,6 +258,5 @@ class Layer2Aggregator:
             k.decode() if isinstance(k, bytes) else k
             for k in all_data
             if not (k.decode() if isinstance(k, bytes) else k).endswith("_ts")
-            and (k.decode() if isinstance(k, bytes) else k)
-            not in ("_original_case_state", "_published")
+            and (k.decode() if isinstance(k, bytes) else k) not in ("_original_case_state", "_published")
         }

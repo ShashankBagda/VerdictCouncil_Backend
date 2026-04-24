@@ -70,9 +70,7 @@ async def test_ensure_domain_vector_store_returns_existing_id():
     domain.is_active = True
 
     session = MagicMock()
-    session.execute = AsyncMock(
-        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=domain))
-    )
+    session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=domain)))
     session.flush = AsyncMock()
 
     result_id, created = await kb.ensure_domain_vector_store(session, domain_id)
@@ -91,9 +89,7 @@ async def test_ensure_domain_vector_store_provisions_new_store():
     domain.is_active = False
 
     session = MagicMock()
-    session.execute = AsyncMock(
-        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=domain))
-    )
+    session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=domain)))
     session.flush = AsyncMock()
 
     mock_client = _mock_client("vs_freshly_created")
@@ -110,9 +106,7 @@ async def test_ensure_domain_vector_store_provisions_new_store():
 async def test_ensure_domain_vector_store_raises_on_missing_domain():
     """LookupError is raised when the domain row does not exist."""
     session = MagicMock()
-    session.execute = AsyncMock(
-        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None))
-    )
+    session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None)))
 
     with pytest.raises(LookupError, match="not found"):
         await kb.ensure_domain_vector_store(session, str(uuid.uuid4()))
@@ -128,16 +122,12 @@ async def test_ensure_domain_vector_store_force_recreate_replaces_stale_id():
     domain.is_active = True
 
     session = MagicMock()
-    session.execute = AsyncMock(
-        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=domain))
-    )
+    session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=domain)))
     session.flush = AsyncMock()
 
     mock_client = _mock_client("vs_replacement")
     with patch("src.services.knowledge_base._get_client", return_value=mock_client):
-        result_id, created = await kb.ensure_domain_vector_store(
-            session, domain_id, force_recreate=True
-        )
+        result_id, created = await kb.ensure_domain_vector_store(session, domain_id, force_recreate=True)
 
     assert result_id == "vs_replacement"
     assert created is True
@@ -154,9 +144,7 @@ async def test_ensure_domain_vector_store_activates_inactive_provisioned_domain(
     domain.is_active = False
 
     session = MagicMock()
-    session.execute = AsyncMock(
-        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=domain))
-    )
+    session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=domain)))
     session.flush = AsyncMock()
 
     result_id, created = await kb.ensure_domain_vector_store(session, domain_id)

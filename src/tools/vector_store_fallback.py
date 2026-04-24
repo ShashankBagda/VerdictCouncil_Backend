@@ -52,8 +52,7 @@ async def vector_store_search(
     if effective_id is None:
         if allow_global_fallback and settings.openai_vector_store_id:
             logger.warning(
-                "Domain not provisioned; falling back to global vector store. "
-                "query=%s domain=%s",
+                "Domain not provisioned; falling back to global vector store. query=%s domain=%s",
                 query[:80],
                 domain,
             )
@@ -61,9 +60,7 @@ async def vector_store_search(
         else:
             if not settings.openai_vector_store_id:
                 raise VectorStoreError("Vector store not configured")
-            raise VectorStoreError(
-                "No domain vector store id provided and allow_global_fallback is False"
-            )
+            raise VectorStoreError("No domain vector store id provided and allow_global_fallback is False")
 
     try:
         client = _get_client()

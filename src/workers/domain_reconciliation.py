@@ -62,9 +62,7 @@ async def reconcile_domain_documents(ctx: dict) -> None:
         try:
             await _reconcile_one(client, doc)
         except Exception as exc:
-            logger.error(
-                "Reconciliation failed for DomainDocument %s: %s", doc.id, exc, exc_info=True
-            )
+            logger.error("Reconciliation failed for DomainDocument %s: %s", doc.id, exc, exc_info=True)
 
 
 async def _reconcile_one(client, doc: DomainDocument) -> None:
@@ -90,8 +88,7 @@ async def _reconcile_one(client, doc: DomainDocument) -> None:
                     )
                     live_doc.status = DomainDocumentStatus.failed
                     live_doc.error_reason = (
-                        f"Stuck in {live_doc.status} for >{_STUCK_THRESHOLD_MINUTES} minutes; "
-                        "manually retry upload"
+                        f"Stuck in {live_doc.status} for >{_STUCK_THRESHOLD_MINUTES} minutes; manually retry upload"
                     )
                 except Exception:
                     # File gone from OpenAI — definitely failed
@@ -106,7 +103,6 @@ async def _reconcile_one(client, doc: DomainDocument) -> None:
 
 async def _check_vector_store_file(client, db, doc: DomainDocument) -> None:
     """Poll the vector store file status and advance or fail the document."""
-    from sqlalchemy import select
 
     from src.models.domain import Domain
 
@@ -136,6 +132,4 @@ async def _check_vector_store_file(client, db, doc: DomainDocument) -> None:
         logger.warning("DomainDocument %s reconciled → failed (VS status=%s)", doc.id, vs_file.status)
     else:
         # Still in progress — leave it for the next reconciliation pass
-        logger.debug(
-            "DomainDocument %s still indexing (VS status=%s)", doc.id, vs_file.status
-        )
+        logger.debug("DomainDocument %s still indexing (VS status=%s)", doc.id, vs_file.status)

@@ -12,7 +12,6 @@ Integration parity test (graph vs mesh on a gold-set fixture) is marked
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -24,7 +23,6 @@ from src.pipeline.graph.shadow import (
     _strip_volatile,
 )
 from src.shared.case_state import CaseState
-
 
 # ---------------------------------------------------------------------------
 # _strip_volatile
@@ -242,9 +240,7 @@ class TestShadowRunnerRunGate:
         runner._graph_runner.run_gate = AsyncMock(return_value=graph_state)
         runner._log_diff = AsyncMock()
 
-        await runner.run_gate(
-            _make_case(), "gate2", start_agent="evidence_analysis", extra_instructions="be thorough"
-        )
+        await runner.run_gate(_make_case(), "gate2", start_agent="evidence_analysis", extra_instructions="be thorough")
 
         # Mesh runner receives positional args (case_state, gate_name, start_agent, extra_instructions)
         _, mesh_args, _ = runner._mesh_runner.run_gate.mock_calls[0]
@@ -337,7 +333,4 @@ class TestGraphVsMeshParity:
         diff = DeepDiff(mesh_clean, graph_clean, ignore_order=True, significant_digits=3)
         ratio = _compute_match_ratio(diff)
 
-        assert ratio >= 0.95, (
-            f"Graph/mesh field-match ratio {ratio:.3f} < 0.95. "
-            f"Diff: {diff.to_dict()}"
-        )
+        assert ratio >= 0.95, f"Graph/mesh field-match ratio {ratio:.3f} < 0.95. Diff: {diff.to_dict()}"

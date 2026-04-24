@@ -63,9 +63,7 @@ async def dispute_fact(
     db: DBSession,
     current_user: User = require_role(UserRole.judge),
 ) -> DisputeFactResponse:
-    result = await db.execute(
-        select(Fact).where(Fact.id == fact_id, Fact.case_id == case_id).with_for_update()
-    )
+    result = await db.execute(select(Fact).where(Fact.id == fact_id, Fact.case_id == case_id).with_for_update())
     fact = result.scalar_one_or_none()
     if not fact:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Fact not found")
@@ -151,16 +149,12 @@ async def get_evidence_gaps(
     # Totals
     total_evidence = (
         await db.execute(
-            select(func.count()).select_from(
-                select(Evidence).where(Evidence.case_id == case_id).subquery()
-            )
+            select(func.count()).select_from(select(Evidence).where(Evidence.case_id == case_id).subquery())
         )
     ).scalar_one()
 
     total_facts = (
-        await db.execute(
-            select(func.count()).select_from(select(Fact).where(Fact.case_id == case_id).subquery())
-        )
+        await db.execute(select(func.count()).select_from(select(Fact).where(Fact.case_id == case_id).subquery()))
     ).scalar_one()
 
     gap_summary = (

@@ -183,10 +183,7 @@ class TestCaseReportPdfEndpoint:
 
         assert resp.status_code == 200
         assert resp.headers["content-type"] == "application/pdf"
-        assert (
-            resp.headers["content-disposition"]
-            == f'attachment; filename="case-{case_id}-report.pdf"'
-        )
+        assert resp.headers["content-disposition"] == f'attachment; filename="case-{case_id}-report.pdf"'
         assert resp.content.startswith(b"%PDF-")
 
     async def test_returns_404_when_case_missing(self, monkeypatch):

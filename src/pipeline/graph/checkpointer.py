@@ -17,10 +17,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_checkpointer: "AsyncPostgresSaver | None" = None
+_checkpointer: AsyncPostgresSaver | None = None
 
 
-async def get_checkpointer() -> "AsyncPostgresSaver":
+async def get_checkpointer() -> AsyncPostgresSaver:
     """Return the singleton AsyncPostgresSaver, creating it on first call."""
     global _checkpointer
     if _checkpointer is not None:
@@ -29,9 +29,9 @@ async def get_checkpointer() -> "AsyncPostgresSaver":
     from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
     # Convert SQLAlchemy async URL to sync psycopg3 URI
-    conn_str = settings.database_url.replace(
-        "postgresql+asyncpg://", "postgresql://"
-    ).replace("postgresql+psycopg://", "postgresql://")
+    conn_str = settings.database_url.replace("postgresql+asyncpg://", "postgresql://").replace(
+        "postgresql+psycopg://", "postgresql://"
+    )
 
     _checkpointer = await AsyncPostgresSaver.afrom_conn_string(conn_str)
     await _checkpointer.setup()

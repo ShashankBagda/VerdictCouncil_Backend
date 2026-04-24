@@ -17,7 +17,7 @@ import json
 import logging
 import os
 import re
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -28,7 +28,11 @@ from src.services.pipeline_events import publish_agent_event
 from src.shared.audit import append_audit_entry
 from src.shared.case_state import CaseState, CaseStatusEnum
 from src.shared.config import settings
-from src.shared.validation import FieldOwnershipError, normalize_agent_output, validate_field_ownership
+from src.shared.validation import (
+    FieldOwnershipError,
+    normalize_agent_output,
+    validate_field_ownership,
+)
 from src.tools.exceptions import CriticalToolFailure, DegradableToolError
 from src.tools.search_precedents import PrecedentSearchError  # noqa: F401 — register as degradable
 
@@ -104,8 +108,7 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
         "function": {
             "name": "parse_document",
             "description": (
-                "Parse uploaded documents via OpenAI Files API. "
-                "Extracts text, tables, and metadata from legal filings."
+                "Parse uploaded documents via OpenAI Files API. Extracts text, tables, and metadata from legal filings."
             ),
             "parameters": {
                 "type": "object",
@@ -152,16 +155,12 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
                             },
                         },
                         "description": (
-                            "List of document segments to compare. "
-                            "Each segment: {doc_id, text, page, paragraph}"
+                            "List of document segments to compare. Each segment: {doc_id, text, page, paragraph}"
                         ),
                     },
                     "check_type": {
                         "type": "string",
-                        "description": (
-                            "Type of cross-reference check: "
-                            "'contradiction' | 'corroboration' | 'all'"
-                        ),
+                        "description": ("Type of cross-reference check: 'contradiction' | 'corroboration' | 'all'"),
                     },
                 },
                 "required": ["segments", "check_type"],
@@ -192,8 +191,7 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
                             },
                         },
                         "description": (
-                            "List of events to order. Each event: "
-                            "{date, description, source_ref, parties, location}"
+                            "List of events to order. Each event: {date, description, source_ref, parties, location}"
                         ),
                     },
                 },
@@ -206,8 +204,7 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
         "function": {
             "name": "generate_questions",
             "description": (
-                "Generate suggested judicial questions based on argument "
-                "analysis and identified weaknesses."
+                "Generate suggested judicial questions based on argument analysis and identified weaknesses."
             ),
             "parameters": {
                 "type": "object",
@@ -244,18 +241,13 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
         "type": "function",
         "function": {
             "name": "search_precedents",
-            "description": (
-                "Query the PAIR Search API for binding higher court case law "
-                "matching fact patterns."
-            ),
+            "description": ("Query the PAIR Search API for binding higher court case law matching fact patterns."),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": (
-                            "Targeted query for legal concepts or statutory provisions"
-                        ),
+                        "description": ("Targeted query for legal concepts or statutory provisions"),
                     },
                     "domain": {
                         "type": "string",
@@ -370,10 +362,7 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
                     },
                     "outcome": {
                         "type": "string",
-                        "description": (
-                            "Outcome for 'complete' actions: "
-                            "'ready_for_review' | 'escalated' | 'failed'"
-                        ),
+                        "description": ("Outcome for 'complete' actions: 'ready_for_review' | 'escalated' | 'failed'"),
                     },
                     "reason": {
                         "type": "string",
@@ -407,8 +396,7 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
                     "extra_instructions": {
                         "type": "string",
                         "description": (
-                            "Optional additional instructions appended to the agent's "
-                            "system prompt for this run only"
+                            "Optional additional instructions appended to the agent's system prompt for this run only"
                         ),
                     },
                 },
@@ -463,8 +451,7 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
                     "escalation_source": {
                         "type": "string",
                         "description": (
-                            "Source of escalation: 'orchestrator' | 'governance_audit' | "
-                            "'judge' | 'routing_trigger'"
+                            "Source of escalation: 'orchestrator' | 'governance_audit' | 'judge' | 'routing_trigger'"
                         ),
                     },
                     "trigger_id": {
@@ -512,8 +499,7 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
                         "type": "array",
                         "items": {"type": "string"},
                         "description": (
-                            "List of agent names to run in parallel. "
-                            "All must complete before the barrier resolves."
+                            "List of agent names to run in parallel. All must complete before the barrier resolves."
                         ),
                     },
                     "gate": {
@@ -743,10 +729,7 @@ class PipelineRunner:
 
         # Extract model name from the SAM model dict and resolve env vars
         model_value = app_config.get("model", {})
-        if isinstance(model_value, dict):
-            model_name = model_value.get("model", "")
-        else:
-            model_name = str(model_value)
+        model_name = model_value.get("model", "") if isinstance(model_value, dict) else str(model_value)
 
         # Resolve ${ENV_VAR} placeholders from the environment
         model_name = _resolve_env_vars(model_name)
@@ -831,9 +814,7 @@ class PipelineRunner:
                         result = await parse_document(**arguments)
                     # Capture page texts for later DB write (US-008 citation drill-down)
                     if file_id and isinstance(result, dict) and result.get("pages"):
-                        self._document_pages_buffer[file_id] = [
-                            p.get("text", "") for p in result["pages"]
-                        ]
+                        self._document_pages_buffer[file_id] = [p.get("text", "") for p in result["pages"]]
             elif tool_name == "cross_reference":
                 from src.tools import cross_reference
 
@@ -863,9 +844,7 @@ class PipelineRunner:
             elif tool_name == "search_domain_guidance":
                 from src.tools.search_domain_guidance import search_domain_guidance
 
-                with tool_span(
-                    "tool.search_domain_guidance", inputs={"args": list(arguments.keys())}
-                ):
+                with tool_span("tool.search_domain_guidance", inputs={"args": list(arguments.keys())}):
                     result = await search_domain_guidance(**arguments)
             elif tool_name == "confidence_calc":
                 from src.tools import confidence_calc
@@ -893,9 +872,7 @@ class PipelineRunner:
         """Run a single agent step: call LLM, parse response, update state."""
         # D13: Refresh pages cache from current state's raw_documents
         self._state_pages_cache = {
-            d["openai_file_id"]: d["pages"]
-            for d in state.raw_documents
-            if d.get("openai_file_id") and d.get("pages")
+            d["openai_file_id"]: d["pages"] for d in state.raw_documents if d.get("openai_file_id") and d.get("pages")
         }
         case_id = str(state.case_id) if state.case_id else "unknown"
         await publish_agent_event(
@@ -933,9 +910,7 @@ class PipelineRunner:
         model = self._resolve_model(config)
         system_prompt = config.get("instruction", "")
         if extra_instructions:
-            system_prompt = (
-                f"{system_prompt}\n\nAdditional instructions from judge:\n{extra_instructions}"
-            )
+            system_prompt = f"{system_prompt}\n\nAdditional instructions from judge:\n{extra_instructions}"
         tools = self._build_tools(agent_name)
 
         state_json = state.model_dump_json()
@@ -962,9 +937,7 @@ class PipelineRunner:
                 "case_id": case_id,
                 "agent": agent_name,
                 "event": "thinking",
-                "content": (
-                    f"→ {model} · tools={len(tools) if tools else 0}"
-                ),
+                "content": (f"→ {model} · tools={len(tools) if tools else 0}"),
                 "ts": datetime.now(UTC).isoformat(),
             },
         )
@@ -1128,9 +1101,7 @@ class PipelineRunner:
             action="agent_response",
             input_payload={"state_keys": list(original_dict.keys())},
             output_payload=agent_output,
-            system_prompt=(
-                system_prompt[:200] + "..." if len(system_prompt) > 200 else system_prompt
-            ),
+            system_prompt=(system_prompt[:200] + "..." if len(system_prompt) > 200 else system_prompt),
             llm_response={"content": raw_content[:1000]},
             tool_calls=tool_calls_log if tool_calls_log else None,
             model=model,
@@ -1169,9 +1140,7 @@ class PipelineRunner:
             try:
                 agents = agents[agents.index(start_agent) :]
             except ValueError:
-                logger.warning(
-                    "start_agent %r not in gate %r; running full gate", start_agent, gate_name
-                )
+                logger.warning("start_agent %r not in gate %r; running full gate", start_agent, gate_name)
 
         state = case_state
         for agent_name in agents:
@@ -1186,9 +1155,7 @@ class PipelineRunner:
 
         gate_pause_status = CaseStatusEnum[f"awaiting_review_{gate_name}"]
         state = state.model_copy(update={"status": gate_pause_status})
-        logger.info(
-            "Gate %s completed for case_id=%s, pausing for judge review", gate_name, state.case_id
-        )
+        logger.info("Gate %s completed for case_id=%s, pausing for judge review", gate_name, state.case_id)
         return state
 
     async def run(self, case_state: CaseState) -> CaseState:
@@ -1281,7 +1248,7 @@ class OrchestratorRunner:
                 "retry_log": [],
                 "escalation_record": None,
                 "what_if_runs": [],
-                "pipeline_start_time": datetime.now(timezone.utc).isoformat(),
+                "pipeline_start_time": datetime.now(UTC).isoformat(),
                 "pipeline_end_time": None,
                 "total_duration_seconds": None,
                 "final_disposition": "in_progress",
@@ -1305,8 +1272,8 @@ class OrchestratorRunner:
                 "agent_name": agent_name,
                 "status": status,
                 "retries": retries,
-                "start_time": start_time or datetime.now(timezone.utc).isoformat(),
-                "end_time": datetime.now(timezone.utc).isoformat(),
+                "start_time": start_time or datetime.now(UTC).isoformat(),
+                "end_time": datetime.now(UTC).isoformat(),
             }
         )
         orch["agents_run"] = agents_run
@@ -1329,16 +1296,14 @@ class OrchestratorRunner:
         return state.model_copy(update={"case_metadata": meta})
 
     @staticmethod
-    def _record_escalation(
-        state: CaseState, source: str, reason: str, trigger_id: str | None
-    ) -> CaseState:
+    def _record_escalation(state: CaseState, source: str, reason: str, trigger_id: str | None) -> CaseState:
         meta = dict(state.case_metadata)
         orch = dict(meta.get("orchestration", {}))
         orch["escalation_record"] = {
             "source": source,
             "trigger_id": trigger_id,
             "reason": reason,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
         orch["final_disposition"] = "escalated"
         meta["orchestration"] = orch
@@ -1348,7 +1313,7 @@ class OrchestratorRunner:
     def _finalize_orchestration(state: CaseState, disposition: str) -> CaseState:
         meta = dict(state.case_metadata)
         orch = dict(meta.get("orchestration", {}))
-        end = datetime.now(timezone.utc).isoformat()
+        end = datetime.now(UTC).isoformat()
         orch["pipeline_end_time"] = end
         orch["final_disposition"] = disposition
         start_str = orch.get("pipeline_start_time")
@@ -1371,7 +1336,7 @@ class OrchestratorRunner:
             if state.status == CaseStatusEnum.failed:
                 return False, "jurisdiction_failed"
             meta = state.case_metadata
-            if not meta.get("jurisdiction_valid", True) is False:
+            if meta.get("jurisdiction_valid", True) is not False:
                 pass  # valid
         if agent_name == "complexity-routing":
             route = state.case_metadata.get("route")
@@ -1425,20 +1390,16 @@ class OrchestratorRunner:
         """Run agent with up to _MAX_AUTO_RETRIES automatic retries."""
         retries = 0
         last_error: str = ""
-        start_time = datetime.now(timezone.utc).isoformat()
+        start_time = datetime.now(UTC).isoformat()
 
         while retries <= _MAX_AUTO_RETRIES:
             try:
-                state = await self._runner._run_agent(
-                    agent_name, state, extra_instructions=extra_instructions
-                )
+                state = await self._runner._run_agent(agent_name, state, extra_instructions=extra_instructions)
                 state = self._record_agent_run(state, agent_name, "success", retries, start_time)
                 return state
             except CriticalToolFailure as exc:
                 # Never retry critical failures — escalate immediately
-                state = self._record_agent_run(
-                    state, agent_name, "critical_failure", retries, start_time
-                )
+                state = self._record_agent_run(state, agent_name, "critical_failure", retries, start_time)
                 raise EscalationRequired(
                     reason=f"CriticalToolFailure in {agent_name}: {exc}",
                     source="orchestrator",
@@ -1462,7 +1423,7 @@ class OrchestratorRunner:
                         "agent_name": agent_name,
                         "attempt": retries + 1,
                         "reason": last_error,
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "timestamp": datetime.now(UTC).isoformat(),
                     }
                 )
                 orch["retry_log"] = retry_log
@@ -1470,9 +1431,7 @@ class OrchestratorRunner:
                 state = state.model_copy(update={"case_metadata": meta})
 
                 if retries >= _MAX_AUTO_RETRIES:
-                    state = self._record_agent_run(
-                        state, agent_name, "failed_max_retries", retries, start_time
-                    )
+                    state = self._record_agent_run(state, agent_name, "failed_max_retries", retries, start_time)
                     raise EscalationRequired(
                         reason=f"Agent '{agent_name}' failed after {retries + 1} attempts: {last_error}",
                         source="orchestrator",
@@ -1510,8 +1469,7 @@ class OrchestratorRunner:
         route = state.case_metadata.get("route")
         if route == "escalate_human":
             trigger = (
-                state.case_metadata.get("routing_factors", {}).get("unconditional_trigger")
-                or "routing_escalation"
+                state.case_metadata.get("routing_factors", {}).get("unconditional_trigger") or "routing_escalation"
             )
             state = self._record_escalation(
                 state,
@@ -1532,7 +1490,7 @@ class OrchestratorRunner:
         """Dispatch gate2 agents in parallel, then apply barrier checks."""
         state = self._set_gate_status(state, "gate2", "running")
 
-        barrier_start = datetime.now(timezone.utc).isoformat()
+        barrier_start = datetime.now(UTC).isoformat()
 
         # Run all four gate2 agents concurrently from the same input state.
         # Each agent reads the shared CaseState and writes its own dedicated fields.
@@ -1565,11 +1523,7 @@ class OrchestratorRunner:
                     if agent_value is not None:
                         merged[field] = agent_value
                 # Merge audit log from parallel result
-                merged["audit_log"] = (
-                    state.audit_log + [
-                        e for e in result.audit_log if e not in state.audit_log
-                    ]
-                )
+                merged["audit_log"] = state.audit_log + [e for e in result.audit_log if e not in state.audit_log]
                 state = CaseState(**merged)
 
         # Escalate if too many failures
@@ -1596,13 +1550,17 @@ class OrchestratorRunner:
                 state = await self._run_with_retry(
                     state,
                     "legal-knowledge",
-                    extra_instructions="RETRY: Previous run produced no legal rules. Ensure legal_rules[] is populated.",
+                    extra_instructions=(
+                        "RETRY: Previous run produced no legal rules. Ensure legal_rules[] is populated."
+                    ),
                 )
             if "evidence_analysis produced no evidence items" in issues:
                 state = await self._run_with_retry(
                     state,
                     "evidence-analysis",
-                    extra_instructions="RETRY: Previous run produced no evidence items. Ensure evidence_items[] is populated.",
+                    extra_instructions=(
+                        "RETRY: Previous run produced no evidence items. Ensure evidence_items[] is populated."
+                    ),
                 )
 
         # Impartiality check
@@ -1621,7 +1579,7 @@ class OrchestratorRunner:
         parallel_results = dict(orch.get("parallel_dispatch_results", {}))
         parallel_results["gate2"] = {
             "status": "complete",
-            "barrier_met_at": datetime.now(timezone.utc).isoformat(),
+            "barrier_met_at": datetime.now(UTC).isoformat(),
             "barrier_start": barrier_start,
             "agent_failures": len(failures),
         }
@@ -1639,8 +1597,7 @@ class OrchestratorRunner:
         # Check both sides' weaknesses are present
         args = state.arguments or {}
         if isinstance(args, dict):
-            for side_key in ("prosecution_argument", "claimant_position",
-                             "defence_argument", "respondent_position"):
+            for side_key in ("prosecution_argument", "claimant_position", "defence_argument", "respondent_position"):
                 if side_key in args and not args[side_key].get("weaknesses"):
                     state = await self._run_with_retry(
                         state,
@@ -1718,9 +1675,7 @@ class OrchestratorRunner:
 
         except EscalationRequired as exc:
             logger.warning("Pipeline escalation: %s (source=%s)", exc.reason, exc.source)
-            state = self._record_escalation(
-                state, source=exc.source, reason=exc.reason, trigger_id=exc.trigger_id
-            )
+            state = self._record_escalation(state, source=exc.source, reason=exc.reason, trigger_id=exc.trigger_id)
             state = state.model_copy(update={"status": CaseStatusEnum.escalated})
             return self._finalize_orchestration(state, "escalated")
 
@@ -1773,7 +1728,7 @@ class OrchestratorRunner:
                 "parent_run_id": base_state.run_id,
                 "modification_type": modification_type,
                 "modifications": list(modifications.keys()),
-                "started_at": datetime.now(timezone.utc).isoformat(),
+                "started_at": datetime.now(UTC).isoformat(),
             }
         )
         orch["what_if_runs"] = what_if_runs
@@ -1787,12 +1742,9 @@ class OrchestratorRunner:
             forked = await self._run_gate3(forked)
             forked = await self._run_gate4(forked)
         except EscalationRequired as exc:
-            forked = self._record_escalation(
-                forked, source=exc.source, reason=exc.reason, trigger_id=exc.trigger_id
-            )
+            forked = self._record_escalation(forked, source=exc.source, reason=exc.reason, trigger_id=exc.trigger_id)
             forked = forked.model_copy(update={"status": CaseStatusEnum.escalated})
             return self._finalize_orchestration(forked, "escalated")
 
         forked = forked.model_copy(update={"status": CaseStatusEnum.ready_for_review})
         return self._finalize_orchestration(forked, "ready_for_review")
-

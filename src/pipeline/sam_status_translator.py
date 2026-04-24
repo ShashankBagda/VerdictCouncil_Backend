@@ -52,11 +52,7 @@ def translate_sam_status(envelope: dict, *, case_id: str) -> dict | None:
     outer_metadata = result.get("metadata") or {}
     logical_task_id = result.get("id")
 
-    agent_name = (
-        outer_metadata.get("agent_name")
-        or _agent_from_task_id(logical_task_id)
-        or "unknown"
-    )
+    agent_name = outer_metadata.get("agent_name") or _agent_from_task_id(logical_task_id) or "unknown"
 
     base = {
         "case_id": case_id,
@@ -174,9 +170,7 @@ def _extract_text_from_turn(entry: Any) -> str | None:
 
 def _looks_like_text_parts(message: dict) -> bool:
     parts = message.get("parts") if isinstance(message, dict) else None
-    return isinstance(parts, list) and any(
-        isinstance(p, dict) and p.get("text") for p in parts
-    )
+    return isinstance(parts, list) and any(isinstance(p, dict) and p.get("text") for p in parts)
 
 
 def _first_text_part(message: dict) -> str | None:

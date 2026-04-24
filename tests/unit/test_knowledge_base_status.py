@@ -175,9 +175,7 @@ async def test_knowledge_base_status_vector_store_unavailable():
     user = _make_user()
     mock_breaker = AsyncMock()
     mock_breaker.get_status = AsyncMock(return_value=_CLOSED_STATUS)
-    mock_client = _mock_openai_client(
-        retrieve_mock=AsyncMock(side_effect=Exception("Connection refused"))
-    )
+    mock_client = _mock_openai_client(retrieve_mock=AsyncMock(side_effect=Exception("Connection refused")))
 
     with (
         patch("src.api.routes.knowledge_base.get_pair_search_breaker", return_value=mock_breaker),

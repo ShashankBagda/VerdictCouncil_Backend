@@ -73,9 +73,7 @@ async def test_check_input_injection_blocks_via_llm_layer():
     )
 
     mock_response = MagicMock()
-    mock_response.choices[0].message.content = json.dumps(
-        {"is_injection": True, "reason": "Override attempt detected"}
-    )
+    mock_response.choices[0].message.content = json.dumps({"is_injection": True, "reason": "Override attempt detected"})
 
     mock_client = AsyncMock()
     mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
@@ -102,9 +100,7 @@ async def test_check_input_injection_llm_layer_passes_benign_text():
     )
 
     mock_response = MagicMock()
-    mock_response.choices[0].message.content = json.dumps(
-        {"is_injection": False, "reason": "Benign legal content"}
-    )
+    mock_response.choices[0].message.content = json.dumps({"is_injection": False, "reason": "Benign legal content"})
 
     mock_client = AsyncMock()
     mock_client.chat.completions.create = AsyncMock(return_value=mock_response)

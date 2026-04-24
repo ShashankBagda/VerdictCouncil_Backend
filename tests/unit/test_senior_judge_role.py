@@ -5,7 +5,6 @@ from fastapi import status
 from sqlalchemy import select
 
 from src.models.user import User, UserRole
-from tests.conftest import AuthenticatedClient
 
 
 @pytest.mark.asyncio
@@ -38,7 +37,7 @@ async def test_senior_judge_can_access_protected_endpoints(db, authenticated_cli
     )
     db.add(senior)
     await db.flush()
-    
+
     # Verify senior_judge role exists and can be retrieved
     result = await db.execute(select(User).where(User.id == senior.id))
     fetched = result.scalar_one()
@@ -56,11 +55,11 @@ async def test_non_senior_judge_cannot_access_senior_endpoints(db, authenticated
 @pytest.mark.asyncio
 async def test_senior_judge_role_values():
     """Test that UserRole enum contains all expected values."""
-    assert hasattr(UserRole, 'judge')
-    assert hasattr(UserRole, 'admin')
-    assert hasattr(UserRole, 'senior_judge')
-    
+    assert hasattr(UserRole, "judge")
+    assert hasattr(UserRole, "admin")
+    assert hasattr(UserRole, "senior_judge")
+
     # Verify they're strings
-    assert UserRole.judge.value == 'judge'
-    assert UserRole.admin.value == 'admin'
-    assert UserRole.senior_judge.value == 'senior_judge'
+    assert UserRole.judge.value == "judge"
+    assert UserRole.admin.value == "admin"
+    assert UserRole.senior_judge.value == "senior_judge"
