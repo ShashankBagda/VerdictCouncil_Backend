@@ -145,7 +145,7 @@ async def test_search_precedents_query_too_short():
 
 
 async def test_search_precedents_non_judge_forbidden():
-    clerk = _make_user(role=UserRole.clerk)
+    clerk = _make_user(role=UserRole.admin)
     app = _app_with_overrides(clerk)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         resp = await ac.post(

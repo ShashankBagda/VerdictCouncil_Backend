@@ -80,11 +80,15 @@ def confidence_calc(
 
     # Convert evidence strength labels to numeric scores
     evidence_numeric = [
-        s for label in evidence_strengths if (s := _label_to_score(label, _EVIDENCE_STRENGTH_MAP)) is not None
+        s
+        for label in evidence_strengths
+        if (s := _label_to_score(label, _EVIDENCE_STRENGTH_MAP)) is not None
     ]
 
     # Convert fact status labels to numeric scores
-    fact_numeric = [s for label in fact_statuses if (s := _label_to_score(label, _FACT_STATUS_MAP)) is not None]
+    fact_numeric = [
+        s for label in fact_statuses if (s := _label_to_score(label, _FACT_STATUS_MAP)) is not None
+    ]
 
     # Normalize precedent similarities: if values are in [0, 1], scale to [0, 100]
     precedent_numeric: list[float] = []
@@ -126,7 +130,7 @@ def confidence_calc(
         classification = "Low"
 
     logger.info(
-        "Confidence calculated: %d (%s) — evidence=%.1f, facts=%.1f, witnesses=%.1f, precedents=%.1f",
+        "Confidence calculated: %d (%s) — evidence=%.1f, facts=%.1f, witnesses=%.1f, precedents=%.1f",  # noqa: E501
         confidence_score,
         classification,
         evidence_avg,

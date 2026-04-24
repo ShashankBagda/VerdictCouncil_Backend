@@ -82,7 +82,7 @@ async def test_initialize_is_idempotent_returns_created_false():
 
 
 async def test_initialize_forbidden_for_non_judge():
-    clerk = _make_user(role=UserRole.clerk)
+    clerk = _make_user(role=UserRole.admin)
     app = _app_for(clerk)
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
@@ -165,7 +165,7 @@ async def test_upload_document_too_large_returns_413():
 
 
 async def test_upload_document_forbidden_for_non_judge():
-    clerk = _make_user(role=UserRole.clerk)
+    clerk = _make_user(role=UserRole.admin)
     app = _app_for(clerk)
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
@@ -315,7 +315,9 @@ async def test_search_returns_hits():
     body = resp.json()
     assert body["items"][0]["file_id"] == "file-a"
     assert body["items"][0]["score"] == 0.9
-    search_mock.assert_awaited_once_with(vector_store_id="vs_judge", query="fair use", max_results=3)
+    search_mock.assert_awaited_once_with(
+        vector_store_id="vs_judge", query="fair use", max_results=3
+    )
 
 
 async def test_search_404_when_uninitialized():

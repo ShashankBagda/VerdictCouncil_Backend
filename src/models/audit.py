@@ -33,4 +33,6 @@ class AuditLog(UUIDPrimaryKeyMixin, Base):
     model: Mapped[str | None] = mapped_column(String(100))
     token_usage: Mapped[dict | None] = mapped_column(JSONB)
     solace_message_id: Mapped[str | None] = mapped_column(String(255))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )

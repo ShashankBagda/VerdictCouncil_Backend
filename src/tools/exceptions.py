@@ -5,7 +5,7 @@ from failures that must halt the gate entirely (CriticalToolFailure).
 """
 
 
-class CriticalToolFailure(Exception):
+class CriticalToolFailure(Exception):  # noqa: N818
     """Base for tool failures that MUST halt the gate, not degrade silently."""
 
 

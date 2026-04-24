@@ -129,7 +129,7 @@ async def test_dispute_fact_not_found():
 async def test_dispute_fact_non_judge_forbidden():
     case_id = uuid.uuid4()
     fact_id = uuid.uuid4()
-    clerk = _make_user(role=UserRole.clerk)
+    clerk = _make_user(role=UserRole.admin)
 
     mock_db = _build_mock_session()
     app = _app_with_overrides(mock_db, clerk)

@@ -79,7 +79,9 @@ class TestOutboxHelpers:
             finally:
                 await session.delete(refreshed)
                 await session.execute(text("DELETE FROM cases WHERE id = :id"), {"id": case.id})
-                await session.execute(text("DELETE FROM users WHERE id = :id"), {"id": case.created_by})
+                await session.execute(
+                    text("DELETE FROM users WHERE id = :id"), {"id": case.created_by}
+                )
                 await session.commit()
 
     @pytest.mark.asyncio
@@ -105,17 +107,25 @@ class TestOutboxHelpers:
                 assert refreshed.status == PipelineJobStatus.dispatched
                 assert refreshed.dispatched_at is not None
             finally:
-                await session.execute(text("DELETE FROM pipeline_jobs WHERE id = :id"), {"id": job.id})
+                await session.execute(
+                    text("DELETE FROM pipeline_jobs WHERE id = :id"), {"id": job.id}
+                )
                 await session.execute(text("DELETE FROM cases WHERE id = :id"), {"id": case.id})
-                await session.execute(text("DELETE FROM users WHERE id = :id"), {"id": case.created_by})
+                await session.execute(
+                    text("DELETE FROM users WHERE id = :id"), {"id": case.created_by}
+                )
                 await session.commit()
 
     @pytest.mark.asyncio
     async def test_mark_completed_and_failed(self):
         async with async_session() as session:
             case = await _make_user_and_case(session)
-            ok_job = await enqueue_outbox_job(session, case_id=case.id, job_type=PipelineJobType.case_pipeline)
-            bad_job = await enqueue_outbox_job(session, case_id=case.id, job_type=PipelineJobType.case_pipeline)
+            ok_job = await enqueue_outbox_job(
+                session, case_id=case.id, job_type=PipelineJobType.case_pipeline
+            )
+            bad_job = await enqueue_outbox_job(
+                session, case_id=case.id, job_type=PipelineJobType.case_pipeline
+            )
             await session.commit()
 
             try:
@@ -132,16 +142,22 @@ class TestOutboxHelpers:
                 assert bad.error_message == "boom"
             finally:
                 for jid in (ok_job.id, bad_job.id):
-                    await session.execute(text("DELETE FROM pipeline_jobs WHERE id = :id"), {"id": jid})
+                    await session.execute(
+                        text("DELETE FROM pipeline_jobs WHERE id = :id"), {"id": jid}
+                    )
                 await session.execute(text("DELETE FROM cases WHERE id = :id"), {"id": case.id})
-                await session.execute(text("DELETE FROM users WHERE id = :id"), {"id": case.created_by})
+                await session.execute(
+                    text("DELETE FROM users WHERE id = :id"), {"id": case.created_by}
+                )
                 await session.commit()
 
     @pytest.mark.asyncio
     async def test_recover_stuck_reverts_old_dispatched_rows(self):
         async with async_session() as session:
             case = await _make_user_and_case(session)
-            job = await enqueue_outbox_job(session, case_id=case.id, job_type=PipelineJobType.case_pipeline)
+            job = await enqueue_outbox_job(
+                session, case_id=case.id, job_type=PipelineJobType.case_pipeline
+            )
             # Manually flip to dispatched with a stale timestamp (2h ago).
             await session.execute(
                 text(
@@ -165,9 +181,13 @@ class TestOutboxHelpers:
                 assert refreshed.status == PipelineJobStatus.pending
                 assert refreshed.dispatched_at is None
             finally:
-                await session.execute(text("DELETE FROM pipeline_jobs WHERE id = :id"), {"id": job.id})
+                await session.execute(
+                    text("DELETE FROM pipeline_jobs WHERE id = :id"), {"id": job.id}
+                )
                 await session.execute(text("DELETE FROM cases WHERE id = :id"), {"id": case.id})
-                await session.execute(text("DELETE FROM users WHERE id = :id"), {"id": case.created_by})
+                await session.execute(
+                    text("DELETE FROM users WHERE id = :id"), {"id": case.created_by}
+                )
                 await session.commit()
 
     @pytest.mark.asyncio
@@ -175,7 +195,9 @@ class TestOutboxHelpers:
         """FOR UPDATE SKIP LOCKED must hide rows locked by another session."""
         async with async_session() as s1:
             case = await _make_user_and_case(s1)
-            job = await enqueue_outbox_job(s1, case_id=case.id, job_type=PipelineJobType.case_pipeline)
+            job = await enqueue_outbox_job(
+                s1, case_id=case.id, job_type=PipelineJobType.case_pipeline
+            )
             await s1.commit()
 
             # s1 claims the row (holds the lock open).
@@ -190,7 +212,11 @@ class TestOutboxHelpers:
             finally:
                 await s1.rollback()  # release lock
                 async with async_session() as cleanup:
-                    await cleanup.execute(text("DELETE FROM pipeline_jobs WHERE id = :id"), {"id": job.id})
+                    await cleanup.execute(
+                        text("DELETE FROM pipeline_jobs WHERE id = :id"), {"id": job.id}
+                    )
                     await cleanup.execute(text("DELETE FROM cases WHERE id = :id"), {"id": case.id})
-                    await cleanup.execute(text("DELETE FROM users WHERE id = :id"), {"id": case.created_by})
+                    await cleanup.execute(
+                        text("DELETE FROM users WHERE id = :id"), {"id": case.created_by}
+                    )
                     await cleanup.commit()

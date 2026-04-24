@@ -111,7 +111,9 @@ class TestConfidenceDelta:
 
         original = _base_case_state()
         modified = copy.deepcopy(original)
-        modified.hearing_analysis = modified.hearing_analysis.model_copy(update={"confidence_score": 65})
+        modified.hearing_analysis = modified.hearing_analysis.model_copy(
+            update={"confidence_score": 65}
+        )
 
         diff = generate_diff(original, modified)
 

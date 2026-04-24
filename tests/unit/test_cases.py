@@ -273,9 +273,9 @@ class TestGetCaseDetail:
 
 class TestCaseOwnership:
     async def test_case_ownership_enforcement(self):
-        """A clerk should not be able to access another user's case."""
-        user_a = _make_user(role=UserRole.clerk, email="clerk_a@example.com")
-        user_b = _make_user(role=UserRole.clerk, email="clerk_b@example.com")
+        """In the single-judge model, any judge can view any case (no ownership filter)."""
+        user_a = _make_user(role=UserRole.judge, email="judge_a@example.com")
+        user_b = _make_user(role=UserRole.judge, email="judge_b@example.com")
 
         # Case belongs to user_b
         case = _make_case(user_b.id)
@@ -283,16 +283,14 @@ class TestCaseOwnership:
         mock_db = _build_mock_session()
         mock_db.execute.return_value = _mock_scalar_result(case)
 
-        # Authenticated as user_a (clerk)
+        # Authenticated as user_a — can still view user_b's case in single-judge model
         app = _app_with_overrides(mock_db, user_a)
         transport = ASGITransport(app=app)
 
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.get(f"/api/v1/cases/{case.id}")
 
-        # The endpoint should return 403 or 404 for cases not owned by the clerk.
-        # Accept either — 404 hides existence, 403 is explicit.
-        assert resp.status_code in (403, 404)
+        assert resp.status_code == 200
 
 
 class TestProcessCase:

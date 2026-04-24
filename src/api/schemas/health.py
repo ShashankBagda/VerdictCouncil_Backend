@@ -14,8 +14,12 @@ class PairHealthResponse(BaseModel):
     service: str = Field(..., description="Service name", examples=["pair_search"])
     state: str = Field(..., description="Circuit breaker state", examples=["closed"])
     failure_count: int = Field(..., description="Current failure count (-1 if Redis unavailable)")
-    failure_threshold: int | None = Field(None, description="Failures before circuit opens", examples=[3])
-    recovery_timeout_seconds: int | None = Field(None, description="Seconds before recovery attempt", examples=[60])
+    failure_threshold: int | None = Field(
+        None, description="Failures before circuit opens", examples=[3]
+    )
+    recovery_timeout_seconds: int | None = Field(
+        None, description="Seconds before recovery attempt", examples=[60]
+    )
     opened_at: float | None = Field(None, description="Unix timestamp when circuit opened")
     error: str | None = Field(None, description="Error message if Redis is unavailable")
 

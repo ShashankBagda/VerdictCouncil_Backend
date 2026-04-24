@@ -46,7 +46,9 @@ async def create_reopen_request(
     if case.status == CaseStatus.processing:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=("Case is currently being processed; wait for it to complete before requesting re-analysis."),
+            detail=(
+                "Case is currently being processed; wait for it to complete before requesting re-analysis."  # noqa: E501
+            ),
         )
 
     request_item = ReopenRequest(
@@ -104,13 +106,19 @@ async def review_reopen_request(
     current_user: User = require_role(UserRole.judge, UserRole.admin),
 ) -> ReopenRequest:
     result = await db.execute(
-        select(ReopenRequest).where(ReopenRequest.id == request_id, ReopenRequest.case_id == case_id)
+        select(ReopenRequest).where(
+            ReopenRequest.id == request_id, ReopenRequest.case_id == case_id
+        )
     )
     request_item = result.scalar_one_or_none()
     if not request_item:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Reopen request not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Reopen request not found"
+        )
 
-    request_item.status = ReopenRequestStatus.approved if body.approve else ReopenRequestStatus.rejected
+    request_item.status = (
+        ReopenRequestStatus.approved if body.approve else ReopenRequestStatus.rejected
+    )
     request_item.reviewed_by = current_user.id
     request_item.reviewed_at = datetime.now(UTC)
     request_item.review_notes = body.review_notes

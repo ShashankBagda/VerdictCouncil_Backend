@@ -76,7 +76,9 @@ async def generate_questions(
     weaknesses: Annotated[list[str], "List of identified weaknesses or gaps to probe"],
     question_types: Annotated[
         list[str] | None,
-        ("Types of questions: 'factual_clarification' | 'evidence_gap' | 'credibility_probe' | 'legal_interpretation'"),
+        (
+            "Types of questions: 'factual_clarification' | 'evidence_gap' | 'credibility_probe' | 'legal_interpretation'"  # noqa: E501
+        ),
     ] = None,
     max_questions: Annotated[int, "Maximum number of questions to generate"] = 5,
 ) -> list[dict]:
@@ -111,9 +113,13 @@ async def generate_questions(
     client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
 
     try:
-        result = await _generate_via_openai(client, argument_summary, weaknesses, question_types, max_questions)
+        result = await _generate_via_openai(
+            client, argument_summary, weaknesses, question_types, max_questions
+        )
     except json.JSONDecodeError as exc:
-        raise QuestionGenerationError(f"Failed to parse question generation response: {exc}") from exc
+        raise QuestionGenerationError(
+            f"Failed to parse question generation response: {exc}"
+        ) from exc
 
     # Normalize the output: extract the questions list
     raw_questions = result.get("questions", [])

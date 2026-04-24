@@ -90,7 +90,7 @@ async def test_refresh_vector_store_inserts_admin_event():
 
 
 async def test_refresh_vector_store_forbidden_for_non_admin():
-    clerk = _make_user(role=UserRole.clerk)
+    clerk = _make_user(role=UserRole.judge)
     session = _FakeSession()
     app = _app_with_overrides(clerk, session)
 
@@ -128,7 +128,7 @@ async def test_set_cost_config_issues_upsert_on_system_config():
 
 
 async def test_set_cost_config_forbidden_for_non_admin():
-    clerk = _make_user(role=UserRole.clerk)
+    clerk = _make_user(role=UserRole.judge)
     session = _FakeSession()
     app = _app_with_overrides(clerk, session)
 

@@ -200,7 +200,11 @@ def _get_facts_map(state: CaseState) -> dict[str, dict]:
     if not state.extracted_facts:
         return {}
 
-    return {f.get("id", str(i)): f for i, f in enumerate(state.extracted_facts.facts) if isinstance(f, dict)}
+    return {
+        f.get("id", str(i)): f
+        for i, f in enumerate(state.extracted_facts.facts)
+        if isinstance(f, dict)
+    }
 
 
 def _get_evidence_map(state: CaseState) -> dict[str, dict]:

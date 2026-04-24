@@ -1,11 +1,25 @@
 """Unit tests for the /api/v1/health endpoints."""
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
 from src.api.app import app
+from src.api.deps import get_current_user
+from src.models.user import User, UserRole
+
+
+def _make_auth_override():
+    """Return a FastAPI dependency override that bypasses auth."""
+    mock_user = MagicMock(spec=User)
+    mock_user.id = None
+    mock_user.role = UserRole.judge
+
+    async def _override():
+        return mock_user
+
+    return _override
 
 
 @pytest.mark.asyncio
@@ -23,13 +37,17 @@ async def test_get_pair_health_returns_circuit_state():
     mock_breaker = AsyncMock()
     mock_breaker.get_status = AsyncMock(return_value=mock_status)
 
-    with patch(
-        "src.api.routes.health.get_pair_search_breaker",
-        return_value=mock_breaker,
-    ):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            resp = await client.get("/api/v1/health/pair")
+    app.dependency_overrides[get_current_user] = _make_auth_override()
+    try:
+        with patch(
+            "src.api.routes.health.get_pair_search_breaker",
+            return_value=mock_breaker,
+        ):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.get("/api/v1/health/pair")
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
 
     assert resp.status_code == 200
     data = resp.json()
@@ -55,13 +73,17 @@ async def test_get_pair_health_returns_proper_json_structure():
     mock_breaker = AsyncMock()
     mock_breaker.get_status = AsyncMock(return_value=mock_status)
 
-    with patch(
-        "src.api.routes.health.get_pair_search_breaker",
-        return_value=mock_breaker,
-    ):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            resp = await client.get("/api/v1/health/pair")
+    app.dependency_overrides[get_current_user] = _make_auth_override()
+    try:
+        with patch(
+            "src.api.routes.health.get_pair_search_breaker",
+            return_value=mock_breaker,
+        ):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.get("/api/v1/health/pair")
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
 
     assert resp.status_code == 200
     data = resp.json()
@@ -86,13 +108,17 @@ async def test_pair_health_redis_error_shape():
     mock_breaker = AsyncMock()
     mock_breaker.get_status = AsyncMock(return_value=mock_status)
 
-    with patch(
-        "src.api.routes.health.get_pair_search_breaker",
-        return_value=mock_breaker,
-    ):
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
-            resp = await client.get("/api/v1/health/pair")
+    app.dependency_overrides[get_current_user] = _make_auth_override()
+    try:
+        with patch(
+            "src.api.routes.health.get_pair_search_breaker",
+            return_value=mock_breaker,
+        ):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.get("/api/v1/health/pair")
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
 
     assert resp.status_code == 200
     data = resp.json()
@@ -100,6 +126,5 @@ async def test_pair_health_redis_error_shape():
     assert data["state"] == "unknown"
     assert data["failure_count"] == -1
     assert data["error"] == "Redis unavailable"
-    # Optional fields should be absent or null
     assert data.get("failure_threshold") is None
     assert data.get("recovery_timeout_seconds") is None

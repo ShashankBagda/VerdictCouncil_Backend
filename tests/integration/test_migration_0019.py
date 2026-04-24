@@ -77,7 +77,9 @@ async def test_migration_0019_upgrade_seeds_small_claims_and_traffic():
 
     async with async_session() as session:
         result = await session.execute(
-            text("SELECT code FROM domains WHERE code IN ('small_claims', 'traffic_violation') ORDER BY code")
+            text(
+                "SELECT code FROM domains WHERE code IN ('small_claims', 'traffic_violation') ORDER BY code"  # noqa: E501
+            )
         )
         codes = [r[0] for r in result.fetchall()]
 
@@ -95,7 +97,9 @@ async def test_migration_0019_seeded_domains_are_inactive():
 
     async with async_session() as session:
         result = await session.execute(
-            text("SELECT code, is_active FROM domains WHERE code IN ('small_claims', 'traffic_violation')")
+            text(
+                "SELECT code, is_active FROM domains WHERE code IN ('small_claims', 'traffic_violation')"  # noqa: E501
+            )
         )
         rows = {r[0]: r[1] for r in result.fetchall()}
 
@@ -159,7 +163,9 @@ async def test_migration_0019_backfill_sets_domain_id():
     command.upgrade(cfg, "0019")
 
     async with async_session() as session:
-        result = await session.execute(text("SELECT domain_id FROM cases WHERE id = :cid").bindparams(cid=str(case_id)))
+        result = await session.execute(
+            text("SELECT domain_id FROM cases WHERE id = :cid").bindparams(cid=str(case_id))
+        )
         domain_id_val = result.scalar()
 
     assert domain_id_val is not None, "Backfill must set domain_id for existing small_claims case"
@@ -181,12 +187,16 @@ async def test_migration_0019_downgrade_removes_domains_table():
 
     async with async_session() as session:
         result = await session.execute(
-            text("SELECT table_name FROM information_schema.tables WHERE table_name IN ('domains', 'domain_documents')")
+            text(
+                "SELECT table_name FROM information_schema.tables WHERE table_name IN ('domains', 'domain_documents')"  # noqa: E501
+            )
         )
         remaining = [r[0] for r in result.fetchall()]
 
     assert "domains" not in remaining, "domains table must be dropped on downgrade"
-    assert "domain_documents" not in remaining, "domain_documents table must be dropped on downgrade"
+    assert "domain_documents" not in remaining, (
+        "domain_documents table must be dropped on downgrade"
+    )  # noqa: E501
 
 
 @pytest.mark.asyncio

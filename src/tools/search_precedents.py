@@ -204,7 +204,7 @@ async def _search_precedents_impl(
             new_state = await pair_breaker.record_failure()
             metadata["pair_status"] = f"failed ({new_state.value})"
             logger.warning(
-                "PAIR Search API unreachable for query '%s': %s (circuit: %s). Falling back to vector store.",
+                "PAIR Search API unreachable for query '%s': %s (circuit: %s). Falling back to vector store.",  # noqa: E501
                 query[:80],
                 exc,
                 new_state.value,

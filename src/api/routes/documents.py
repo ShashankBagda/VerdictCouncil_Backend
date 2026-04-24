@@ -26,7 +26,9 @@ async def get_document_excerpt(
     db: DBSession = None,
     current_user: User = require_role(UserRole.judge),
 ) -> dict:
-    result = await db.execute(select(Document).where(Document.id == document_id).options(selectinload(Document.case)))
+    result = await db.execute(
+        select(Document).where(Document.id == document_id).options(selectinload(Document.case))
+    )
     doc = result.scalar_one_or_none()
     if doc is None or doc.case is None or doc.case.created_by != current_user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")

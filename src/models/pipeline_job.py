@@ -44,7 +44,9 @@ class PipelineJob(UUIDPrimaryKeyMixin, Base):
     case_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("cases.id", ondelete="CASCADE"), nullable=False
     )
-    job_type: Mapped[PipelineJobType] = mapped_column(Enum(PipelineJobType, name="pipelinejobtype"), nullable=False)
+    job_type: Mapped[PipelineJobType] = mapped_column(
+        Enum(PipelineJobType, name="pipelinejobtype"), nullable=False
+    )
     target_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     status: Mapped[PipelineJobStatus] = mapped_column(
         Enum(PipelineJobStatus, name="pipelinejobstatus"),
@@ -54,6 +56,8 @@ class PipelineJob(UUIDPrimaryKeyMixin, Base):
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
     dispatched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -33,7 +33,6 @@ dependencies = [
     # Wraps protectai/deberta-v3-base-prompt-injection-v2 (Apache-2.0, 95%+ recall).
     # See docs/security/rag-corpus-sanitization.md for architecture notes and citations.
     "llm-guard==0.3.16",
-    "jinja2>=3.1.0",
 ]
 
 [project.optional-dependencies]
@@ -58,21 +57,17 @@ include = ["src*"]
 
 [tool.ruff]
 target-version = "py312"
-line-length = 120
+line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP", "B", "A", "SIM"]
 ignore = [
     "UP042",  # str+Enum pattern needed for Pydantic/SQLAlchemy compatibility
     "B008",   # FastAPI uses function calls in defaults (Depends, Query)
-    "N806",   # Allow UPPERCASE constants inside functions (gate/status sets)
-    "N818",   # Allow exception names without Error suffix (project convention)
-    "SIM102", # Allow nested if statements (clarity over brevity)
-    "SIM117", # Allow multiple nested with statements (clarity over brevity)
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"src/pipeline/graph/prompts.py" = ["E501"]  # LLM prompt strings are intentionally long
+"src/pipeline/graph/prompts.py" = ["E501"]  # prompt strings intentionally exceed line limit
 
 [tool.mypy]
 python_version = "3.12"
@@ -90,4 +85,12 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 markers = [
     "integration: marks tests requiring live infrastructure (LLM, broker, Redis) — skipped in CI",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+    "pytest-asyncio>=1.3.0",
+    "pytest-cov>=7.1.0",
+    "pytest-mock>=3.15.1",
 ]

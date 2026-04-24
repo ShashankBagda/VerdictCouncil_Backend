@@ -196,7 +196,9 @@ async def _run_agent_node(agent_name: str, state: GraphState) -> dict[str, Any]:
                     "case_id": case_id,
                     "agent": agent_name,
                     "event": "thinking",
-                    "content": (f"→ {model_name} · continuing after {len(tool_calls_log)} tool call(s)"),
+                    "content": (
+                        f"→ {model_name} · continuing after {len(tool_calls_log)} tool call(s)"
+                    ),
                     "ts": datetime.now(UTC).isoformat(),
                 },
             )

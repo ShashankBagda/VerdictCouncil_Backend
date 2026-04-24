@@ -30,7 +30,9 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     knowledge_base_vector_store_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
-    sessions: Mapped[list[Session]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    sessions: Mapped[list[Session]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
     password_reset_tokens: Mapped[list[PasswordResetToken]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
@@ -40,10 +42,14 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 class Session(UUIDPrimaryKeyMixin, Base):
     __tablename__ = "sessions"
 
-    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+    )
     jwt_token_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
     user: Mapped[User] = relationship(back_populates="sessions")
 
@@ -57,6 +63,8 @@ class PasswordResetToken(UUIDPrimaryKeyMixin, Base):
     token_hash: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
     user: Mapped[User] = relationship(back_populates="password_reset_tokens")

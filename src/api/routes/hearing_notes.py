@@ -96,7 +96,9 @@ async def update_hearing_note(
     db: DBSession,
     current_user: User = require_role(UserRole.judge),
 ) -> HearingNote:
-    result = await db.execute(select(HearingNote).where(HearingNote.id == note_id, HearingNote.case_id == case_id))
+    result = await db.execute(
+        select(HearingNote).where(HearingNote.id == note_id, HearingNote.case_id == case_id)
+    )
     note = result.scalar_one_or_none()
     if not note:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found")
@@ -140,7 +142,9 @@ async def lock_hearing_note(
     db: DBSession,
     current_user: User = require_role(UserRole.judge),
 ) -> HearingNote:
-    result = await db.execute(select(HearingNote).where(HearingNote.id == note_id, HearingNote.case_id == case_id))
+    result = await db.execute(
+        select(HearingNote).where(HearingNote.id == note_id, HearingNote.case_id == case_id)
+    )
     note = result.scalar_one_or_none()
     if not note:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found")
@@ -170,7 +174,9 @@ async def delete_hearing_note(
     db: DBSession,
     current_user: User = require_role(UserRole.judge),
 ) -> dict:
-    result = await db.execute(select(HearingNote).where(HearingNote.id == note_id, HearingNote.case_id == case_id))
+    result = await db.execute(
+        select(HearingNote).where(HearingNote.id == note_id, HearingNote.case_id == case_id)
+    )
     note = result.scalar_one_or_none()
     if not note:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found")

@@ -185,10 +185,14 @@ async def run_gate_job(ctx: dict[str, Any], job_id: str) -> None:  # noqa: ARG00
             if not live_case.domain_ref.is_active or not live_case.domain_ref.vector_store_id:
                 live_case.status_value = "failed_retryable"
                 await db.commit()
-                raise RetiredDomainError(f"Domain {live_case.domain_ref.code} retired mid-case; aborting gate resume")
+                raise RetiredDomainError(
+                    f"Domain {live_case.domain_ref.code} retired mid-case; aborting gate resume"
+                )
 
             # Always overwrite from live DB — never use stale checkpoint value
-            state = state.model_copy(update={"domain_vector_store_id": live_case.domain_ref.vector_store_id})
+            state = state.model_copy(
+                update={"domain_vector_store_id": live_case.domain_ref.vector_store_id}
+            )
 
         # Force status to processing before handing to run_gate
         state = state.model_copy(update={"status": CaseStatusEnum.processing})
@@ -216,9 +220,15 @@ async def run_gate_job(ctx: dict[str, Any], job_id: str) -> None:  # noqa: ARG00
                 from src.models.case import Document
 
                 for file_id, pages in runner._document_pages_buffer.items():
-                    await db.execute(sa_update(Document).where(Document.openai_file_id == file_id).values(pages=pages))
+                    await db.execute(
+                        sa_update(Document)
+                        .where(Document.openai_file_id == file_id)
+                        .values(pages=pages)
+                    )
 
-            await persist_case_results(db, case_id, final_state, gate_state_payload=gate_state_payload)
+            await persist_case_results(
+                db, case_id, final_state, gate_state_payload=gate_state_payload
+            )
 
         async with async_session() as db:
             await persist_case_state(

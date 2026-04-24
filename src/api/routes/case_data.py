@@ -190,13 +190,13 @@ def _derive_overall_status(case: Case, agents: list[dict]) -> str:
         return "completed"
     # Gate-pause statuses — pass through the enum value string so the
     # frontend can render gate review panels and stop polling.
-    _GATE_PAUSE_STATUSES = {
+    gate_pause_statuses = {
         CaseStatus.awaiting_review_gate1,
         CaseStatus.awaiting_review_gate2,
         CaseStatus.awaiting_review_gate3,
         CaseStatus.awaiting_review_gate4,
     }
-    if case.status in _GATE_PAUSE_STATUSES:
+    if case.status in gate_pause_statuses:
         return case.status.value
     # Derive from agent states for actively-processing cases
     if any(a["status"] == "failed" for a in agents):
@@ -216,7 +216,9 @@ def _derive_current_agent(agents: list[dict[str, Any]]) -> str | None:
 
 
 def _derive_overall_elapsed_seconds(agents: list[dict[str, Any]]) -> int | None:
-    completed = [agent["elapsed_seconds"] for agent in agents if agent.get("elapsed_seconds") is not None]
+    completed = [
+        agent["elapsed_seconds"] for agent in agents if agent.get("elapsed_seconds") is not None
+    ]
     if not completed:
         return None
     return int(sum(completed))
@@ -497,7 +499,9 @@ async def get_pipeline_status(
 ) -> dict:
     case = await _get_case_or_404(case_id, db, current_user)
 
-    result = await db.execute(select(AuditLog).where(AuditLog.case_id == case_id).order_by(AuditLog.created_at.asc()))
+    result = await db.execute(
+        select(AuditLog).where(AuditLog.case_id == case_id).order_by(AuditLog.created_at.asc())
+    )
     logs = list(result.scalars().all())
 
     agents = _derive_agent_status(case, logs)
@@ -549,7 +553,9 @@ async def get_case_timeline(
     current_user: CurrentUser,
 ) -> list[Fact]:
     await _get_case_or_404(case_id, db, current_user)
-    result = await db.execute(select(Fact).where(Fact.case_id == case_id).order_by(Fact.event_date.asc().nullslast()))
+    result = await db.execute(
+        select(Fact).where(Fact.case_id == case_id).order_by(Fact.event_date.asc().nullslast())
+    )
     return list(result.scalars().all())
 
 

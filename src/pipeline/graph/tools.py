@@ -35,6 +35,7 @@ def _merge_precedent_meta(
         existing["pair_status"] = new.get("pair_status", existing.get("pair_status"))
     return existing
 
+
 # ---------------------------------------------------------------------------
 # Precedent metadata side-channel
 # ---------------------------------------------------------------------------
@@ -73,7 +74,9 @@ class _CrossReferenceInput(BaseModel):
 
 
 class _TimelineConstructInput(BaseModel):
-    events: list[dict[str, Any]] = Field(description="Events to order. Each: {fact_id, date, event, source_refs}")
+    events: list[dict[str, Any]] = Field(
+        description="Events to order. Each: {fact_id, date, event, source_refs}"
+    )
 
 
 class _GenerateQuestionsInput(BaseModel):
@@ -91,13 +94,15 @@ class _GenerateQuestionsInput(BaseModel):
 
 class _ConfidenceCalcInput(BaseModel):
     evidence_strengths: list[str] = Field(
-        description="Strength labels per evidence item: 'strong' | 'moderate' | 'weak' | 'insufficient'"
+        description="Strength labels per evidence item: 'strong' | 'moderate' | 'weak' | 'insufficient'"  # noqa: E501
     )
     fact_statuses: list[str] = Field(
         description="Status labels per extracted fact: 'established' | 'disputed' | 'unverified'"
     )
     witness_scores: list[int] = Field(description="Credibility scores per witness (0-100)")
-    precedent_similarities: list[float] = Field(description="Similarity scores per precedent (0.0-1.0)")
+    precedent_similarities: list[float] = Field(
+        description="Similarity scores per precedent (0.0-1.0)"
+    )
 
 
 class _SearchPrecedentsInput(BaseModel):
@@ -107,7 +112,9 @@ class _SearchPrecedentsInput(BaseModel):
 
 
 class _SearchDomainGuidanceInput(BaseModel):
-    query: str = Field(description="Semantic query for statutes, practice directions, or bench books")
+    query: str = Field(
+        description="Semantic query for statutes, practice directions, or bench books"
+    )
     max_results: int = Field(5, description="Maximum number of guidance results to return")
 
 
