@@ -237,7 +237,9 @@ class TestLayer2Aggregator:
     async def test_three_agents_complete_triggers_merge(self, redis, publisher, base_state):
         result = None
         for agent in AGENTS:
-            result = await receive_agent_output(redis, publisher, base_state, agent, AGENT_OUTPUTS[agent])
+            result = await receive_agent_output(
+                redis, publisher, base_state, agent, AGENT_OUTPUTS[agent]
+            )
 
         # Merge should have been triggered on the third call
         assert result is not None
@@ -270,7 +272,9 @@ class TestLayer2Aggregator:
         reversed_agents = list(reversed(AGENTS))
         result = None
         for agent in reversed_agents:
-            result = await receive_agent_output(redis, publisher, base_state, agent, AGENT_OUTPUTS[agent])
+            result = await receive_agent_output(
+                redis, publisher, base_state, agent, AGENT_OUTPUTS[agent]
+            )
 
         assert result is not None
         _expected_e2 = _evidence_output()
@@ -291,10 +295,14 @@ class TestLayer2Aggregator:
     @pytest.mark.asyncio
     async def test_duplicate_handling(self, redis, publisher, base_state):
         # Send evidence_analysis twice, then the other two
-        await receive_agent_output(redis, publisher, base_state, "evidence_analysis", _evidence_output())
+        await receive_agent_output(
+            redis, publisher, base_state, "evidence_analysis", _evidence_output()
+        )
         # Duplicate with slightly different data
         modified_evidence = {**_evidence_output(), "extra": "duplicate_data"}
-        await receive_agent_output(redis, publisher, base_state, "evidence_analysis", modified_evidence)
+        await receive_agent_output(
+            redis, publisher, base_state, "evidence_analysis", modified_evidence
+        )
 
         # Still only 1 field in Redis (overwritten)
         key = _redis_key(base_state.case_id, base_state.run_id)
@@ -302,7 +310,9 @@ class TestLayer2Aggregator:
 
         # Complete the remaining agents
         await receive_agent_output(redis, publisher, base_state, "extracted_facts", _facts_output())
-        result = await receive_agent_output(redis, publisher, base_state, "witnesses", _witnesses_output())
+        result = await receive_agent_output(
+            redis, publisher, base_state, "witnesses", _witnesses_output()
+        )
 
         assert result is not None
         # The merged evidence should reflect the *latest* (overwritten) value
@@ -321,16 +331,26 @@ class TestLayer2Aggregator:
         state_run_b = _base_case_state(case_id="case-001", run_id="run-bbb")
 
         # Interleave agent outputs across two runs
-        await receive_agent_output(redis, publisher, state_run_a, "evidence_analysis", _evidence_output())
-        await receive_agent_output(redis, publisher, state_run_b, "evidence_analysis", _evidence_output())
-        await receive_agent_output(redis, publisher, state_run_a, "extracted_facts", _facts_output())
-        await receive_agent_output(redis, publisher, state_run_b, "extracted_facts", _facts_output())
+        await receive_agent_output(
+            redis, publisher, state_run_a, "evidence_analysis", _evidence_output()
+        )
+        await receive_agent_output(
+            redis, publisher, state_run_b, "evidence_analysis", _evidence_output()
+        )
+        await receive_agent_output(
+            redis, publisher, state_run_a, "extracted_facts", _facts_output()
+        )
+        await receive_agent_output(
+            redis, publisher, state_run_b, "extracted_facts", _facts_output()
+        )
 
         # Neither run is complete yet
         assert len(publisher.messages) == 0
 
         # Complete run A
-        result_a = await receive_agent_output(redis, publisher, state_run_a, "witnesses", _witnesses_output())
+        result_a = await receive_agent_output(
+            redis, publisher, state_run_a, "witnesses", _witnesses_output()
+        )
         assert result_a is not None
         assert result_a.run_id == "run-aaa"
         assert len(publisher.messages) == 1
@@ -340,7 +360,9 @@ class TestLayer2Aggregator:
         assert await redis.hlen(key_b) == 2
 
         # Complete run B
-        result_b = await receive_agent_output(redis, publisher, state_run_b, "witnesses", _witnesses_output())
+        result_b = await receive_agent_output(
+            redis, publisher, state_run_b, "witnesses", _witnesses_output()
+        )
         assert result_b is not None
         assert result_b.run_id == "run-bbb"
         assert len(publisher.messages) == 2
@@ -350,7 +372,9 @@ class TestLayer2Aggregator:
     @pytest.mark.asyncio
     async def test_timeout_marks_failed(self, redis, publisher, base_state):
         # Only 2 of 3 agents report
-        await receive_agent_output(redis, publisher, base_state, "evidence_analysis", _evidence_output())
+        await receive_agent_output(
+            redis, publisher, base_state, "evidence_analysis", _evidence_output()
+        )
         await receive_agent_output(redis, publisher, base_state, "extracted_facts", _facts_output())
 
         # No merge should have happened
@@ -372,7 +396,9 @@ class TestLayer2Aggregator:
         redis.kill()
 
         with pytest.raises(ConnectionError, match="Redis connection lost"):
-            await receive_agent_output(redis, publisher, base_state, "evidence_analysis", _evidence_output())
+            await receive_agent_output(
+                redis, publisher, base_state, "evidence_analysis", _evidence_output()
+            )
 
         # Publisher should not have been called
         assert len(publisher.messages) == 0

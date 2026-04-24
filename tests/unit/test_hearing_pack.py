@@ -165,7 +165,10 @@ class TestHearingPackEndpoint:
 
         assert resp.status_code == 200
         assert resp.headers["content-type"] == "application/zip"
-        assert resp.headers["content-disposition"] == f'attachment; filename="case-{case_id}-hearing-pack.zip"'
+        assert (
+            resp.headers["content-disposition"]
+            == f'attachment; filename="case-{case_id}-hearing-pack.zip"'
+        )
         with zipfile.ZipFile(io.BytesIO(resp.content), "r") as zf:
             assert "manifest.json" in zf.namelist()
 
@@ -188,9 +191,10 @@ class TestHearingPackEndpoint:
 
         assert resp.status_code == 404
 
-    async def test_clerk_cannot_export_other_users_case(self, monkeypatch):
-        owner = _make_user(role=UserRole.clerk, email="owner@example.com")
-        intruder = _make_user(role=UserRole.clerk, email="intruder@example.com")
+    async def test_judge_can_export_any_case(self, monkeypatch):
+        """In single-judge model, any judge can export any case's hearing pack."""
+        owner = _make_user(role=UserRole.judge, email="owner@example.com")
+        other_judge = _make_user(role=UserRole.judge, email="other@example.com")
         case_id = uuid.uuid4()
         case_row = _make_case_row(case_id, owner.id)
         mock_db = _build_mock_session(case_row)
@@ -202,10 +206,10 @@ class TestHearingPackEndpoint:
 
         monkeypatch.setattr(cases_module, "build_case_report_data", _fake_build)
 
-        app = _app_with_overrides(mock_db, intruder)
+        app = _app_with_overrides(mock_db, other_judge)
         transport = ASGITransport(app=app)
 
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.get(f"/api/v1/cases/{case_id}/hearing-pack")
 
-        assert resp.status_code == 403
+        assert resp.status_code == 200

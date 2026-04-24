@@ -270,10 +270,14 @@ async def run_intake_extraction(
         await publish_intake_event(case_id, {"type": "done", "extraction": payload, "ts": _now()})
         return payload
 
-    await publish_intake_event(case_id, {"type": "status", "phase": "parsing_documents", "ts": _now()})
+    await publish_intake_event(
+        case_id, {"type": "status", "phase": "parsing_documents", "ts": _now()}
+    )
     docs_with_text = [(d, await _document_text(db, d)) for d in authoritative]
 
-    await publish_intake_event(case_id, {"type": "status", "phase": "extracting_fields", "ts": _now()})
+    await publish_intake_event(
+        case_id, {"type": "status", "phase": "extracting_fields", "ts": _now()}
+    )
 
     client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
     # The efficient-reasoning model (gpt-5-mini) requires org verification on

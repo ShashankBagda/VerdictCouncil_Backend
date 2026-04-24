@@ -118,7 +118,9 @@ async def test_fail_closed_no_vector_store_id_raises():
         mock_settings.openai_vector_store_id = "vs_global"
 
         with pytest.raises(VectorStoreError):
-            await vector_store_search("any query", vector_store_id=None, allow_global_fallback=False)
+            await vector_store_search(
+                "any query", vector_store_id=None, allow_global_fallback=False
+            )  # noqa: E501
 
 
 # ------------------------------------------------------------------ #

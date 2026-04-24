@@ -48,7 +48,9 @@ class PipelineProgressEvent(BaseModel):
     error: str | None = Field(None, description="Truncated error message when phase=failed")
     detail: dict[str, Any] | None = Field(
         None,
-        description=("Extra payload for terminal events: {'reason': <halt reason>, 'stopped_at': <mesh stage label>}."),
+        description=(
+            "Extra payload for terminal events: {'reason': <halt reason>, 'stopped_at': <mesh stage label>}."  # noqa: E501
+        ),
     )
     mlflow_run_id: str | None = Field(
         None,

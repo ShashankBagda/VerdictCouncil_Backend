@@ -13,7 +13,9 @@ class TestFieldOwnership:
 
     def test_unauthorized_write_raises(self):
         original = CaseState().model_dump()
-        updated = CaseState(hearing_analysis={"preliminary_conclusion": "test", "confidence_score": 80}).model_dump()
+        updated = CaseState(
+            hearing_analysis={"preliminary_conclusion": "test", "confidence_score": 80}
+        ).model_dump()
         with pytest.raises(FieldOwnershipError, match="case-processing"):
             validate_field_ownership("case-processing", original, updated)
 

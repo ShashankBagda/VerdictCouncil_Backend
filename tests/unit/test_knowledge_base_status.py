@@ -175,7 +175,9 @@ async def test_knowledge_base_status_vector_store_unavailable():
     user = _make_user()
     mock_breaker = AsyncMock()
     mock_breaker.get_status = AsyncMock(return_value=_CLOSED_STATUS)
-    mock_client = _mock_openai_client(retrieve_mock=AsyncMock(side_effect=Exception("Connection refused")))
+    mock_client = _mock_openai_client(
+        retrieve_mock=AsyncMock(side_effect=Exception("Connection refused"))
+    )
 
     with (
         patch("src.api.routes.knowledge_base.get_pair_search_breaker", return_value=mock_breaker),
@@ -268,7 +270,7 @@ async def test_knowledge_base_status_per_judge_retrieve_failure_stays_initialize
 
 
 async def test_knowledge_base_status_non_judge_forbidden():
-    clerk = _make_user(role=UserRole.clerk)
+    clerk = _make_user(role=UserRole.admin)
     app = _app_with_overrides(clerk)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         resp = await ac.get("/api/v1/knowledge-base/status")

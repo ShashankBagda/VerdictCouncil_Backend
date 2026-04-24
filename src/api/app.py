@@ -19,7 +19,8 @@ OPENAPI_TAGS = [
     {
         "name": "cases",
         "description": (
-            "CRUD operations for judicial cases. Judges create and manage cases; admins have full visibility."
+            "CRUD operations for judicial cases. "
+            "Judges create and manage cases; admins have full visibility."
         ),
     },
     {
@@ -29,7 +30,8 @@ OPENAPI_TAGS = [
     },
     {
         "name": "audit",
-        "description": "Immutable audit trail of all agent actions on a case. Filterable by agent name and time range.",
+        "description": "Immutable audit trail of all agent actions on a case. "
+        "Filterable by agent name and time range.",
     },
     {
         "name": "dashboard",
@@ -37,7 +39,9 @@ OPENAPI_TAGS = [
     },
     {
         "name": "health",
-        "description": ("PAIR API circuit breaker status and active probing for external service health."),
+        "description": (
+            "PAIR API circuit breaker status and active probing for external service health."
+        ),
     },
     {
         "name": "hearing-notes",
@@ -45,7 +49,9 @@ OPENAPI_TAGS = [
     },
     {
         "name": "hearing-pack",
-        "description": ("Generate a hearing preparation pack (summary, evidence, arguments, and analysis)."),
+        "description": (
+            "Generate a hearing preparation pack (summary, evidence, arguments, and analysis)."
+        ),
     },
     {
         "name": "reopen-requests",
@@ -57,11 +63,13 @@ OPENAPI_TAGS = [
     },
     {
         "name": "admin",
-        "description": ("Administrative operations: vector store refresh, user actions, cost config."),
+        "description": (
+            "Administrative operations: vector store refresh, user actions, cost config."
+        ),
     },
     {
         "name": "domains",
-        "description": "Domain management: create/retire domains, upload per-domain guidance documents.",
+        "description": "Domain management: create/retire domains, upload per-domain guidance documents.",  # noqa: E501
     },
 ]
 
@@ -184,8 +192,12 @@ def create_app() -> FastAPI:
     app.include_router(audit.router, prefix="/api/v1/audit", tags=["audit"])
     app.include_router(dashboard.router, prefix="/api/v1/dashboard", tags=["dashboard"])
     app.include_router(health.router, prefix="/api/v1/health", tags=["health"])
-    app.include_router(precedent_search.router, prefix="/api/v1/precedents", tags=["precedent-search"])
-    app.include_router(knowledge_base.router, prefix="/api/v1/knowledge-base", tags=["knowledge-base"])
+    app.include_router(
+        precedent_search.router, prefix="/api/v1/precedents", tags=["precedent-search"]
+    )
+    app.include_router(
+        knowledge_base.router, prefix="/api/v1/knowledge-base", tags=["knowledge-base"]
+    )
     app.include_router(documents.router, prefix="/api/v1/documents", tags=["documents"])
     app.include_router(admin.router, prefix="/api/v1/admin", tags=["admin"])
     app.include_router(domains.router, prefix="/api/v1/domains", tags=["domains"])

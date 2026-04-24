@@ -88,7 +88,9 @@ class TestStuckCaseWatchdogIntegration:
         async with async_session() as session:
             user = await _make_user(session)
             recent = datetime.now(UTC) - timedelta(seconds=30)
-            fresh = await _make_case(session, user.id, status=CaseStatus.processing, created_at=recent)
+            fresh = await _make_case(
+                session, user.id, status=CaseStatus.processing, created_at=recent
+            )
             await session.commit()
 
             try:
@@ -131,7 +133,9 @@ class TestStuckCaseWatchdogIntegration:
             await session.commit()
 
             try:
-                marked = await find_and_mark_stuck_cases(session, threshold_seconds=1800, dry_run=True)
+                marked = await find_and_mark_stuck_cases(
+                    session, threshold_seconds=1800, dry_run=True
+                )
                 assert str(stuck.id) in marked
 
                 refreshed = await session.get(Case, stuck.id)

@@ -41,7 +41,9 @@ def _make_case(case_id: uuid.UUID, jurisdiction_valid: bool | None = None) -> Ma
     return case
 
 
-def _make_audit(case_id: uuid.UUID, payload: dict, agent_name: str = "case-processing") -> MagicMock:
+def _make_audit(
+    case_id: uuid.UUID, payload: dict, agent_name: str = "case-processing"
+) -> MagicMock:
     entry = MagicMock(spec=AuditLog)
     entry.id = uuid.uuid4()
     entry.case_id = case_id
@@ -204,7 +206,7 @@ async def test_jurisdiction_case_not_found():
 
 async def test_jurisdiction_non_judge_forbidden():
     case_id = uuid.uuid4()
-    clerk = _make_user(role=UserRole.clerk)
+    clerk = _make_user(role=UserRole.admin)
     mock_db = _build_mock_session()
 
     app = _app_with_overrides(mock_db, clerk)

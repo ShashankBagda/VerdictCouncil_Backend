@@ -27,11 +27,15 @@ async def get_stats(db: DBSession, current_user: CurrentUser) -> dict:
     total = (await db.execute(select(func.count(Case.id)))).scalar_one()
 
     # By status
-    status_rows = (await db.execute(select(Case.status, func.count(Case.id)).group_by(Case.status))).all()
+    status_rows = (
+        await db.execute(select(Case.status, func.count(Case.id)).group_by(Case.status))
+    ).all()
     by_status = {row[0].value: row[1] for row in status_rows}
 
     # By domain
-    domain_rows = (await db.execute(select(Case.domain, func.count(Case.id)).group_by(Case.domain))).all()
+    domain_rows = (
+        await db.execute(select(Case.domain, func.count(Case.id)).group_by(Case.domain))
+    ).all()
     by_domain = {row[0].value: row[1] for row in domain_rows}
 
     # Recent cases (last 10)

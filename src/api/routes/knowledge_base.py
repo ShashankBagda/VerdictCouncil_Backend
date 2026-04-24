@@ -78,7 +78,9 @@ async def get_knowledge_base_status(
     else:
         try:
             await _get_openai_client().vector_stores.retrieve(global_store_id)
-            vector_store = VectorStoreStatus(configured=True, store_id=global_store_id, status="healthy")
+            vector_store = VectorStoreStatus(
+                configured=True, store_id=global_store_id, status="healthy"
+            )
         except Exception as exc:
             logger.warning("Vector store health check failed: %s", exc)
             vector_store = VectorStoreStatus(

@@ -70,7 +70,9 @@ def pipeline_run(*, case_id: str, run_id: str, mode: str) -> Generator[Any, None
 
 
 @contextmanager
-def agent_run(*, agent_name: str, case_id: str, run_id: str) -> Generator[tuple[str, str] | None, None, None]:
+def agent_run(
+    *, agent_name: str, case_id: str, run_id: str
+) -> Generator[tuple[str, str] | None, None, None]:
     """Wrap one agent invocation as a nested MLflow run under the active pipeline run.
 
     Yields ``(mlflow_run_id, experiment_id)`` when MLflow is enabled so

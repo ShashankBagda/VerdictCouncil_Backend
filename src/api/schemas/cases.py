@@ -27,7 +27,9 @@ from src.models.case import (
 class CasePartyCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     role: PartyRole = Field(..., description="Role in the matter")
-    contact_info: dict[str, Any] | None = Field(default=None, description="Optional contact information")
+    contact_info: dict[str, Any] | None = Field(
+        default=None, description="Optional contact information"
+    )
 
 
 _schema_logger = logging.getLogger(__name__)
@@ -41,7 +43,9 @@ class CaseCreateRequest(BaseModel):
     are accepted; once old clients migrate, the enum alias will be dropped.
     """
 
-    domain_id: UUID | None = Field(default=None, description="UUID of the Domain row (canonical, preferred)")
+    domain_id: UUID | None = Field(
+        default=None, description="UUID of the Domain row (canonical, preferred)"
+    )
     domain: CaseDomain | None = Field(
         default=None,
         description="[Deprecated] Legacy domain enum. Use domain_id instead.",
@@ -80,11 +84,12 @@ class CaseCreateRequest(BaseModel):
             if self.claim_amount > 30000:
                 raise ValueError("SCT claim_amount exceeds the $30,000 jurisdiction limit.")
             if self.claim_amount > 20000 and not self.consent_to_higher_claim_limit:
-                raise ValueError("SCT claim_amount above $20,000 requires consent_to_higher_claim_limit.")
+                raise ValueError(
+                    "SCT claim_amount above $20,000 requires consent_to_higher_claim_limit."
+                )
 
-        if domain_code == CaseDomain.traffic_violation.value:
-            if not self.offence_code:
-                raise ValueError("Traffic cases require offence_code.")
+        if domain_code == CaseDomain.traffic_violation.value and not self.offence_code:
+            raise ValueError("Traffic cases require offence_code.")
 
         return self
 
@@ -191,7 +196,9 @@ class FactResponse(BaseModel):
     event_time: time | None = Field(None, description="Time of the event")
     confidence: FactConfidence | None = Field(None, description="Confidence level")
     status: FactStatus | None = Field(None, description="Agreed or disputed")
-    corroboration: dict[str, Any] | None = Field(None, description="Corroboration or dispute metadata")
+    corroboration: dict[str, Any] | None = Field(
+        None, description="Corroboration or dispute metadata"
+    )
     source_document_id: UUID | None = Field(None, description="Originating document id")
 
     model_config = {"from_attributes": True}
@@ -202,8 +209,12 @@ class WitnessResponse(BaseModel):
     name: str = Field(..., description="Witness name")
     role: str | None = Field(None, description="Witness role")
     credibility_score: int | None = Field(None, description="Credibility score (0-100)")
-    bias_indicators: dict[str, Any] | None = Field(None, description="Bias indicators and credibility factors")
-    simulated_testimony: str | None = Field(None, description="Traffic-only simulated testimony summary")
+    bias_indicators: dict[str, Any] | None = Field(
+        None, description="Bias indicators and credibility factors"
+    )
+    simulated_testimony: str | None = Field(
+        None, description="Traffic-only simulated testimony summary"
+    )
 
     model_config = {"from_attributes": True}
 
@@ -226,7 +237,9 @@ class PrecedentResponse(BaseModel):
     outcome: str | None = Field(None, description="Case outcome")
     reasoning_summary: str | None = Field(None, description="Key reasoning summary")
     similarity_score: float | None = Field(None, description="Similarity score (0-1)")
-    distinguishing_factors: str | None = Field(None, description="How the precedent differs from the current case")
+    distinguishing_factors: str | None = Field(
+        None, description="How the precedent differs from the current case"
+    )
     source: PrecedentSource | None = Field(None, description="curated or live_search")
     url: str | None = Field(None, description="Source URL when available")
 
@@ -237,9 +250,13 @@ class ArgumentResponse(BaseModel):
     id: UUID
     side: ArgumentSide = Field(..., description="Which side the argument supports")
     legal_basis: str = Field(..., description="Legal basis for the argument")
-    supporting_evidence: dict[str, Any] | None = Field(None, description="Supporting evidence chain")
+    supporting_evidence: dict[str, Any] | None = Field(
+        None, description="Supporting evidence chain"
+    )
     weaknesses: str | None = Field(None, description="Identified weaknesses")
-    suggested_questions: dict[str, Any] | None = Field(None, description="Suggested judicial questions")
+    suggested_questions: dict[str, Any] | None = Field(
+        None, description="Suggested judicial questions"
+    )
 
     model_config = {"from_attributes": True}
 
@@ -248,7 +265,9 @@ class HearingAnalysisResponse(BaseModel):
     id: UUID
     reasoning_chain: dict[str, Any] | None = Field(None, description="Structured reasoning chain")
     preliminary_conclusion: str | None = Field(None, description="Preliminary conclusion")
-    uncertainty_flags: dict[str, Any] | None = Field(None, description="Uncertainty flags and pivot factors")
+    uncertainty_flags: dict[str, Any] | None = Field(
+        None, description="Uncertainty flags and pivot factors"
+    )
     confidence_score: int | None = Field(None, description="Confidence score (0-100)")
 
     model_config = {"from_attributes": True}
@@ -311,18 +330,30 @@ class CaseListResponse(BaseModel):
 class CaseDetailResponse(CaseResponse):
     """Full case with all related entities."""
 
-    documents: list[DocumentResponse] = Field(default_factory=list, description="Uploaded documents")
+    documents: list[DocumentResponse] = Field(
+        default_factory=list, description="Uploaded documents"
+    )
     evidence: list[EvidenceResponse] = Field(default_factory=list, description="Evidence items")
     facts: list[FactResponse] = Field(default_factory=list, description="Reconstructed facts")
     witnesses: list[WitnessResponse] = Field(default_factory=list, description="Witnesses")
-    legal_rules: list[LegalRuleResponse] = Field(default_factory=list, description="Applicable legal rules")
-    precedents: list[PrecedentResponse] = Field(default_factory=list, description="Relevant precedents")
-    arguments: list[ArgumentResponse] = Field(default_factory=list, description="Constructed arguments")
-    hearing_analyses: list[HearingAnalysisResponse] = Field(default_factory=list, description="AI hearing analyses")
-    audit_logs: list[AuditLogSummary] = Field(default_factory=list, description="Audit trail entries")
+    legal_rules: list[LegalRuleResponse] = Field(
+        default_factory=list, description="Applicable legal rules"
+    )
+    precedents: list[PrecedentResponse] = Field(
+        default_factory=list, description="Relevant precedents"
+    )
+    arguments: list[ArgumentResponse] = Field(
+        default_factory=list, description="Constructed arguments"
+    )
+    hearing_analyses: list[HearingAnalysisResponse] = Field(
+        default_factory=list, description="AI hearing analyses"
+    )
+    audit_logs: list[AuditLogSummary] = Field(
+        default_factory=list, description="Audit trail entries"
+    )
     domain_has_vector_store: bool = Field(
         False,
-        description="True when the case's domain has an active vector store (admin-uploaded materials).",
+        description="True when the case's domain has an active vector store (admin-uploaded materials).",  # noqa: E501
     )
 
 
@@ -331,15 +362,23 @@ class GateAdvanceRequest(BaseModel):
 
 
 class GateRerunRequest(BaseModel):
-    agent_name: str | None = Field(None, description="Agent to restart from; defaults to first agent in gate")
-    instructions: str | None = Field(None, description="Additional instructions appended to the agent's system prompt")
+    agent_name: str | None = Field(
+        None, description="Agent to restart from; defaults to first agent in gate"
+    )
+    instructions: str | None = Field(
+        None, description="Additional instructions appended to the agent's system prompt"
+    )
 
 
 class AIEngagement(BaseModel):
-    conclusion_type: str = Field(..., description="Type of AI conclusion (verdict_recommendation, fairness_flag, etc.)")
+    conclusion_type: str = Field(
+        ..., description="Type of AI conclusion (verdict_recommendation, fairness_flag, etc.)"
+    )
     conclusion_id: str | None = Field(None, description="ID of the specific conclusion item")
     agreed: bool = Field(..., description="Whether the judge agrees with this AI conclusion")
-    reasoning: str | None = Field(None, description="Required when agreed=False: judge's reasoning for disagreement")
+    reasoning: str | None = Field(
+        None, description="Required when agreed=False: judge's reasoning for disagreement"
+    )
 
     @model_validator(mode="after")
     def reasoning_required_on_disagree(self) -> AIEngagement:

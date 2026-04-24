@@ -58,7 +58,9 @@ async def test_upload_document_to_kb_creates_file_and_attaches():
     vs_file = MagicMock(id="file-xyz", status="completed")
     mock_client = MagicMock()
     mock_client.files = MagicMock(create=AsyncMock(return_value=file_obj))
-    mock_client.vector_stores = MagicMock(files=MagicMock(create_and_poll=AsyncMock(return_value=vs_file)))
+    mock_client.vector_stores = MagicMock(
+        files=MagicMock(create_and_poll=AsyncMock(return_value=vs_file))
+    )
 
     with patch("src.services.knowledge_base._get_client", return_value=mock_client):
         result = await kb.upload_document_to_kb(
@@ -155,7 +157,9 @@ async def test_list_kb_files_enriches_each_file_with_metadata():
     file_obj = MagicMock(filename="brief.pdf", bytes=1024, created_at=1700000000)
 
     mock_client = MagicMock()
-    mock_client.vector_stores = MagicMock(files=MagicMock(list=AsyncMock(return_value=_FakeAsyncPaginator([vs_file]))))
+    mock_client.vector_stores = MagicMock(
+        files=MagicMock(list=AsyncMock(return_value=_FakeAsyncPaginator([vs_file])))
+    )
     mock_client.files = MagicMock(retrieve=AsyncMock(return_value=file_obj))
 
     with patch("src.services.knowledge_base._get_client", return_value=mock_client):
@@ -176,10 +180,15 @@ async def test_list_kb_files_walks_all_pages():
     # Regression: naked ``await .list(...)`` returns only the first page (default 20).
     # The wrapper must iterate the AsyncPaginator across every page.
     vs_files = [MagicMock(id=f"file-{i}", status="completed") for i in range(25)]
-    file_objs = {f"file-{i}": MagicMock(filename=f"doc-{i}.pdf", bytes=100, created_at=1700000000) for i in range(25)}
+    file_objs = {
+        f"file-{i}": MagicMock(filename=f"doc-{i}.pdf", bytes=100, created_at=1700000000)
+        for i in range(25)
+    }
 
     mock_client = MagicMock()
-    mock_client.vector_stores = MagicMock(files=MagicMock(list=AsyncMock(return_value=_FakeAsyncPaginator(vs_files))))
+    mock_client.vector_stores = MagicMock(
+        files=MagicMock(list=AsyncMock(return_value=_FakeAsyncPaginator(vs_files)))
+    )
     mock_client.files = MagicMock(retrieve=AsyncMock(side_effect=lambda fid: file_objs[fid]))
 
     with patch("src.services.knowledge_base._get_client", return_value=mock_client):
@@ -194,7 +203,9 @@ async def test_list_kb_files_propagates_metadata_failure():
     # returns 503 — fabricating "filename: unknown" would hide a real outage.
     vs_file = MagicMock(id="file-xyz", status="completed")
     mock_client = MagicMock()
-    mock_client.vector_stores = MagicMock(files=MagicMock(list=AsyncMock(return_value=_FakeAsyncPaginator([vs_file]))))
+    mock_client.vector_stores = MagicMock(
+        files=MagicMock(list=AsyncMock(return_value=_FakeAsyncPaginator([vs_file])))
+    )
     mock_client.files = MagicMock(retrieve=AsyncMock(side_effect=RuntimeError("file gone")))
 
     with (
@@ -211,7 +222,9 @@ async def test_list_kb_files_propagates_metadata_failure():
 
 async def test_delete_kb_file_detaches_and_deletes_raw_file():
     mock_client = MagicMock()
-    mock_client.vector_stores = MagicMock(files=MagicMock(delete=AsyncMock(return_value=MagicMock())))
+    mock_client.vector_stores = MagicMock(
+        files=MagicMock(delete=AsyncMock(return_value=MagicMock()))
+    )
     mock_client.files = MagicMock(delete=AsyncMock(return_value=MagicMock()))
 
     with patch("src.services.knowledge_base._get_client", return_value=mock_client):
@@ -230,7 +243,9 @@ async def test_delete_kb_file_propagates_raw_delete_error():
     # route returns 503 — silently swallowing it leaves an orphan file eating
     # OpenAI quota while the API reports deleted=true.
     mock_client = MagicMock()
-    mock_client.vector_stores = MagicMock(files=MagicMock(delete=AsyncMock(return_value=MagicMock())))
+    mock_client.vector_stores = MagicMock(
+        files=MagicMock(delete=AsyncMock(return_value=MagicMock()))
+    )
     mock_client.files = MagicMock(delete=AsyncMock(side_effect=RuntimeError("upstream 500")))
 
     with (

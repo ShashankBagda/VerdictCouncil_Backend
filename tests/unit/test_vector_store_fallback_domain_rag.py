@@ -107,6 +107,7 @@ async def test_direct_vector_store_id_is_used():
     mock_client.responses.create = AsyncMock(return_value=response)
 
     with (
+        patch("src.tools.vector_store_fallback._client", None),
         patch("src.tools.vector_store_fallback.settings") as mock_settings,
         patch("src.tools.vector_store_fallback.AsyncOpenAI", return_value=mock_client),
     ):
@@ -135,7 +136,7 @@ async def test_direct_vector_store_id_is_used():
 
 @pytest.mark.asyncio
 async def test_global_fallback_with_no_global_configured_raises():
-    """allow_global_fallback=True but settings.openai_vector_store_id is empty raises VectorStoreError."""
+    """allow_global_fallback=True but settings.openai_vector_store_id is empty raises VectorStoreError."""  # noqa: E501
     with patch("src.tools.vector_store_fallback.settings") as mock_settings:
         mock_settings.openai_vector_store_id = ""
 
@@ -154,7 +155,7 @@ async def test_global_fallback_with_no_global_configured_raises():
 
 @pytest.mark.asyncio
 async def test_direct_vector_store_id_returns_tagged_results():
-    """Results from a directly-provided vector_store_id are tagged with vector_store_fallback source."""
+    """Results from a directly-provided vector_store_id are tagged with vector_store_fallback source."""  # noqa: E501
     results = [
         _mock_file_search_result("case_a.pdf", 0.88, "Court held that..."),
         _mock_file_search_result("case_b.pdf", 0.70, "On appeal..."),
@@ -166,6 +167,7 @@ async def test_direct_vector_store_id_returns_tagged_results():
     mock_client.responses.create = AsyncMock(return_value=response)
 
     with (
+        patch("src.tools.vector_store_fallback._client", None),
         patch("src.tools.vector_store_fallback.settings") as mock_settings,
         patch("src.tools.vector_store_fallback.AsyncOpenAI", return_value=mock_client),
     ):

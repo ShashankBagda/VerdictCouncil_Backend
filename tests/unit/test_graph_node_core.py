@@ -98,7 +98,9 @@ class TestRunAgentNodeNoTools:
         llm_response = _ai_msg(content=json.dumps({"evidence_analysis": {"evidence_items": []}}))
 
         with (
-            patch("src.pipeline.graph.nodes.common.ChatOpenAI", return_value=_mock_llm([llm_response])),
+            patch(
+                "src.pipeline.graph.nodes.common.ChatOpenAI", return_value=_mock_llm([llm_response])
+            ),  # noqa: E501
             patch("src.pipeline.graph.nodes.common.publish_progress", new_callable=AsyncMock),
             patch("src.pipeline.graph.nodes.common.publish_agent_event", new_callable=AsyncMock),
             patch("src.pipeline.graph.nodes.common.agent_run") as mock_ar,
@@ -123,7 +125,9 @@ class TestRunAgentNodeNoTools:
         llm_response = _ai_msg(content=json.dumps({"evidence_analysis": {}}))
 
         with (
-            patch("src.pipeline.graph.nodes.common.ChatOpenAI", return_value=_mock_llm([llm_response])),
+            patch(
+                "src.pipeline.graph.nodes.common.ChatOpenAI", return_value=_mock_llm([llm_response])
+            ),  # noqa: E501
             patch(
                 "src.pipeline.graph.nodes.common.publish_progress",
                 new_callable=AsyncMock,
@@ -162,7 +166,9 @@ class TestRunAgentNodeNoTools:
             mock_session.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_session.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            state = _make_state({"extra_instructions": {_EVIDENCE_AGENT: "Focus on document contradictions."}})
+            state = _make_state(
+                {"extra_instructions": {_EVIDENCE_AGENT: "Focus on document contradictions."}}
+            )
             await _run_agent_node(_EVIDENCE_AGENT, state)
 
         call_args = llm_mock.ainvoke.call_args_list[0][0][0]
@@ -187,7 +193,9 @@ class TestFieldOwnership:
         llm_response = _ai_msg(content=json.dumps(bad_output))
 
         with (
-            patch("src.pipeline.graph.nodes.common.ChatOpenAI", return_value=_mock_llm([llm_response])),
+            patch(
+                "src.pipeline.graph.nodes.common.ChatOpenAI", return_value=_mock_llm([llm_response])
+            ),  # noqa: E501
             patch("src.pipeline.graph.nodes.common.publish_progress", new_callable=AsyncMock),
             patch("src.pipeline.graph.nodes.common.publish_agent_event", new_callable=AsyncMock),
             patch("src.pipeline.graph.nodes.common.agent_run") as mock_ar,
@@ -222,7 +230,9 @@ class TestPrecedentMetaFolding:
         mock_meta.record({"source_failed": False, "pair_status": "ok"})
 
         with (
-            patch("src.pipeline.graph.nodes.common.ChatOpenAI", return_value=_mock_llm([llm_response])),
+            patch(
+                "src.pipeline.graph.nodes.common.ChatOpenAI", return_value=_mock_llm([llm_response])
+            ),  # noqa: E501
             patch("src.pipeline.graph.nodes.common.publish_progress", new_callable=AsyncMock),
             patch("src.pipeline.graph.nodes.common.publish_agent_event", new_callable=AsyncMock),
             patch("src.pipeline.graph.nodes.common.agent_run") as mock_ar,
@@ -255,7 +265,9 @@ class TestMlflowIds:
         llm_response = _ai_msg(content=json.dumps({}))
 
         with (
-            patch("src.pipeline.graph.nodes.common.ChatOpenAI", return_value=_mock_llm([llm_response])),
+            patch(
+                "src.pipeline.graph.nodes.common.ChatOpenAI", return_value=_mock_llm([llm_response])
+            ),  # noqa: E501
             patch("src.pipeline.graph.nodes.common.publish_progress", new_callable=AsyncMock),
             patch("src.pipeline.graph.nodes.common.publish_agent_event", new_callable=AsyncMock),
             patch("src.pipeline.graph.nodes.common.agent_run") as mock_ar,
@@ -278,7 +290,9 @@ class TestMlflowIds:
         llm_response = _ai_msg(content=json.dumps({}))
 
         with (
-            patch("src.pipeline.graph.nodes.common.ChatOpenAI", return_value=_mock_llm([llm_response])),
+            patch(
+                "src.pipeline.graph.nodes.common.ChatOpenAI", return_value=_mock_llm([llm_response])
+            ),  # noqa: E501
             patch("src.pipeline.graph.nodes.common.publish_progress", new_callable=AsyncMock),
             patch("src.pipeline.graph.nodes.common.publish_agent_event", new_callable=AsyncMock),
             patch("src.pipeline.graph.nodes.common.agent_run") as mock_ar,
@@ -306,7 +320,9 @@ class TestPersistFault:
         llm_response = _ai_msg(content=json.dumps({}))
 
         with (
-            patch("src.pipeline.graph.nodes.common.ChatOpenAI", return_value=_mock_llm([llm_response])),
+            patch(
+                "src.pipeline.graph.nodes.common.ChatOpenAI", return_value=_mock_llm([llm_response])
+            ),  # noqa: E501
             patch("src.pipeline.graph.nodes.common.publish_progress", new_callable=AsyncMock),
             patch("src.pipeline.graph.nodes.common.publish_agent_event", new_callable=AsyncMock),
             patch("src.pipeline.graph.nodes.common.agent_run") as mock_ar,

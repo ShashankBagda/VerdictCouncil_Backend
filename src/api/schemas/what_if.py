@@ -25,7 +25,9 @@ class WhatIfRequest(BaseModel):
     modification_payload: dict[str, Any] = Field(
         ..., description="Modification parameters (structure depends on modification_type)"
     )
-    description: str | None = Field(None, description="Human-readable description of the modification")
+    description: str | None = Field(
+        None, description="Human-readable description of the modification"
+    )
 
 
 class WhatIfResponse(BaseModel):
@@ -60,7 +62,9 @@ class WhatIfResultResponse(BaseModel):
 class StabilityRequest(BaseModel):
     """Request stability score computation."""
 
-    perturbation_count: int = Field(5, ge=1, le=20, description="Number of perturbations to test", examples=[5])
+    perturbation_count: int = Field(
+        5, ge=1, le=20, description="Number of perturbations to test", examples=[5]
+    )
 
 
 class StabilityResponse(BaseModel):
@@ -78,10 +82,16 @@ class StabilityResultResponse(BaseModel):
     case_id: uuid.UUID = Field(..., description="Case ID")
     run_id: str = Field(..., description="Pipeline run ID")
     score: int = Field(..., description="Stability score (0-100)", examples=[85])
-    classification: StabilityClassification = Field(..., description="Stability classification", examples=["stable"])
+    classification: StabilityClassification = Field(
+        ..., description="Stability classification", examples=["stable"]
+    )
     perturbation_count: int = Field(..., description="Number of perturbations tested")
-    perturbations_held: int = Field(..., description="Number of perturbations that held the verdict")
-    perturbation_details: dict[str, Any] | None = Field(None, description="Detailed perturbation results")
+    perturbations_held: int = Field(
+        ..., description="Number of perturbations that held the verdict"
+    )
+    perturbation_details: dict[str, Any] | None = Field(
+        None, description="Detailed perturbation results"
+    )
     status: StabilityStatus = Field(..., description="Computation status")
     created_at: datetime = Field(..., description="Creation timestamp")
     completed_at: datetime | None = Field(None, description="Completion timestamp")

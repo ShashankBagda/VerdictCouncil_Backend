@@ -220,7 +220,9 @@ def _insert_witnesses(db: AsyncSession, case_id: UUID, state: CaseState) -> None
                 case_id=case_id,
                 name=name,
                 role=item.get("role"),
-                credibility_score=int(credibility) if isinstance(credibility, (int, float)) else None,
+                credibility_score=int(credibility)
+                if isinstance(credibility, (int, float))
+                else None,
                 bias_indicators=_as_jsonb(item.get("bias_indicators")),
                 simulated_testimony=item.get("simulated_testimony"),
             )
@@ -262,7 +264,9 @@ def _insert_precedents(db: AsyncSession, case_id: UUID, state: CaseState) -> Non
                 court=item.get("court"),
                 outcome=item.get("outcome"),
                 reasoning_summary=item.get("reasoning_summary") or item.get("reasoning"),
-                similarity_score=float(similarity) if isinstance(similarity, (int, float)) else None,
+                similarity_score=float(similarity)
+                if isinstance(similarity, (int, float))
+                else None,
                 distinguishing_factors=item.get("distinguishing_factors"),
                 source=_coerce_enum(item.get("source"), PrecedentSource),
                 url=item.get("url"),

@@ -124,7 +124,7 @@ async def persist_case_state(
             if attempt < _CHECKPOINT_MAX_RETRIES:
                 delay = _CHECKPOINT_RETRY_BASE_DELAY_SECONDS * (2 ** (attempt - 1))
                 logger.warning(
-                    "pipeline_checkpoint upsert transient failure (case_id=%s run_id=%s agent=%s attempt=%d/%d): %s",
+                    "pipeline_checkpoint upsert transient failure (case_id=%s run_id=%s agent=%s attempt=%d/%d): %s",  # noqa: E501
                     case_id,
                     run_id,
                     agent_name,
@@ -188,10 +188,14 @@ async def load_case_state(
         try:
             raw = json.loads(raw)
         except json.JSONDecodeError as exc:
-            raise CheckpointCorruptError(f"checkpoint for case_id={case_id} run_id={run_id} is not valid JSON") from exc
+            raise CheckpointCorruptError(
+                f"checkpoint for case_id={case_id} run_id={run_id} is not valid JSON"
+            ) from exc
 
     if not isinstance(raw, dict) or "schema_version" not in raw:
-        raise CheckpointCorruptError(f"checkpoint for case_id={case_id} run_id={run_id} is missing schema_version")
+        raise CheckpointCorruptError(
+            f"checkpoint for case_id={case_id} run_id={run_id} is missing schema_version"
+        )
 
     version = raw["schema_version"]
     if version != CURRENT_SCHEMA_VERSION:

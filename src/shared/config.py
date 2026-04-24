@@ -46,7 +46,7 @@ class Settings(BaseSettings):
 
         if self.jwt_secret == "change-me-in-production":
             warnings.warn(
-                "JWT_SECRET is using the default value. Set a secure secret via the JWT_SECRET environment variable.",
+                "JWT_SECRET is using the default value. Set a secure secret via the JWT_SECRET environment variable.",  # noqa: E501
                 stacklevel=2,
             )
         if not self.cookie_secure:

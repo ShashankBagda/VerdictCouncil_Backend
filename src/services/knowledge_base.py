@@ -42,7 +42,10 @@ async def ensure_judge_vector_store(db: AsyncSession, user: User) -> tuple[str, 
     """
     locked = (
         await db.execute(
-            select(User).where(User.id == user.id).with_for_update().execution_options(populate_existing=True)
+            select(User)
+            .where(User.id == user.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
     ).scalar_one_or_none()
     if locked is None:
@@ -73,7 +76,9 @@ async def upload_document_to_kb(vector_store_id: str, file_bytes: bytes, filenam
         file_id=file_obj.id,
     )
 
-    logger.info("Uploaded %s to vector store %s (file_id=%s)", filename, vector_store_id, file_obj.id)
+    logger.info(
+        "Uploaded %s to vector store %s (file_id=%s)", filename, vector_store_id, file_obj.id
+    )
     return {
         "file_id": file_obj.id,
         "filename": filename,
@@ -176,7 +181,10 @@ async def ensure_domain_vector_store(
 
     locked = (
         await db.execute(
-            sa_select(Domain).where(Domain.id == domain_id).with_for_update().execution_options(populate_existing=True)
+            sa_select(Domain)
+            .where(Domain.id == domain_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
     ).scalar_one_or_none()
     if locked is None:

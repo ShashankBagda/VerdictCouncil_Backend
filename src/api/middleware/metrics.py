@@ -66,19 +66,31 @@ class MetricsStore:
                 lines.append("# HELP http_requests_total Total HTTP requests.")
                 lines.append("# TYPE http_requests_total counter")
                 for (method, path, st), count in sorted(self._request_counts.items()):
-                    lines.append(f'http_requests_total{{method="{method}",path="{path}",status="{st}"}} {count}')
+                    lines.append(
+                        f'http_requests_total{{method="{method}",path="{path}",status="{st}"}} {count}'  # noqa: E501
+                    )
 
             # http_request_duration_seconds
             if self._durations:
-                lines.append("# HELP http_request_duration_seconds HTTP request duration in seconds.")
+                lines.append(
+                    "# HELP http_request_duration_seconds HTTP request duration in seconds."
+                )
                 lines.append("# TYPE http_request_duration_seconds histogram")
                 for (method, path), entry in sorted(self._durations.items()):
                     labels = f'method="{method}",path="{path}"'
                     for bound, cnt in sorted(entry["buckets"].items()):
-                        lines.append(f'http_request_duration_seconds_bucket{{{labels},le="{bound}"}} {cnt}')
-                    lines.append(f'http_request_duration_seconds_bucket{{{labels},le="+Inf"}} {entry["count"]}')
-                    lines.append(f"http_request_duration_seconds_sum{{{labels}}} {entry['sum']:.6f}")
-                    lines.append(f"http_request_duration_seconds_count{{{labels}}} {entry['count']}")
+                        lines.append(
+                            f'http_request_duration_seconds_bucket{{{labels},le="{bound}"}} {cnt}'
+                        )
+                    lines.append(
+                        f'http_request_duration_seconds_bucket{{{labels},le="+Inf"}} {entry["count"]}'  # noqa: E501
+                    )
+                    lines.append(
+                        f"http_request_duration_seconds_sum{{{labels}}} {entry['sum']:.6f}"
+                    )
+                    lines.append(
+                        f"http_request_duration_seconds_count{{{labels}}} {entry['count']}"
+                    )
 
             # active_cases_total
             if self._case_gauges:
