@@ -81,7 +81,6 @@ class AuditEntry(BaseModel):
     tool_calls: list[dict[str, Any]] | None = None
     model: str | None = None
     token_usage: dict[str, Any] | None = None
-    solace_message_id: str | None = None
 
 
 class CaseState(BaseModel):

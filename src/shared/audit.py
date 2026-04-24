@@ -16,7 +16,6 @@ def append_audit_entry(
     tool_calls: list[dict[str, Any]] | None = None,
     model: str | None = None,
     token_usage: dict[str, Any] | None = None,
-    solace_message_id: str | None = None,
 ) -> CaseState:
     """Append an audit entry to the CaseState. Returns a new CaseState."""
     entry = AuditEntry(
@@ -30,6 +29,5 @@ def append_audit_entry(
         tool_calls=tool_calls,
         model=model,
         token_usage=token_usage,
-        solace_message_id=solace_message_id,
     )
     return state.model_copy(update={"audit_log": [*state.audit_log, entry]})

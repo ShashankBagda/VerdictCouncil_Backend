@@ -1,3 +1,5 @@
+/Users/douglasswm/Project/AAS/VER/VerdictCouncil_Backend/.venv/lib/python3.12/site-packages/pydantic/main.py:263: UserWarning: COOKIE_SECURE is False. Session cookies will be sent over insecure HTTP. This must ONLY be used in local development.
+  validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
 {
   "openapi": "3.1.0",
   "info": {
@@ -7729,18 +7731,6 @@
             ],
             "title": "Created At",
             "description": "Timestamp"
-          },
-          "solace_message_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Solace Message Id",
-            "description": "Broker message id"
           }
         },
         "type": "object",
