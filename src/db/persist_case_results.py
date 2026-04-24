@@ -333,7 +333,6 @@ def _insert_audit_log(db: AsyncSession, case_id: UUID, state: CaseState) -> None
                 tool_calls=_as_jsonb(entry.tool_calls),
                 model=entry.model,
                 token_usage=_as_jsonb(entry.token_usage),
-                solace_message_id=entry.solace_message_id,
             )
         )
 

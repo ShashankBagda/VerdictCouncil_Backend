@@ -8,8 +8,8 @@ Usage:
 """
 
 import pytest
-from src.pipeline.mesh_runner_factory import get_mesh_runner
 
+from src.pipeline.graph.runner import GraphPipelineRunner
 from src.shared.case_state import CaseState
 
 from .fixtures import ALL_FIXTURES
@@ -68,8 +68,8 @@ class TestPipelineEval:
     """
 
     @pytest.fixture
-    async def runner(self):
-        return await get_mesh_runner()
+    def runner(self):
+        return GraphPipelineRunner()
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(

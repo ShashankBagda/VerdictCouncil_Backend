@@ -280,7 +280,6 @@ class AuditLogSummary(BaseModel):
     agent_name: str = Field(..., description="Name of the agent that performed the action")
     action: str = Field(..., description="Action performed")
     created_at: datetime | None = Field(None, description="Timestamp")
-    solace_message_id: str | None = Field(None, description="Broker message id")
 
     model_config = {"from_attributes": True}
 
