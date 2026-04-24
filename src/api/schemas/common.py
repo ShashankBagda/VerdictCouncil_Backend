@@ -18,9 +18,7 @@ class MessageResponse(BaseModel):
 class ValidationErrorDetail(BaseModel):
     """Single validation error entry (FastAPI 422 format)."""
 
-    loc: list[str | int] = Field(
-        ..., description="Path to the invalid field", examples=[["body", "email"]]
-    )
+    loc: list[str | int] = Field(..., description="Path to the invalid field", examples=[["body", "email"]])
     msg: str = Field(..., description="Validation error message", examples=["field required"])
     type: str = Field(..., description="Error type identifier", examples=["value_error.missing"])
 

@@ -11,9 +11,7 @@ class AuditLogResponse(BaseModel):
 
     id: UUID = Field(..., description="Audit log entry ID")
     case_id: UUID = Field(..., description="Associated case ID")
-    agent_name: str = Field(
-        ..., description="Agent that performed the action", examples=["legal-knowledge"]
-    )
+    agent_name: str = Field(..., description="Agent that performed the action", examples=["legal-knowledge"])
     action: str = Field(..., description="Action performed", examples=["search_precedents"])
     input_payload: dict | None = Field(None, description="Input data sent to the agent")
     output_payload: dict | None = Field(None, description="Output data from the agent")

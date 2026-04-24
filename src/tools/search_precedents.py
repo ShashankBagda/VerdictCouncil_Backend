@@ -42,9 +42,7 @@ class SearchResult:
     )
 
 
-def _cache_key(
-    query: str, domain: str, vector_store_id: str | None, max_results: int
-) -> str:
+def _cache_key(query: str, domain: str, vector_store_id: str | None, max_results: int) -> str:
     """Generate a deterministic cache key for a search query.
 
     vector_store_id is included to avoid cross-domain cache collisions (H6).
@@ -182,7 +180,9 @@ async def _search_precedents_impl(
         metadata["pair_status"] = "circuit_open"
         try:
             results = await vector_store_search(
-                query, domain, max_results,
+                query,
+                domain,
+                max_results,
                 vector_store_id=vector_store_id,
                 allow_global_fallback=True,
             )
@@ -204,15 +204,16 @@ async def _search_precedents_impl(
             new_state = await pair_breaker.record_failure()
             metadata["pair_status"] = f"failed ({new_state.value})"
             logger.warning(
-                "PAIR Search API unreachable for query '%s': %s (circuit: %s). "
-                "Falling back to vector store.",
+                "PAIR Search API unreachable for query '%s': %s (circuit: %s). Falling back to vector store.",
                 query[:80],
                 exc,
                 new_state.value,
             )
             try:
                 results = await vector_store_search(
-                    query, domain, max_results,
+                    query,
+                    domain,
+                    max_results,
                     vector_store_id=vector_store_id,
                     allow_global_fallback=True,
                 )

@@ -17,9 +17,7 @@ class DashboardStats(BaseModel):
         description="Case count grouped by domain",
         examples=[{"small_claims": 30, "traffic_violation": 12}],
     )
-    escalation_rate_percent: float = Field(
-        ..., description="Percentage of cases currently escalated"
-    )
+    escalation_rate_percent: float = Field(..., description="Percentage of cases currently escalated")
     average_processing_time_seconds: float | None = Field(
         None, description="Average pipeline processing time when available"
     )

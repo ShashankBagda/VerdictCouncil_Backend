@@ -114,9 +114,7 @@ class FakeA2AClient:
     ) -> str:
         self.publishes.append((topic, envelope, reply_to))
         self.publishes_with_status.append((topic, envelope, reply_to, status_topic))
-        payload_hash = hashlib.sha256(
-            json.dumps(envelope, sort_keys=True).encode("utf-8")
-        ).hexdigest()
+        payload_hash = hashlib.sha256(json.dumps(envelope, sort_keys=True).encode("utf-8")).hexdigest()
         if self.auto_resolver is not None:
             response = self.auto_resolver(topic, envelope, reply_to)
             if response is not None:

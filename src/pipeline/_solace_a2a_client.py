@@ -226,7 +226,7 @@ class SolaceA2AClient:
             return
         self._delivered[task_id] = envelope
 
-    def subscribe_status(self, topic_subscription: str) -> "StatusSubscription":
+    def subscribe_status(self, topic_subscription: str) -> StatusSubscription:
         """Open a dedicated DirectMessageReceiver on `topic_subscription`.
 
         Caller reads envelopes from the returned handle's async queue

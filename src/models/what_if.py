@@ -64,20 +64,14 @@ class WhatIfScenario(UUIDPrimaryKeyMixin, Base):
     )
     original_run_id: Mapped[str] = mapped_column(String(255), nullable=False)
     scenario_run_id: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
-    modification_type: Mapped[ModificationType] = mapped_column(
-        Enum(ModificationType), nullable=False
-    )
+    modification_type: Mapped[ModificationType] = mapped_column(Enum(ModificationType), nullable=False)
     modification_description: Mapped[str | None] = mapped_column(Text)
     modification_payload: Mapped[dict | None] = mapped_column(JSONB)
     status: Mapped[ScenarioStatus] = mapped_column(
         Enum(ScenarioStatus), nullable=False, server_default=ScenarioStatus.pending.value
     )
-    created_by: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
+    created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # Relationships
@@ -101,9 +95,7 @@ class WhatIfResult(UUIDPrimaryKeyMixin, Base):
     modified_analysis: Mapped[dict | None] = mapped_column(JSONB)
     diff_view: Mapped[dict | None] = mapped_column(JSONB)
     analysis_changed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     # Relationships
     scenario: Mapped[WhatIfScenario] = relationship(back_populates="result")
@@ -117,18 +109,14 @@ class StabilityScore(UUIDPrimaryKeyMixin, Base):
     )
     run_id: Mapped[str] = mapped_column(String(255), nullable=False)
     score: Mapped[int] = mapped_column(Integer, nullable=False)
-    classification: Mapped[StabilityClassification] = mapped_column(
-        Enum(StabilityClassification), nullable=False
-    )
+    classification: Mapped[StabilityClassification] = mapped_column(Enum(StabilityClassification), nullable=False)
     perturbation_count: Mapped[int] = mapped_column(Integer, nullable=False)
     perturbations_held: Mapped[int] = mapped_column(Integer, nullable=False)
     perturbation_details: Mapped[dict | None] = mapped_column(JSONB)
     status: Mapped[StabilityStatus] = mapped_column(
         Enum(StabilityStatus), nullable=False, server_default=StabilityStatus.pending.value
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # Relationships

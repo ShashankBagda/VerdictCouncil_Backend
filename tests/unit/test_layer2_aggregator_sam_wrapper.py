@@ -14,6 +14,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+pytest.importorskip("solace_ai_connector", reason="solace-agent-mesh not installed")
 from src.services.layer2_aggregator.a2a import (
     build_send_task_response,
     parse_send_task_response,
@@ -40,9 +41,7 @@ def _app_info(**app_config_overrides):
 
 def _build_app(app_info):
     """Instantiate Layer2AggregatorApp without booting the real SAI flow machinery."""
-    with patch(
-        "src.services.layer2_aggregator.app.App.__init__", return_value=None
-    ) as mock_base_init:
+    with patch("src.services.layer2_aggregator.app.App.__init__", return_value=None) as mock_base_init:
         app = Layer2AggregatorApp(app_info=app_info)
     return app, mock_base_init, app_info
 
@@ -97,10 +96,7 @@ def test_app_rejects_missing_required_field(missing_field):
 
 
 def test_sub_task_id_from_topic_returns_trailing_segment():
-    assert (
-        sub_task_id_from_topic("verdictcouncil/a2a/v1/agent/response/layer2-aggregator/task-abc123")
-        == "task-abc123"
-    )
+    assert sub_task_id_from_topic("verdictcouncil/a2a/v1/agent/response/layer2-aggregator/task-abc123") == "task-abc123"
     assert sub_task_id_from_topic("") == ""
 
 
@@ -121,9 +117,7 @@ def test_parse_send_task_response_extracts_data_part():
         },
     }
     assert parse_send_task_response(envelope) == {"evidence_analysis": {"exhibits": []}}
-    assert parse_send_task_response(json.dumps(envelope).encode()) == {
-        "evidence_analysis": {"exhibits": []}
-    }
+    assert parse_send_task_response(json.dumps(envelope).encode()) == {"evidence_analysis": {"exhibits": []}}
     assert parse_send_task_response(json.dumps(envelope)) == {"evidence_analysis": {"exhibits": []}}
 
 
@@ -325,9 +319,7 @@ def test_invoke_returns_none_when_barrier_not_met():
             return json.dumps(
                 {
                     "base_state": {"case_id": "c-1"},
-                    "mesh_reply_to": (
-                        "verdictcouncil/a2a/v1/agent/response/mesh-runner/layer2-c-1-r-1"
-                    ),
+                    "mesh_reply_to": ("verdictcouncil/a2a/v1/agent/response/mesh-runner/layer2-c-1-r-1"),
                 }
             ).encode()
         return None
@@ -366,9 +358,7 @@ def test_invoke_emits_send_task_response_when_barrier_met():
         if key_str.startswith("vc:aggregator:sub_task:"):
             return b"witnesses|c-1|r-1"
         if key_str.startswith("vc:aggregator:run:"):
-            return json.dumps(
-                {"base_state": {"case_id": "c-1"}, "mesh_reply_to": mesh_reply_to}
-            ).encode()
+            return json.dumps({"base_state": {"case_id": "c-1"}, "mesh_reply_to": mesh_reply_to}).encode()
         return None
 
     component._redis.get = get

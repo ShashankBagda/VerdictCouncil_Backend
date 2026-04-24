@@ -24,7 +24,5 @@ async def astream_graph_events(
     consumers (e.g., shadow runner diffs, test harnesses) that want a
     machine-readable event feed from the graph engine itself.
     """
-    async for event in compiled_graph.astream_events(
-        input_state, config=config, version="v2"
-    ):
+    async for event in compiled_graph.astream_events(input_state, config=config, version="v2"):
         yield event

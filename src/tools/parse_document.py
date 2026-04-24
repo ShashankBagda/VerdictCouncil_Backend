@@ -142,8 +142,7 @@ async def parse_document(
 
     if not raw_extracted_text.strip():
         raise DocumentParseError(
-            f"No text content extracted from document {file_id}. "
-            "Document may be corrupt or unsupported format."
+            f"No text content extracted from document {file_id}. Document may be corrupt or unsupported format."
         )
 
     # Sanitize once per page (single pass — avoids double-scanning the same content).

@@ -52,9 +52,7 @@ def _score_output(state: CaseState) -> dict:
         scores["audit_passed_present"] = False
 
     # Overall pass: completeness >= 70%, has hearing analysis, has fairness
-    scores["passed"] = (
-        scores["completeness"] >= 0.7 and scores["has_hearing_analysis"] and scores["has_fairness"]
-    )
+    scores["passed"] = scores["completeness"] >= 0.7 and scores["has_hearing_analysis"] and scores["has_fairness"]
 
     return scores
 
@@ -86,10 +84,7 @@ class TestPipelineEval:
 
         # Print score report
         print(f"\n--- Eval: {fixture['case_id']} ---")
-        print(
-            f"  Completeness: {scores['completeness']:.0%} "
-            f"({scores['populated_fields']}/{scores['total_fields']})"
-        )
+        print(f"  Completeness: {scores['completeness']:.0%} ({scores['populated_fields']}/{scores['total_fields']})")
         print(f"  Has hearing analysis: {scores['has_hearing_analysis']}")
         print(f"  Has fairness: {scores['has_fairness']}")
         print(f"  Audit passed present: {scores['audit_passed_present']}")

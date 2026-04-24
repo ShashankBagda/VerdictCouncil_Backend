@@ -165,10 +165,7 @@ class TestHearingPackEndpoint:
 
         assert resp.status_code == 200
         assert resp.headers["content-type"] == "application/zip"
-        assert (
-            resp.headers["content-disposition"]
-            == f'attachment; filename="case-{case_id}-hearing-pack.zip"'
-        )
+        assert resp.headers["content-disposition"] == f'attachment; filename="case-{case_id}-hearing-pack.zip"'
         with zipfile.ZipFile(io.BytesIO(resp.content), "r") as zf:
             assert "manifest.json" in zf.namelist()
 

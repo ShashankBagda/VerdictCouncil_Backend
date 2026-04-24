@@ -87,9 +87,7 @@ def _mock_runner_with_verdicts(verdicts: list[str]):
             v = verdicts[verdict_idx[0] % len(verdicts)]
             verdict_idx[0] += 1
         state = copy.deepcopy(state)
-        original_confidence = (
-            state.hearing_analysis.confidence_score if state.hearing_analysis else 80
-        )
+        original_confidence = state.hearing_analysis.confidence_score if state.hearing_analysis else 80
         state.hearing_analysis = {
             "preliminary_conclusion": v,
             "confidence_score": original_confidence,

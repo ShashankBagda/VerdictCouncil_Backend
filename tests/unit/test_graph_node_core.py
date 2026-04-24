@@ -7,11 +7,12 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+pytest.importorskip("langchain_core", reason="langchain-core not installed")
 from langchain_core.messages import AIMessage
 
 from src.pipeline.graph.nodes.common import _run_agent_node
-from src.shared.case_state import CaseState, EvidenceAnalysis
-
+from src.shared.case_state import CaseState
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -161,9 +162,7 @@ class TestRunAgentNodeNoTools:
             mock_session.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_session.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            state = _make_state(
-                {"extra_instructions": {_EVIDENCE_AGENT: "Focus on document contradictions."}}
-            )
+            state = _make_state({"extra_instructions": {_EVIDENCE_AGENT: "Focus on document contradictions."}})
             await _run_agent_node(_EVIDENCE_AGENT, state)
 
         call_args = llm_mock.ainvoke.call_args_list[0][0][0]

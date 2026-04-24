@@ -9,7 +9,6 @@ node; the caller folds this into CaseState.precedent_source_metadata at exit.
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 from langchain_core.tools import tool
@@ -18,7 +17,6 @@ from pydantic import BaseModel, Field
 from src.pipeline.graph.prompts import AGENT_TOOLS
 from src.pipeline.graph.state import GraphState
 from src.tools.sam.search_precedents_tool import _merge_precedent_meta
-
 
 # ---------------------------------------------------------------------------
 # Precedent metadata side-channel
@@ -54,15 +52,11 @@ class _CrossReferenceInput(BaseModel):
     segments: list[dict[str, Any]] = Field(
         description="Document segments to compare. Each: {doc_id, text, page, paragraph}"
     )
-    check_type: str = Field(
-        description="Type of check: 'contradiction' | 'corroboration' | 'all'"
-    )
+    check_type: str = Field(description="Type of check: 'contradiction' | 'corroboration' | 'all'")
 
 
 class _TimelineConstructInput(BaseModel):
-    events: list[dict[str, Any]] = Field(
-        description="Events to order. Each: {fact_id, date, event, source_refs}"
-    )
+    events: list[dict[str, Any]] = Field(description="Events to order. Each: {fact_id, date, event, source_refs}")
 
 
 class _GenerateQuestionsInput(BaseModel):
@@ -85,12 +79,8 @@ class _ConfidenceCalcInput(BaseModel):
     fact_statuses: list[str] = Field(
         description="Status labels per extracted fact: 'established' | 'disputed' | 'unverified'"
     )
-    witness_scores: list[int] = Field(
-        description="Credibility scores per witness (0-100)"
-    )
-    precedent_similarities: list[float] = Field(
-        description="Similarity scores per precedent (0.0-1.0)"
-    )
+    witness_scores: list[int] = Field(description="Credibility scores per witness (0-100)")
+    precedent_similarities: list[float] = Field(description="Similarity scores per precedent (0.0-1.0)")
 
 
 class _SearchPrecedentsInput(BaseModel):
@@ -100,9 +90,7 @@ class _SearchPrecedentsInput(BaseModel):
 
 
 class _SearchDomainGuidanceInput(BaseModel):
-    query: str = Field(
-        description="Semantic query for statutes, practice directions, or bench books"
-    )
+    query: str = Field(description="Semantic query for statutes, practice directions, or bench books")
     max_results: int = Field(5, description="Maximum number of guidance results to return")
 
 
@@ -290,9 +278,7 @@ def make_tools(
         from src.tools.search_domain_guidance import search_domain_guidance
 
         if not vector_store_id:
-            raise DomainGuidanceUnavailable(
-                "No domain_vector_store_id configured for this case"
-            )
+            raise DomainGuidanceUnavailable("No domain_vector_store_id configured for this case")
         return await search_domain_guidance(
             query=query,
             vector_store_id=vector_store_id,

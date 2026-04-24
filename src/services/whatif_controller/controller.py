@@ -143,9 +143,7 @@ class WhatIfController:
             if isinstance(item, dict) and item.get("id") == evidence_id:
                 item["excluded"] = exclude
                 if exclude:
-                    item["exclusion_reason"] = payload.get(
-                        "reason", "Excluded by judge via what-if scenario"
-                    )
+                    item["exclusion_reason"] = payload.get("reason", "Excluded by judge via what-if scenario")
                 break
 
         return state
@@ -221,10 +219,7 @@ class WhatIfController:
             }
 
         # Run all perturbation scenarios in parallel
-        tasks = [
-            self.create_scenario(case_state, p["modification_type"], p["payload"])
-            for p in perturbations
-        ]
+        tasks = [self.create_scenario(case_state, p["modification_type"], p["payload"]) for p in perturbations]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         # Evaluate results
@@ -299,8 +294,7 @@ class WhatIfController:
                                 "new_status": new_status,
                             },
                             "description": (
-                                f"Toggle fact '{fact.get('id', 'unknown')}' "
-                                f"from {fact['status']} to {new_status}"
+                                f"Toggle fact '{fact.get('id', 'unknown')}' from {fact['status']} to {new_status}"
                             ),
                         }
                     )

@@ -87,9 +87,7 @@ class Layer2AggregatorComponent(ComponentBase):
             raise ValueError("Layer2AggregatorComponent requires redis_url")
 
         self._loop = asyncio.new_event_loop()
-        self._loop_thread = threading.Thread(
-            target=self._run_loop, name="layer2-aggregator-loop", daemon=True
-        )
+        self._loop_thread = threading.Thread(target=self._run_loop, name="layer2-aggregator-loop", daemon=True)
         self._loop_thread.start()
 
         self._redis = redis.Redis.from_url(redis_url, decode_responses=False)
@@ -107,8 +105,7 @@ class Layer2AggregatorComponent(ComponentBase):
         sub_task_id = sub_task_id_from_topic(topic)
         if not sub_task_id:
             logger.warning(
-                "Layer2AggregatorComponent received message with no sub_task_id "
-                "(topic=%r); dropping",
+                "Layer2AggregatorComponent received message with no sub_task_id (topic=%r); dropping",
                 topic,
             )
             return None

@@ -31,7 +31,7 @@ class SanitizationResult:
     text: str
     regex_hits: int
     classifier_hits: int  # 0 when classifier is disabled
-    chunks_scanned: int   # pages processed
+    chunks_scanned: int  # pages processed
 
 
 def detect_injection(text: str) -> bool:

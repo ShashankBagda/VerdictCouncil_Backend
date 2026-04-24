@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from src.pipeline.graph.prompts import (
     AGENT_MODEL_TIER,
     AGENT_ORDER,
@@ -21,7 +19,6 @@ from src.shared.case_state import (
     ExtractedFacts,
     Witnesses,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -86,9 +83,7 @@ class TestMergeCaseSequential:
         assert merged.status == "processing"
 
     def test_non_owned_submodel_preserved(self):
-        base = CaseState(
-            evidence_analysis=EvidenceAnalysis(evidence_items=[{"id": "e1"}])
-        )
+        base = CaseState(evidence_analysis=EvidenceAnalysis(evidence_items=[{"id": "e1"}]))
         update = _base()  # evidence_analysis is None
         merged = _merge_case(base, update)
         assert merged.evidence_analysis is not None
@@ -130,9 +125,7 @@ class TestMergeCaseParallel:
             evidence_analysis=EvidenceAnalysis(evidence_items=[{"id": "e1"}]),
         )
         # Fact agent returns its own update; evidence_analysis is None in its output
-        fact_update = CaseState(
-            extracted_facts=ExtractedFacts(facts=[{"fact": "fact-A"}])
-        )
+        fact_update = CaseState(extracted_facts=ExtractedFacts(facts=[{"fact": "fact-A"}]))
         merged = _merge_case(after_evidence, fact_update)
         # Both owned fields must survive
         assert merged.evidence_analysis is not None
@@ -144,9 +137,7 @@ class TestMergeCaseParallel:
             evidence_analysis=EvidenceAnalysis(evidence_items=[{"id": "e1"}]),
             extracted_facts=ExtractedFacts(facts=[{"fact": "A"}]),
         )
-        witness_update = CaseState(
-            witnesses=Witnesses(witnesses=[{"name": "Alice"}])
-        )
+        witness_update = CaseState(witnesses=Witnesses(witnesses=[{"name": "Alice"}]))
         merged = _merge_case(base, witness_update)
         assert merged.evidence_analysis is not None
         assert merged.extracted_facts is not None

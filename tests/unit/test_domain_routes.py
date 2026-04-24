@@ -11,7 +11,7 @@ from httpx import ASGITransport, AsyncClient
 
 from src.api.app import create_app
 from src.api.deps import get_current_user, get_db
-from src.models.domain import Domain, DomainDocument, DomainDocumentStatus
+from src.models.domain import Domain
 from src.models.user import User, UserRole
 
 

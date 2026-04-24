@@ -63,9 +63,7 @@ async def find_and_mark_stuck_cases(
     last_activity = func.coalesce(Case.updated_at, Case.created_at)
     cutoff = func.now() - func.make_interval(0, 0, 0, 0, 0, 0, threshold_seconds)
 
-    rows = await session.execute(
-        select(Case.id).where(Case.status == CaseStatus.processing, last_activity < cutoff)
-    )
+    rows = await session.execute(select(Case.id).where(Case.status == CaseStatus.processing, last_activity < cutoff))
     stuck_ids = [str(row[0]) for row in rows.all()]
 
     if not stuck_ids:
@@ -77,9 +75,7 @@ async def find_and_mark_stuck_cases(
         return stuck_ids
 
     await session.execute(
-        update(Case)
-        .where(Case.id.in_([row for row in stuck_ids]))
-        .values(status=CaseStatus.failed_retryable)
+        update(Case).where(Case.id.in_([row for row in stuck_ids])).values(status=CaseStatus.failed_retryable)
     )
     await session.commit()
 
@@ -95,9 +91,7 @@ async def find_and_mark_stuck_cases(
 
 async def _run(threshold_seconds: int, dry_run: bool) -> int:
     async with async_session() as session:
-        marked = await find_and_mark_stuck_cases(
-            session, threshold_seconds=threshold_seconds, dry_run=dry_run
-        )
+        marked = await find_and_mark_stuck_cases(session, threshold_seconds=threshold_seconds, dry_run=dry_run)
     return len(marked)
 
 

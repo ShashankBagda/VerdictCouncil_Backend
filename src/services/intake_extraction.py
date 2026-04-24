@@ -178,9 +178,7 @@ async def _document_text(db: AsyncSession, doc: Document) -> str:
     call otherwise. Unparseable docs return an empty string so the caller
     can still attempt extraction from the other uploads."""
     if doc.pages:
-        texts = [
-            p.get("text", "") if isinstance(p, dict) else str(p) for p in doc.pages
-        ]
+        texts = [p.get("text", "") if isinstance(p, dict) else str(p) for p in doc.pages]
         joined = "\n\n".join(t for t in texts if t)
         if joined.strip():
             return joined
@@ -269,19 +267,13 @@ async def run_intake_extraction(
         case.intake_extraction = payload
         case.status = CaseStatus.awaiting_intake_confirmation
         await db.commit()
-        await publish_intake_event(
-            case_id, {"type": "done", "extraction": payload, "ts": _now()}
-        )
+        await publish_intake_event(case_id, {"type": "done", "extraction": payload, "ts": _now()})
         return payload
 
-    await publish_intake_event(
-        case_id, {"type": "status", "phase": "parsing_documents", "ts": _now()}
-    )
+    await publish_intake_event(case_id, {"type": "status", "phase": "parsing_documents", "ts": _now()})
     docs_with_text = [(d, await _document_text(db, d)) for d in authoritative]
 
-    await publish_intake_event(
-        case_id, {"type": "status", "phase": "extracting_fields", "ts": _now()}
-    )
+    await publish_intake_event(case_id, {"type": "status", "phase": "extracting_fields", "ts": _now()})
 
     client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
     # The efficient-reasoning model (gpt-5-mini) requires org verification on
@@ -328,9 +320,7 @@ async def run_intake_extraction(
     case.status = CaseStatus.awaiting_intake_confirmation
     await db.commit()
 
-    await publish_intake_event(
-        case_id, {"type": "done", "extraction": payload, "ts": _now()}
-    )
+    await publish_intake_event(case_id, {"type": "done", "extraction": payload, "ts": _now()})
     return payload
 
 
