@@ -34,6 +34,7 @@ from src.services.database import async_session
 from src.services.pipeline_events import (
     check_cancel_flag,
     publish_agent_event,
+    publish_narration,
     publish_progress,
 )
 from src.shared.audit import append_audit_entry
@@ -118,8 +119,15 @@ async def _run_agent_node(agent_name: str, state: GraphState) -> dict[str, Any]:
         system_prompt = f"{system_prompt}\n\nAdditional instructions from judge:\n{extra}"
     system_prompt = (
         f"{system_prompt}\n\n"
-        "OUTPUT FORMAT: Respond with ONLY a single valid JSON object — no prose, "
-        "no markdown fences, no commentary. Your entire response must parse as JSON."
+        "OUTPUT FORMAT — two sections separated by exactly the line `---STATE---`:\n"
+        "Section 1 (before the marker): A 1–3 sentence natural-language update for the "
+        "courtroom observer. Present tense. No JSON, no markdown, no bullet points. "
+        "Summarise what you just found or analysed.\n"
+        "---STATE---\n"
+        "Section 2 (after the marker): A single valid JSON object — your state update. "
+        "No prose, no markdown fences, no commentary. Must parse as JSON.\n"
+        "If you have nothing meaningful to report in the narration, write a brief one-sentence "
+        "summary of the completed analysis."
     )
 
     # ------------------------------------------------------------------
@@ -251,11 +259,22 @@ async def _run_agent_node(agent_name: str, state: GraphState) -> dict[str, Any]:
                 token_usage = _token_usage(ai_msg)
 
     # ------------------------------------------------------------------
-    # Parse final JSON
+    # Parse final JSON — extract narration (before ---STATE---) and JSON commit
     # ------------------------------------------------------------------
     raw_content = ai_msg.content if isinstance(ai_msg.content, str) else ""
     if not raw_content:
         raw_content = "{}"
+
+    _STATE_MARKER = "---STATE---"
+    if _STATE_MARKER in raw_content:
+        _narration_part, _, _state_part = raw_content.partition(_STATE_MARKER)
+        narration_text = _narration_part.strip()
+        raw_content = _state_part.strip()
+    else:
+        narration_text = ""
+
+    if narration_text:
+        await publish_narration(case_id, agent_name, narration_text)
 
     await publish_agent_event(
         case_id,

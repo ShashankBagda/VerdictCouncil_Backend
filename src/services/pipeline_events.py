@@ -115,6 +115,35 @@ async def publish_agent_event(case_id: str | object, event: dict) -> None:
         logger.exception("Failed to publish agent event")
 
 
+async def publish_narration(
+    case_id: str | object,
+    agent: str,
+    content: str,
+    chunk_index: int = 0,
+) -> None:
+    """Publish a natural-language narration chunk from a running agent.
+
+    Narration is the prose counterpart to the structured JSON state commit.
+    It is emitted *before* the llm_response event so the UI receives readable
+    text as soon as the agent finishes its analysis.
+    """
+    try:
+        r = await _get_redis_client()
+        event = {
+            "kind": "narration",
+            "schema_version": 1,
+            "case_id": str(case_id),
+            "agent": agent,
+            "content": content,
+            "chunk_index": chunk_index,
+            "ts": datetime.now(UTC).isoformat(),
+        }
+        await r.publish(_channel(case_id), json.dumps(event, default=str))
+        asyncio.create_task(_tee_write(case_id, event))
+    except Exception:
+        logger.exception("Failed to publish narration event for agent '%s'", agent)
+
+
 _CANCEL_KEY_TTL = 86400  # 24 hours
 
 
