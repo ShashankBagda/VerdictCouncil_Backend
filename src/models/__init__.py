@@ -15,6 +15,7 @@ from src.models.case import (
     ReopenRequest,
     Witness,
 )
+from src.models.pipeline_checkpoint import PipelineCheckpoint
 from src.models.pipeline_job import PipelineJob, PipelineJobStatus, PipelineJobType
 from src.models.system_config import SystemConfig
 from src.models.user import PasswordResetToken, Session, User
@@ -39,6 +40,7 @@ __all__ = [
     "AuditLog",
     "AdminEvent",
     "SystemConfig",
+    "PipelineCheckpoint",
     "PipelineJob",
     "PipelineJobStatus",
     "PipelineJobType",

@@ -16,6 +16,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 from sqlalchemy import select
 
 from src.api.deps import CurrentUser, DBSession
+from src.models.user import UserRole
 from src.api.schemas.cases import (
     ArgumentResponse,
     DocumentResponse,
@@ -34,6 +35,7 @@ from src.models.case import (
     Case,
     CaseStatus,
     Document,
+    DocumentKind,
     Evidence,
     Fact,
     HearingAnalysis,
@@ -41,8 +43,15 @@ from src.models.case import (
     Precedent,
     Witness,
 )
-from src.models.user import UserRole
 
+# Typed slots that kick off intake extraction as soon as one is uploaded.
+# Judges can still drop evidence bundles or letters of mitigation into a
+# draft, but none of those alone are sufficient grounding to propose
+# parties / offence / title — so we wait until an authoritative doc arrives.
+_INTAKE_TRIGGER_KINDS = {
+    DocumentKind.notice_of_traffic_offence,
+    DocumentKind.charge_sheet,
+}
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -82,13 +91,13 @@ SUPPLEMENTARY_PRESERVED_STAGES = PIPELINE_AGENTS[:2]
 
 
 async def _get_case_or_404(case_id: UUID, db, current_user) -> Case:
-    """Load a case with access check. Raises 404/403."""
+    """Load a case, raising 404 if not found and 403 if not owned by this judge."""
     result = await db.execute(select(Case).where(Case.id == case_id))
     case = result.scalar_one_or_none()
     if not case:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
-    if current_user.role == UserRole.clerk and case.created_by != current_user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+    if current_user.role == UserRole.judge and case.created_by != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
     return case
 
 
@@ -169,10 +178,27 @@ def _compute_progress(agents: list[dict]) -> int:
 
 
 def _derive_overall_status(case: Case, agents: list[dict]) -> str:
+    # Map concrete DB statuses to frontend-facing strings first so the
+    # frontend can gate visibility of action buttons on the exact value.
     if case.status == CaseStatus.failed:
         return "failed"
+    if case.status == CaseStatus.failed_retryable:
+        return "failed_retryable"
+    if case.status == CaseStatus.escalated:
+        return "escalated"
     if case.status in (CaseStatus.ready_for_review, CaseStatus.closed):
         return "completed"
+    # Gate-pause statuses — pass through the enum value string so the
+    # frontend can render gate review panels and stop polling.
+    _GATE_PAUSE_STATUSES = {
+        CaseStatus.awaiting_review_gate1,
+        CaseStatus.awaiting_review_gate2,
+        CaseStatus.awaiting_review_gate3,
+        CaseStatus.awaiting_review_gate4,
+    }
+    if case.status in _GATE_PAUSE_STATUSES:
+        return case.status.value
+    # Derive from agent states for actively-processing cases
     if any(a["status"] == "failed" for a in agents):
         return "failed"
     if all(a["status"] == "completed" for a in agents):
@@ -235,6 +261,14 @@ async def upload_documents(
     db: DBSession,
     current_user: CurrentUser,
     files: list[UploadFile] = File(..., description="Files to upload"),
+    kinds: list[str] | None = Form(
+        default=None,
+        description=(
+            "Typed-slot kind for each file (one per file, same order). "
+            "Valid values: " + ", ".join(k.value for k in DocumentKind) + ". "
+            "Omit for legacy untyped upload — defaults to 'other'."
+        ),
+    ),
 ) -> list[Document]:
     case = await _get_case_or_404(case_id, db, current_user)
 
@@ -242,11 +276,39 @@ async def upload_documents(
 
     from src.shared.config import settings
 
+    if kinds is not None and len(kinds) != len(files):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="kinds must be the same length as files (one per upload)",
+        )
+
+    resolved_kinds: list[DocumentKind] = []
+    for idx, _ in enumerate(files):
+        if kinds is None:
+            resolved_kinds.append(DocumentKind.other)
+            continue
+        raw = kinds[idx]
+        try:
+            resolved_kinds.append(DocumentKind(raw))
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Unknown document kind: {raw}",
+            ) from exc
+
     oa_client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
 
     created = []
-    for upload in files:
+    for upload, doc_kind in zip(files, resolved_kinds, strict=True):
         content = await upload.read()
+        if len(content) > settings.case_doc_max_upload_bytes:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=(
+                    f"File '{upload.filename}' exceeds maximum size of "
+                    f"{settings.case_doc_max_upload_bytes // 1024 // 1024} MiB"
+                ),
+            )
         openai_file_id: str | None = None
         try:
             oa_file = await oa_client.files.create(
@@ -265,6 +327,7 @@ async def upload_documents(
             case_id=case.id,
             filename=upload.filename or "unnamed",
             file_type=upload.content_type,
+            kind=doc_kind,
             uploaded_by=current_user.id,
             openai_file_id=openai_file_id,
         )
@@ -276,12 +339,32 @@ async def upload_documents(
         case_id=case.id,
         agent_name="system",
         action="document_upload",
-        input_payload={"filenames": [f.filename for f in files]},
+        input_payload={
+            "filenames": [f.filename for f in files],
+            "kinds": [k.value for k in resolved_kinds],
+        },
     )
     db.add(audit)
     await db.flush()
     for doc in created:
         await db.refresh(doc)
+
+    # Draft intake: the first authoritative document triggers extraction.
+    # Anything uploaded after the case has left intake is business-as-usual
+    # (evidence / supplementary uploads for an already-pending case).
+    if case.status == CaseStatus.draft and any(
+        k in _INTAKE_TRIGGER_KINDS for k in resolved_kinds
+    ):
+        from src.models.pipeline_job import PipelineJobType
+        from src.workers.outbox import enqueue_outbox_job
+
+        case.status = CaseStatus.extracting
+        await enqueue_outbox_job(
+            db, case_id=case.id, job_type=PipelineJobType.intake_extraction
+        )
+        await db.commit()
+    else:
+        await db.commit()
 
     return created
 
@@ -320,6 +403,14 @@ async def upload_supplementary_documents(
     created: list[Document] = []
     for upload in files:
         content = await upload.read()
+        if len(content) > settings.case_doc_max_upload_bytes:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=(
+                    f"File '{upload.filename}' exceeds maximum size of "
+                    f"{settings.case_doc_max_upload_bytes // 1024 // 1024} MiB"
+                ),
+            )
         openai_file_id: str | None = None
         try:
             oa_file = await oa_client.files.create(

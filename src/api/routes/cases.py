@@ -14,9 +14,11 @@ from sqlalchemy.orm import selectinload
 
 from src.api.deps import CurrentUser, DBSession, require_role
 from src.api.schemas.cases import (
-    KNOWN_TRAFFIC_OFFENCE_CODES,
+    CaseConfirmRequest,
     CaseCreateRequest,
     CaseDetailResponse,
+    CaseDraftCreateRequest,
+    CaseIntakeMessageRequest,
     CaseListResponse,
     CaseResponse,
     GateAdvanceRequest,
@@ -39,6 +41,7 @@ from src.services.case_report_data import build_case_report_data
 from src.services.hearing_pack import assemble_pack
 from src.services.pdf_export import render_case_report_pdf
 from src.services.pipeline_events import subscribe as subscribe_pipeline_events
+from src.shared.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -208,11 +211,11 @@ def _build_jurisdiction_summary(case: Case) -> dict[str, Any]:
 
     if case.domain == CaseDomain.traffic_violation:
         if case.offence_code:
-            if case.offence_code not in KNOWN_TRAFFIC_OFFENCE_CODES:
-                failure = True
-                reasons.append(f"Offence code {case.offence_code} is not recognised.")
-            else:
-                reasons.append(f"Offence code {case.offence_code} is recognised.")
+            # Offence codes are not a closed set — the RTA lists many sections
+            # and sitting judges are the authority on which code applies. We
+            # record the code on the jurisdiction summary for audit, but never
+            # fail the case on an allow-list mismatch.
+            reasons.append(f"Offence code recorded: {case.offence_code}.")
         if earliest_fact_date and case.filed_date:
             limitation_days = (case.filed_date - earliest_fact_date).days
             if limitation_days > 365:
@@ -318,6 +321,12 @@ def _serialize_case_summary(case: Case) -> dict[str, Any]:
         "description": case.description,
         "summary_snippet": summary_snippet,
         "domain": case.domain,
+        "domain_id": case.domain_id,
+        "domain_detail": (
+            {"id": case.domain_ref.id, "code": case.domain_ref.code, "name": case.domain_ref.name}
+            if case.domain_ref
+            else None
+        ),
         "status": case.status,
         "status_group": _status_group(case.status),
         "jurisdiction": _build_jurisdiction_summary(case),
@@ -365,22 +374,22 @@ def _serialize_case_detail(case: Case) -> dict[str, Any]:
             "arguments": list(case.arguments or []),
             "hearing_analyses": list(case.hearing_analyses or []),
             "audit_logs": list(case.audit_logs or []),
+            "domain_has_vector_store": bool(
+                case.domain_ref
+                and case.domain_ref.is_active
+                and case.domain_ref.vector_store_id
+            ),
         }
     )
     return summary
 
 
 async def _load_case_for_export(case_id: UUID, db, current_user: User) -> Case:
-    """Fetch a case and enforce clerk ownership. Raises 404/403."""
+    """Fetch a case, raising 404 if not found."""
     result = await db.execute(select(Case).where(Case.id == case_id))
     case = result.scalar_one_or_none()
     if not case:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
-    if current_user.role == UserRole.clerk and case.created_by != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to view this case",
-        )
     return case
 
 
@@ -390,7 +399,7 @@ async def _load_case_for_export(case_id: UUID, db, current_user: User) -> Case:
     status_code=status.HTTP_201_CREATED,
     operation_id="create_case",
     summary="Create a new case",
-    description="Create a new judicial case in the specified domain. Requires clerk or judge role.",
+    description="Create a new judicial case in the specified domain. Requires judge role.",
     responses={
         403: {"model": ErrorResponse, "description": "Insufficient permissions"},
         422: {"model": ValidationErrorResponse, "description": "Validation error"},
@@ -399,11 +408,58 @@ async def _load_case_for_export(case_id: UUID, db, current_user: User) -> Case:
 async def create_case(
     body: CaseCreateRequest,
     db: DBSession,
-    current_user: User = require_role(UserRole.clerk, UserRole.judge),
+    current_user: User = require_role(UserRole.judge),
 ) -> dict[str, Any]:
+    from src.models.domain import Domain as DomainModel
+
+    # Resolve domain row — must be active
+    domain_row: DomainModel | None = None
+    if body.domain_id is not None:
+        domain_row = await db.get(DomainModel, body.domain_id)
+        if domain_row is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Domain {body.domain_id} not found",
+            )
+        # Check for disagreement between domain_id and legacy domain enum
+        if body.domain is not None and body.domain.value != domain_row.code:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="domain_id and domain disagree — send only one or ensure they match",
+            )
+    elif body.domain is not None:
+        result = await db.execute(
+            select(DomainModel)
+            .where(DomainModel.code == body.domain.value)
+            .with_for_update(read=True)
+        )
+        domain_row = result.scalar_one_or_none()
+        if domain_row is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Domain seed row missing — contact platform team",
+            )
+
+    if domain_row is not None and not domain_row.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Domain '{domain_row.code}' is not active",
+        )
+
+    # Resolve legacy domain enum from domain_row if only domain_id was sent
+    legacy_domain = body.domain
+    if legacy_domain is None and domain_row is not None:
+        from src.models.case import CaseDomain
+
+        try:
+            legacy_domain = CaseDomain(domain_row.code)
+        except ValueError:
+            legacy_domain = None  # New domain without a legacy enum value — OK
+
     case = Case(
         id=uuid4(),
-        domain=body.domain,
+        domain=legacy_domain,
+        domain_id=domain_row.id if domain_row else None,
         title=body.title.strip(),
         description=body.description.strip() if body.description else None,
         filed_date=body.filed_date,
@@ -424,7 +480,391 @@ async def create_case(
     db.add(case)
     await db.flush()
     await db.refresh(case)
+    if case.domain_id:
+        await db.refresh(case, ["domain_ref"])
     return _serialize_case_summary(case)
+
+
+# ---------------------------------------------------------------------------
+# Chat-first intake — draft / confirm / extract / stream / message
+# ---------------------------------------------------------------------------
+#
+# The legacy POST /cases/ above takes a fully-typed payload from the judge.
+# The new intake flow inverts this: the judge picks a domain and uploads
+# typed documents; the extractor proposes fields; the judge confirms via
+# the chat surface; only then does the case reach `pending` and become
+# eligible for the 9-agent pipeline.
+
+
+@router.post(
+    "/draft",
+    response_model=CaseResponse,
+    status_code=status.HTTP_201_CREATED,
+    operation_id="create_case_draft",
+    summary="Create a draft case for docs-as-source-of-truth intake",
+)
+async def create_case_draft(
+    body: CaseDraftCreateRequest,
+    db: DBSession,
+    current_user: User = require_role(UserRole.judge),
+) -> dict[str, Any]:
+    from src.models.domain import Domain as DomainModel
+
+    domain_row: DomainModel | None = None
+    if body.domain_id is not None:
+        domain_row = await db.get(DomainModel, body.domain_id)
+        if domain_row is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Domain {body.domain_id} not found",
+            )
+    elif body.domain is not None:
+        result = await db.execute(
+            select(DomainModel).where(DomainModel.code == body.domain.value)
+        )
+        domain_row = result.scalar_one_or_none()
+        if domain_row is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Domain seed row missing — contact platform team",
+            )
+
+    if domain_row is not None and not domain_row.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Domain '{domain_row.code}' is not active",
+        )
+
+    legacy_domain = body.domain
+    if legacy_domain is None and domain_row is not None:
+        try:
+            legacy_domain = CaseDomain(domain_row.code)
+        except ValueError:
+            legacy_domain = None
+
+    case = Case(
+        id=uuid4(),
+        domain=legacy_domain,
+        domain_id=domain_row.id if domain_row else None,
+        filed_date=body.filed_date,
+        status=CaseStatus.draft,
+        created_by=current_user.id,
+    )
+    db.add(case)
+    await db.flush()
+    # _serialize_case_summary + _build_jurisdiction_summary +
+    # _extract_escalation_reason + _build_pipeline_progress walk six lazy
+    # relationships. On the legacy create path ≥2 parties are always
+    # populated in session memory, so `case.parties` never lazy-loads —
+    # but `case.facts`, `case.audit_logs`, etc. still would. The old path
+    # gets away with it because those collections are only touched if
+    # facts/audit rows exist, which for a freshly-created case is always
+    # empty and returns fast from the ORM's null-marker path (not a real
+    # query). For a draft created with NO parties, the very first
+    # relationship access trips the greenlet wall before any of that
+    # happy-path short-circuiting kicks in. Refresh them all so the
+    # collections materialise as real (empty) lists.
+    await db.refresh(
+        case,
+        ["parties", "documents", "reopen_requests", "facts", "audit_logs"],
+    )
+    if case.domain_id:
+        await db.refresh(case, ["domain_ref"])
+    return _serialize_case_summary(case)
+
+
+@router.post(
+    "/{case_id}/confirm",
+    response_model=CaseResponse,
+    status_code=status.HTTP_200_OK,
+    operation_id="confirm_case_intake",
+    summary="Judge confirms extracted fields — transitions draft/awaiting_intake_confirmation → pending",
+)
+async def confirm_case_intake(
+    case_id: UUID,
+    body: CaseConfirmRequest,
+    db: DBSession,
+    current_user: User = require_role(UserRole.judge),
+) -> dict[str, Any]:
+    # Eager-load every collection we'll touch before returning: parties
+    # (mutated below), plus the relationships the summary serializer walks
+    # (documents, facts, reopen_requests, audit_logs, domain_ref). Without
+    # selectinload, `case.parties` would lazy-load, which triggers an
+    # autoflush — and with dirty scalar attributes already pending on the
+    # session that flush hits asyncpg outside an active greenlet and 500s.
+    result = await db.execute(
+        select(Case)
+        .where(Case.id == case_id)
+        .options(
+            selectinload(Case.parties),
+            selectinload(Case.documents),
+            selectinload(Case.facts),
+            selectinload(Case.reopen_requests),
+            selectinload(Case.audit_logs),
+            selectinload(Case.domain_ref),
+        )
+    )
+    case = result.scalar_one_or_none()
+    if case is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
+    if case.created_by != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+
+    if case.status not in (
+        CaseStatus.draft,
+        CaseStatus.extracting,
+        CaseStatus.awaiting_intake_confirmation,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Case cannot be confirmed from status {case.status.value}",
+        )
+
+    # Domain-specific validation was loosened on CaseConfirmRequest (no
+    # closed offence-code whitelist), but we still enforce the SCT
+    # jurisdictional caps that the Act fixes in statute.
+    if case.domain == CaseDomain.small_claims:
+        if body.claim_amount is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Small-claims matters require claim_amount at confirm",
+            )
+        if body.claim_amount > 30000:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="SCT claim_amount exceeds the $30,000 jurisdiction limit.",
+            )
+        if body.claim_amount > 20000 and not body.consent_to_higher_claim_limit:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="SCT claim_amount above $20,000 requires consent_to_higher_claim_limit.",
+            )
+    if case.domain == CaseDomain.traffic_violation and not body.offence_code:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Traffic matters require offence_code at confirm",
+        )
+
+    case.title = body.title.strip()
+    case.description = body.description.strip() if body.description else None
+    case.filed_date = body.filed_date
+    case.claim_amount = body.claim_amount
+    case.consent_to_higher_claim_limit = body.consent_to_higher_claim_limit
+    case.offence_code = body.offence_code
+    case.status = CaseStatus.pending
+
+    # Replace parties wholesale — confirm is authoritative. The Party rows
+    # have ON DELETE CASCADE so orphans are cleaned up automatically.
+    for existing in list(case.parties):
+        await db.delete(existing)
+    for party in body.parties:
+        case.parties.append(
+            Party(
+                id=uuid4(),
+                name=party.name.strip(),
+                role=party.role,
+                contact_info=party.contact_info,
+            )
+        )
+
+    await db.commit()
+    # commit() expires all ORM attributes. Refresh scalars first, then the
+    # lazy collections the serializer walks, to avoid MissingGreenlet.
+    await db.refresh(case)
+    await db.refresh(
+        case,
+        ["parties", "documents", "reopen_requests", "facts", "audit_logs"],
+    )
+    if case.domain_id:
+        await db.refresh(case, ["domain_ref"])
+
+    # Close the intake stream for any subscribers still listening.
+    from src.services.intake_events import publish_intake_event
+
+    await publish_intake_event(
+        case_id,
+        {"type": "confirmed", "ts": datetime.now(UTC).isoformat()},
+    )
+
+    return _serialize_case_summary(case)
+
+
+@router.post(
+    "/{case_id}/intake/extract",
+    response_model=MessageResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    operation_id="trigger_intake_extraction",
+    summary="(Re-)enqueue intake extraction for a draft case",
+)
+async def trigger_intake_extraction(
+    case_id: UUID,
+    db: DBSession,
+    current_user: User = require_role(UserRole.judge),
+) -> MessageResponse:
+    case = await db.get(Case, case_id)
+    if case is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
+    if case.created_by != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+    if case.status not in (
+        CaseStatus.draft,
+        CaseStatus.extracting,
+        CaseStatus.awaiting_intake_confirmation,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Intake extraction not valid from status {case.status.value}",
+        )
+
+    from src.models.pipeline_job import PipelineJobType
+    from src.workers.outbox import enqueue_outbox_job
+
+    case.status = CaseStatus.extracting
+    await enqueue_outbox_job(db, case_id=case_id, job_type=PipelineJobType.intake_extraction)
+    await db.commit()
+    return MessageResponse(message="Intake extraction enqueued")
+
+
+@router.post(
+    "/{case_id}/intake/message",
+    response_model=MessageResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    operation_id="send_intake_message",
+    summary="Judge correction on the intake chat — re-runs extraction",
+)
+async def send_intake_message(
+    case_id: UUID,
+    body: CaseIntakeMessageRequest,
+    db: DBSession,
+    current_user: User = require_role(UserRole.judge),
+) -> MessageResponse:
+    case = await db.get(Case, case_id)
+    if case is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
+    if case.created_by != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+    if case.status not in (
+        CaseStatus.draft,
+        CaseStatus.extracting,
+        CaseStatus.awaiting_intake_confirmation,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Cannot accept intake message from status {case.status.value}",
+        )
+
+    from src.models.pipeline_job import PipelineJobType
+    from src.workers.outbox import enqueue_outbox_job
+
+    case.status = CaseStatus.extracting
+    await enqueue_outbox_job(
+        db,
+        case_id=case_id,
+        job_type=PipelineJobType.intake_extraction,
+        payload={"correction": body.content},
+    )
+    await db.commit()
+
+    # Echo the judge's message on the stream so the frontend chat renders
+    # it immediately without waiting for the worker to pick the job up.
+    from src.services.intake_events import publish_intake_event
+
+    await publish_intake_event(
+        case_id,
+        {
+            "type": "user_message",
+            "content": body.content,
+            "ts": datetime.now(UTC).isoformat(),
+        },
+    )
+    return MessageResponse(message="Correction received — re-extracting")
+
+
+@router.get(
+    "/{case_id}/intake/stream",
+    operation_id="stream_intake_events",
+    summary="SSE stream of intake extraction events (ai-sdk UIMessage format)",
+    description=(
+        "Server-Sent Events stream backed by the intake Redis pub/sub channel. "
+        "Closes on `done`, `error`, or `confirmed` events."
+    ),
+)
+async def stream_intake_events(
+    case_id: UUID,
+    request: Request,
+    db: DBSession,
+    current_user: CurrentUser,
+) -> StreamingResponse:
+    case = await _load_case_for_export(case_id, db, current_user)
+
+    from src.services.intake_events import subscribe_intake_events
+
+    async def event_generator():
+        # Snapshot-on-connect so a client that reconnects after the worker
+        # already finished still sees the latest extraction without polling.
+        if case.intake_extraction is not None:
+            snap = {
+                "type": "done"
+                if case.status == CaseStatus.awaiting_intake_confirmation
+                else "status",
+                "phase": "reconnect_snapshot",
+                "extraction": case.intake_extraction,
+                "ts": datetime.now(UTC).isoformat(),
+            }
+            yield f"data: {json.dumps(snap)}\n\n"
+
+        queue: asyncio.Queue[str] = asyncio.Queue()
+        producer_done = asyncio.Event()
+
+        async def _producer():
+            try:
+                async for payload in subscribe_intake_events(case_id):
+                    await queue.put(payload)
+            finally:
+                producer_done.set()
+
+        producer_task = asyncio.create_task(_producer())
+        stream_start = time.monotonic()
+        try:
+            while True:
+                if await request.is_disconnected():
+                    return
+                remaining = SSE_WATCHDOG_SECONDS - (time.monotonic() - stream_start)
+                if remaining <= 0:
+                    yield "data: " + json.dumps(
+                        {
+                            "type": "error",
+                            "message": "watchdog_timeout",
+                            "ts": datetime.now(UTC).isoformat(),
+                        }
+                    ) + "\n\n"
+                    return
+                try:
+                    payload = await asyncio.wait_for(
+                        queue.get(), timeout=min(SSE_HEARTBEAT_SECONDS, remaining)
+                    )
+                except TimeoutError:
+                    if producer_done.is_set() and queue.empty():
+                        return
+                    yield ": keepalive\n\n"
+                    continue
+                yield f"data: {payload}\n\n"
+                if producer_done.is_set() and queue.empty():
+                    return
+        finally:
+            producer_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await producer_task
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get(
@@ -450,7 +890,7 @@ async def list_cases(
 ) -> dict[str, Any]:
     query = select(Case)
 
-    if current_user.role in {UserRole.clerk, UserRole.judge}:
+    if current_user.role == UserRole.judge:
         query = query.where(Case.created_by == current_user.id)
 
     if status_filter:
@@ -501,6 +941,7 @@ async def list_cases(
         selectinload(Case.facts),
         selectinload(Case.reopen_requests),
         selectinload(Case.audit_logs),
+        selectinload(Case.domain_ref),
     )
     query = query.offset((page - 1) * per_page).limit(per_page)
     result = await db.execute(query)
@@ -545,18 +986,13 @@ async def get_case(
             selectinload(Case.hearing_analyses),
             selectinload(Case.reopen_requests),
             selectinload(Case.audit_logs),
+            selectinload(Case.domain_ref),
         )
     )
     case = result.scalar_one_or_none()
 
     if not case:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
-
-    if current_user.role == UserRole.clerk and case.created_by != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to view this case",
-        )
 
     return _serialize_case_detail(case)
 
@@ -665,20 +1101,18 @@ async def stream_pipeline_status(
         # Producer-consumer pattern: a background task owns the subscribe()
         # generator for its full lifetime and pushes payloads onto a queue.
         # The consumer wakes up every SSE_HEARTBEAT_SECONDS to emit keepalives
-        # and check for client disconnect / watchdog expiry. This avoids the
-        # wait_for-on-__anext__ pitfall where a heartbeat-driven cancellation
-        # would tear down the underlying pubsub mid-iteration.
+        # and check for client disconnect / watchdog expiry.
         queue: asyncio.Queue[str] = asyncio.Queue()
         producer_done = asyncio.Event()
 
-        async def _producer():
+        async def _redis_producer():
             try:
                 async for payload in subscribe_pipeline_events(case_id):
                     await queue.put(payload)
             finally:
                 producer_done.set()
 
-        producer_task = asyncio.create_task(_producer())
+        producer_task = asyncio.create_task(_redis_producer())
         stream_start = time.monotonic()
 
         try:
@@ -742,10 +1176,16 @@ async def _run_case_pipeline(case_id: UUID) -> None:
     from src.shared.config import settings
 
     async with async_session() as db:
+        from sqlalchemy.orm import joinedload as _joinedload
+
         case_result = await db.execute(
             select(Case)
             .where(Case.id == case_id)
-            .options(selectinload(Case.documents), selectinload(Case.parties))
+            .options(
+                selectinload(Case.documents),
+                selectinload(Case.parties),
+                _joinedload(Case.domain_ref),
+            )
         )
         case = case_result.scalar_one_or_none()
         if not case:
@@ -758,12 +1198,21 @@ async def _run_case_pipeline(case_id: UUID) -> None:
                 "filename": document.filename,
                 "file_type": _optional_text(getattr(document, "file_type", None)),
                 "openai_file_id": _optional_text(getattr(document, "openai_file_id", None)),
+                "pages": getattr(document, "pages", None),
             }
             for document in case.documents
         ]
+
+        domain_vector_store_id = (
+            case.domain_ref.vector_store_id
+            if case.domain_ref and case.domain_ref.is_active
+            else None
+        )
+
         initial_state = CaseState(
             case_id=str(case.id),
-            domain=case.domain.value,
+            domain=case.domain.value if case.domain else None,
+            domain_vector_store_id=domain_vector_store_id,
             status="processing",
             parties=[
                 {
@@ -785,15 +1234,9 @@ async def _run_case_pipeline(case_id: UUID) -> None:
         )
 
     try:
-        if settings.use_mesh_runner:
-            from src.pipeline.mesh_runner_factory import get_mesh_runner
+        from src.pipeline.graph.runner import GraphPipelineRunner
 
-            runner = await get_mesh_runner()
-            final_state = await runner.run(initial_state, run_id=initial_state.run_id)
-        else:
-            from src.pipeline.runner import PipelineRunner
-
-            final_state = await PipelineRunner().run(initial_state)
+        final_state = await GraphPipelineRunner().run(initial_state)
     except Exception:
         logger.exception("Pipeline run failed for case_id=%s", case_id)
         async with async_session() as db:
@@ -832,6 +1275,27 @@ async def _run_case_pipeline(case_id: UUID) -> None:
                 state=final_state,
             )
 
+    # Close the SSE stream from the backend side: the frontend treats
+    # `agent=pipeline` + `phase=awaiting_review|terminal` as the
+    # authoritative shutdown signal, but the sequential runner never
+    # emits it on its own. Without this, the browser holds an open
+    # EventSource well past the gate pause and never shows the gate
+    # review UI until the next poll tick catches up.
+    from src.api.schemas.pipeline_events import PipelineProgressEvent
+    from src.services.pipeline_events import publish_progress
+
+    if status_val.startswith("awaiting_review_gate"):
+        close_event = PipelineProgressEvent(
+            case_id=case_id,
+            agent="pipeline",
+            phase="awaiting_review",
+            step=None,
+            total=9,
+            ts=datetime.now(UTC),
+            detail={"reason": "gate_pause", "stopped_at": status_val},
+        )
+        await publish_progress(close_event)
+
 
 @router.post(
     "/{case_id}/process",
@@ -861,12 +1325,6 @@ async def process_case(
     if not case:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
 
-    if current_user.role == UserRole.clerk and case.created_by != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to run this case",
-        )
-
     if not case.documents:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -894,6 +1352,86 @@ async def process_case(
     await db.commit()
 
     return MessageResponse(message="Pipeline started")
+
+
+# Statuses from which the pipeline can be restarted by a judge.
+_RESTARTABLE_STATUSES = (
+    CaseStatus.failed,
+    CaseStatus.failed_retryable,
+    CaseStatus.escalated,
+)
+
+
+@router.post(
+    "/{case_id}/restart",
+    response_model=MessageResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    operation_id="restart_case_pipeline",
+    summary="Restart a failed or escalated case pipeline",
+    description=(
+        "Reset a case in 'failed', 'failed_retryable', or 'escalated' status back to "
+        "'pending' and re-enqueue the full 9-agent pipeline. All prior analysis results "
+        "are retained in the database for audit purposes."
+    ),
+    responses={
+        403: {"model": ErrorResponse, "description": "Not authorized"},
+        404: {"model": ErrorResponse, "description": "Case not found"},
+        409: {"model": ErrorResponse, "description": "Case is not in a restartable state"},
+    },
+)
+async def restart_case_pipeline(
+    case_id: UUID,
+    db: DBSession,
+    current_user: User = require_role(UserRole.judge),
+) -> MessageResponse:
+    from src.models.pipeline_job import PipelineJobType
+    from src.workers.outbox import enqueue_outbox_job
+
+    result = await db.execute(
+        select(Case).where(Case.id == case_id).options(selectinload(Case.documents))
+    )
+    case = result.scalar_one_or_none()
+    if not case:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
+    if case.created_by != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+
+    if not case.documents:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Case has no uploaded documents — cannot restart pipeline",
+        )
+
+    flip = await db.execute(
+        update(Case)
+        .where(Case.id == case_id, Case.status.in_(_RESTARTABLE_STATUSES))
+        .values(status=CaseStatus.processing)
+        .returning(Case.id)
+    )
+    if flip.scalar_one_or_none() is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Case cannot be restarted from its current state. "
+                "Only 'failed', 'failed_retryable', or 'escalated' cases can be restarted."
+            ),
+        )
+
+    db.add(
+        AuditLog(
+            case_id=case_id,
+            agent_name="judge",
+            action="pipeline_restarted",
+            input_payload={
+                "restarted_by": str(current_user.id),
+                "previous_status": case.status.value,
+            },
+        )
+    )
+    await enqueue_outbox_job(db, case_id=case_id, job_type=PipelineJobType.case_pipeline)
+    await db.commit()
+
+    return MessageResponse(message="Pipeline restarted")
 
 
 _VALID_GATE_NAMES = {"gate1", "gate2", "gate3", "gate4"}
@@ -981,7 +1519,7 @@ async def rerun_gate(
     current_user: User = require_role(UserRole.judge),
 ) -> MessageResponse:
     from src.models.pipeline_job import PipelineJobType
-    from src.pipeline.runner import GATE_AGENTS
+    from src.pipeline.graph.prompts import GATE_AGENTS
     from src.workers.outbox import enqueue_outbox_job
 
     if gate_name not in _VALID_GATE_NAMES:

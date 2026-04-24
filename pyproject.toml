@@ -8,7 +8,11 @@ version = "0.1.0"
 description = "Multi-agent AI judicial decision-support system"
 requires-python = ">=3.12"
 dependencies = [
-    "solace-agent-mesh>=0.5.0",
+    "langgraph>=0.2.0",
+    "langchain-core>=0.3.0",
+    "langchain-openai>=0.2.0",
+    "langgraph-checkpoint-postgres>=2.0.0",
+    "deepdiff>=8.0.0",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.34.0",
     "sqlalchemy[asyncio]>=2.0.35",
@@ -25,6 +29,10 @@ dependencies = [
     "python-multipart>=0.0.18",
     "arq~=0.26.3",
     "mlflow>=2.18,<3",
+    # Layer-2 prompt-injection classifier for RAG corpus sanitization at ingest.
+    # Wraps protectai/deberta-v3-base-prompt-injection-v2 (Apache-2.0, 95%+ recall).
+    # See docs/security/rag-corpus-sanitization.md for architecture notes and citations.
+    "llm-guard==0.3.16",
 ]
 
 [project.optional-dependencies]
@@ -66,9 +74,20 @@ warn_unused_configs = true
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["solace_agent_mesh.*", "passlib.*"]
+module = ["passlib.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = [
+    "integration: marks tests requiring live infrastructure (LLM, broker, Redis) — skipped in CI",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+    "pytest-asyncio>=1.3.0",
+    "pytest-cov>=7.1.0",
+    "pytest-mock>=3.15.1",
+]

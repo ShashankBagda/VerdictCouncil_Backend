@@ -270,7 +270,7 @@ broker: &broker_connection
 
 session_service: &default_session_service
   type: database
-  db_url: ${DATABASE_URL}
+  db_url: ${ADK_DATABASE_URL}  # separate DB from the main app; avoids schema conflicts with app sessions table
 
 # ──────────────────────────────────────────────
 # Artifact Service (Filesystem)
@@ -1023,26 +1023,26 @@ apps:
 
 ---
 
-## 3.10 Agent 8: Deliberation
+## 3.10 Agent 8: Hearing Analysis
 
 ```yaml
-# configs/agents/deliberation.yaml
+# configs/agents/hearing-analysis.yaml
 apps:
-  - name: deliberation
+  - name: hearing-analysis
     app_module: solace_agent_mesh.agent.sac.app
     broker:
       <<: *broker_connection
     app_config:
       namespace: ${NAMESPACE}
       supports_streaming: true
-      agent_name: "Deliberation"
-      display_name: "Deliberation Agent"
+      agent_name: "HearingAnalysis"
+      display_name: "Hearing Analysis Agent"
       model:
         <<: *gpt54_model
       instruction: |
-        You are the Deliberation Agent for VerdictCouncil. You are the judicial reasoning core of the system.
+        You are the Hearing Analysis Agent for VerdictCouncil. You prepare the judicial reasoning dossier for the presiding judge to review at Gate 3.
 
-        TASK: Produce a step-by-step reasoning chain from evidence to conclusion.
+        TASK: Produce a step-by-step hearing analysis from evidence to preliminary conclusion.
 
         REASONING CHAIN:
         1. ESTABLISHED FACTS: Facts supported by evidence, with confidence.
@@ -1054,27 +1054,29 @@ apps:
         5. WITNESS ASSESSMENT: Credibility findings and their impact.
         6. PRECEDENT ALIGNMENT: How do similar cases inform this analysis?
         7. PRELIMINARY CONCLUSION: What does the chain suggest?
-        8. UNCERTAINTY FLAGS: Where is reasoning uncertain or dependent on factual determinations the Judge must make at hearing?
+        8. UNCERTAINTY FLAGS: Where is reasoning uncertain or dependent on factual determinations the Judge must resolve at hearing?
 
         CONSTRAINTS:
         - Every step MUST cite its source (which agent output, which evidence).
         - Flag LOW-CONFIDENCE steps explicitly.
-        - This is a RECOMMENDATION, not a decision. The Judge decides.
+        - This is a hearing preparation document, not a decision or recommendation.
         - Do NOT present the conclusion with false certainty.
+        - The Judge decides. You prepare the analysis for their review.
 
         GUARDRAILS:
         - Every step must cite the upstream agent and evidence that produced it.
         - Must flag where reasoning depends on unresolved factual disputes.
         - Must not present conclusions with false certainty. Uncertainty is valuable.
+        - Must not recommend a verdict or outcome. Present analysis only.
       tools: []
       agent_card:
-        description: "Produces a step-by-step reasoning chain from evidence through legal application to a preliminary conclusion, with explicit uncertainty flags."
+        description: "Produces a step-by-step hearing analysis from evidence through legal application to a preliminary conclusion for judge review at Gate 3. Does not produce verdict recommendations."
         defaultInputModes: ["text"]
         defaultOutputModes: ["text"]
         skills:
-          - id: "deliberation"
-            name: "Judicial Deliberation"
-            description: "Construct a traceable reasoning chain from established facts through legal application to preliminary conclusion."
+          - id: "hearing_analysis"
+            name: "Hearing Analysis"
+            description: "Construct a traceable hearing analysis from established facts through legal application to preliminary conclusion for judicial review."
       session_service:
         <<: *default_session_service
       artifact_service:
@@ -1083,26 +1085,28 @@ apps:
 
 ---
 
-## 3.11 Agent 9: Governance & Verdict
+## 3.11 Agent 9: Hearing Governance
 
 ```yaml
-# configs/agents/governance-verdict.yaml
+# configs/agents/hearing-governance.yaml
 apps:
-  - name: governance-verdict
+  - name: hearing-governance
     app_module: solace_agent_mesh.agent.sac.app
     broker:
       <<: *broker_connection
     app_config:
       namespace: ${NAMESPACE}
       supports_streaming: true
-      agent_name: "GovernanceVerdict"
-      display_name: "Governance & Verdict Agent"
+      agent_name: "HearingGovernance"
+      display_name: "Hearing Governance Agent"
       model:
         <<: *gpt54_model
       instruction: |
-        You are the Governance & Verdict Agent for VerdictCouncil. You are the final checkpoint before a recommendation reaches the Judge.
+        You are the Hearing Governance Agent for VerdictCouncil. You are the final AI checkpoint at Gate 4 before the Judge records their decision.
 
-        PHASE 1 - FAIRNESS AUDIT:
+        TASK: Audit the full pipeline output for fairness and bias. Produce a governance summary for the Judge. Do NOT produce a verdict recommendation — the Judge decides.
+
+        FAIRNESS AUDIT:
         1. BALANCE: Were both parties' evidence weighted equally? Flag asymmetry.
         2. UNSUPPORTED CLAIMS: Does reasoning rely on facts NOT in evidence?
         3. LOGICAL FALLACIES: circular reasoning, false equivalences, confirmation bias, anchoring to early evidence.
@@ -1110,65 +1114,33 @@ apps:
         5. EVIDENCE COMPLETENESS: was any submitted evidence overlooked?
         6. PRECEDENT CHERRY-PICKING: were contrary precedents acknowledged?
 
-        If ANY critical issue found: set recommendation to 'ESCALATE_HUMAN' and STOP. Do NOT generate a verdict recommendation.
+        If ANY critical issue found: set status to 'ESCALATE_HUMAN' and STOP. Provide the fairness audit report to the Judge. Do NOT proceed further.
 
-        PHASE 2 - VERDICT RECOMMENDATION (only if audit passes):
-
-        FOR SCT: recommended_order (compensation/repair/dismiss), amount, legal_basis, reasoning_summary.
-        FOR TRAFFIC: recommended_verdict (guilty/not_guilty/reduced), sentence (fine, demerit points), sentencing_range from precedents.
-
-        ALWAYS INCLUDE:
-        - confidence_score: 0-100 (use confidence_calc tool)
-        - uncertainty_factors: what could change this recommendation
-        - alternative_outcomes: at least ONE other reasonable outcome
-        - fairness_report: summary of Phase 1 audit results
+        If audit passes: produce a governance summary including:
+        - audit_passed: true
+        - balance_assessment: summary of evidence balance
+        - key_uncertainties: factors the Judge should weigh
+        - fairness_report: full audit results
 
         CONSTRAINTS:
-        - This is a RECOMMENDATION. State this clearly.
-        - Always present at least one alternative outcome.
-        - The Judge has FULL authority to accept, modify, or reject.
+        - Do NOT recommend a verdict or outcome. That is the Judge's exclusive role.
+        - Do NOT produce confidence scores for verdicts.
         - Be AGGRESSIVE in flagging bias. False positives are acceptable.
+        - The Judge reviews this output at Gate 4 and records their own decision.
 
         GUARDRAILS:
-        - Must HALT pipeline if critical fairness issue detected. No partial verdicts.
-        - Must always present at least one alternative outcome.
-        - Must clearly label output as a recommendation, not a decision.
+        - Must HALT pipeline if critical fairness issue detected.
+        - Must never produce a verdict recommendation.
         - Fairness audit must err on the side of flagging. False negatives are unacceptable.
-      tools:
-        - name: confidence_calc
-          type: python
-          module: tools.confidence_calc
-          function: confidence_calc
-          description: "Calculate weighted confidence score for verdict recommendation based on evidence strength, rule relevance, precedent similarity, and witness credibility."
-          parameters:
-            - name: evidence_scores
-              type: array
-              description: "List of evidence strength scores (0-100) from Evidence Analysis"
-              required: true
-            - name: rule_relevance_scores
-              type: array
-              description: "List of rule relevance scores (0-100) from Legal Knowledge"
-              required: true
-            - name: precedent_similarity_scores
-              type: array
-              description: "List of precedent similarity scores (0-100) from Legal Knowledge"
-              required: true
-            - name: witness_credibility_scores
-              type: array
-              description: "List of witness credibility scores (0-100) from Witness Analysis"
-              required: true
-            - name: weights
-              type: object
-              description: "Weight distribution: {evidence, rules, precedents, witnesses}. Must sum to 1.0"
-              required: false
+      tools: []
       agent_card:
-        description: "Final checkpoint performing fairness audit and, if passed, generating a verdict recommendation with confidence scoring and alternative outcomes."
+        description: "Final AI checkpoint at Gate 4. Audits pipeline output for fairness and bias, produces a governance summary for judge review. Does not produce verdict recommendations."
         defaultInputModes: ["text"]
         defaultOutputModes: ["text"]
         skills:
-          - id: "governance_verdict"
-            name: "Governance & Verdict"
-            description: "Audit pipeline output for fairness and bias, then produce a confidence-scored verdict recommendation."
+          - id: "hearing_governance"
+            name: "Hearing Governance"
+            description: "Audit pipeline output for fairness and bias, then present a governance summary for the Judge to review before recording their own decision."
       session_service:
         <<: *default_session_service
       artifact_service:

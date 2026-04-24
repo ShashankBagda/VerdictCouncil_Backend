@@ -647,7 +647,7 @@ As a judicial officer, I want to review cases that have been escalated by the AI
 - Escalated cases are prominently flagged in the case list and dashboard
 - Escalation reason is displayed clearly (e.g., "Complexity score exceeds threshold", "Governance audit identified critical bias concern")
 - All available analysis up to the point of escalation is accessible to the judge
-- Judge can decide next steps: continue with available analysis, request re-processing with adjusted parameters, refer case to a senior judge, or proceed to hearing without AI support
+- Judge can decide next steps: continue with available analysis, request re-processing with adjusted parameters, or proceed to hearing without AI support
 - Escalation decision and rationale are logged in the audit trail
 
 **Happy Flow:**
@@ -656,9 +656,8 @@ As a judicial officer, I want to review cases that have been escalated by the AI
 3. Judge reviews the available analysis: Agents 1-2 have completed, but remaining agents have not run due to the escalation.
 4. Judge evaluates the escalation reason and determines that the complexity is manageable with the available AI support.
 5. Judge selects "Continue Processing" — the system resumes the pipeline from Agent 3 onwards.
-6. Alternatively, if the judge agreed the case was too complex, they could select "Refer to Senior Judge" and add a note explaining the referral.
-7. The judge's decision and rationale are recorded in the audit trail.
-8. The case proceeds according to the judge's direction.
+6. The judge's decision and rationale are recorded in the audit trail.
+7. The case proceeds according to the judge's direction.
 
 ---
 
@@ -891,12 +890,12 @@ As an ops engineer, I want to see real-time health metrics for each of the 9 age
 As an administrator, I want to create, update, deactivate, and assign roles to user accounts, so that only authorized judicial officers and staff can access the system and their access matches their responsibilities.
 
 **Acceptance Criteria:**
-- Admin can list all accounts with filter by role (judge, senior_judge, admin) and status (active, inactive)
+- Admin can list all accounts with filter by role (judge, admin) and status (active, inactive)
 - Admin can create a new account with name, email, role, and either an initial password or an SSO identity binding
 - Admin can deactivate an account; deactivation is non-destructive and preserves the audit trail and historical case assignments
 - Admin can trigger a password reset (sends email or generates a one-time reset link)
 - Admin can assign or revoke roles; role changes are logged with the acting admin's user ID
-- System enforces role-based route access — judges see only case views, senior judges additionally see the refer-to inbox (cf. US-024 follow-up), admins additionally see Settings/Ops
+- System enforces role-based route access — judges see case views and AI assistant features; admins additionally see Settings/Ops (vector store management, pipeline health, cost config)
 - Failed password resets and role changes are written to the audit trail
 
 **Happy Flow:**
@@ -904,9 +903,9 @@ As an administrator, I want to create, update, deactivate, and assign roles to u
 2. Admin clicks "New User" and enters name "J. Tan", email "j.tan@courts.gov.sg", role "judge".
 3. System creates the account and sends an email with a one-time setup link.
 4. Admin later sees J. Tan in the active list after first login.
-5. Three months later the admin changes J. Tan's role from "judge" to "senior_judge".
-6. The change is logged: "2026-07-01 — admin Douglas Sim — role change — J. Tan — judge → senior_judge".
-7. On next login, J. Tan sees the senior judge case-referral inbox.
+5. If J. Tan's responsibilities change, admin updates the role (e.g., judge → admin).
+6. The change is logged: "2026-07-01 — admin Douglas Sim — role change — J. Tan — judge → admin".
+7. On next login, J. Tan sees the Settings/Ops views for their new role.
 
 ---
 
@@ -978,7 +977,7 @@ As a judicial officer, I want to amend a previously recorded judicial decision w
 - Original decision is preserved; an amendment creates a new decision record linked to its predecessor
 - Audit trail shows the full chain: original → amendment 1 → amendment 2, each with timestamp and judge ID
 - Amendments appear in the exported case report (US-027) as an appendix
-- Only the recording judge or a senior judge can amend; amendment attempts by other users are rejected
+- Only the recording judge can amend; amendment attempts by other users are rejected
 - Notification to parties is **out of scope** for the MVP (placeholder for future email integration)
 
 **Happy Flow:**
@@ -994,78 +993,25 @@ As a judicial officer, I want to amend a previously recorded judicial decision w
 
 ### US-037: Reopen a Closed Case
 
-**Actor:** Tribunal Magistrate / Judge (with senior judge approval)
+**Actor:** Tribunal Magistrate / Judge
 
-As a judicial officer, I want to reopen a closed case with appropriate justification and approval, so that new evidence, appeals, or clerical errors can be addressed without losing the original case history.
+As a judicial officer, I want to reopen a closed case with a recorded justification, so that new evidence, appeals, or clerical errors can be addressed without losing the original case history.
 
 **Acceptance Criteria:**
-- Reopen is gated: only senior judges can approve reopening; a regular judge can only request it
-- Reopen request requires reason (`new_evidence`, `appeal`, `clerical_error`, `procedural_defect`), written justification, and any attached documents
-- When approved, the case transitions from "Closed" to "Reopened" and the full pipeline can be re-triggered if needed
+- Judge can reopen any closed case they own by providing a reason (`new_evidence`, `appeal`, `clerical_error`, `procedural_defect`) and written justification
+- Reopen action transitions the case from "Closed" to "Reopened" and allows the full pipeline to be re-triggered if needed
 - Original closure record, decision, and audit trail are preserved and visible alongside the reopened analysis
 - Reopened cases are clearly flagged in the case list
-- Reopening is logged in the audit trail with both the requesting judge and the approving senior judge
+- Reopening is logged in the audit trail with the judge's user ID, reason, and justification
 - Reopened cases can be re-closed following the normal flow
 
 **Happy Flow:**
 1. Judge is notified that a claimant has submitted new evidence on a case closed 3 weeks ago.
-2. Judge navigates to the closed case and clicks "Request Reopen".
-3. Judge enters reason "new_evidence", justification "Claimant has produced the original quotation document that was not available at the original hearing".
-4. Judge attaches the new document and submits the request.
-5. System routes the request to the senior judge inbox.
-6. Senior judge reviews the justification and new evidence, clicks "Approve Reopen".
-7. Case status changes to "Reopened", pipeline is re-triggered with the new document (US-005 flow), and the original judge is notified.
-8. Original closure record remains visible in the case history.
+2. Judge navigates to the closed case and clicks "Reopen Case".
+3. Judge selects reason "new_evidence" and enters justification "Claimant has produced the original quotation document that was not available at the original hearing".
+4. Judge attaches the new document and confirms.
+5. Case status changes to "Reopened" and pipeline is re-triggered with the new document (US-005 flow).
+6. Original closure record remains visible in the case history.
+7. Reopen action is recorded in the audit trail with timestamp and judge ID.
 
----
-
-## 1.10 Senior Judge Operations
-
-### US-040: Senior Judge — Review Referred Cases
-
-**Actor:** Senior Judge
-
-As a senior judicial officer, I want a single inbox that surfaces every item routed to me for senior-judge action — escalation referrals, decision amendments by other judges, and reopen requests — so that I can review, approve, reject, or reassign each one without hunting through individual cases.
-
-**Acceptance Criteria:**
-- Inbox is gated by the `senior_judge` role (assigned via US-033); regular judges cannot see it
-- Inbox aggregates three referral sources into a single ranked list:
-  - **Escalations** referred from US-024 (judge clicked "Refer to Senior Judge" on an escalated case)
-  - **Reopen requests** from US-037 awaiting senior approval
-  - **Amendments-of-record** flagged from US-036 when the amending judge is not the original recording judge
-- Each inbox entry shows: case ID, originating judge, referral type, reason, age (time since referral), and a one-line preview
-- Entries are sorted by configurable rank (default: oldest first within priority tier; `clerical_error` and `appeal` reopen reasons rank above `procedural_defect`)
-- Senior judge can take one of four actions per entry:
-  - **Approve** — proceeds with the requested action (reopen the case, accept the amendment, take ownership of the escalation)
-  - **Reject** — refuses the request with a written reason; routes a notification back to the originating judge
-  - **Reassign** — routes the item to another senior judge in the pool
-  - **Request more info** — sends the entry back to the originating judge with a question; the entry leaves the inbox until the judge responds
-- All four actions are recorded in the audit trail (US-026) with the senior judge ID, action type, timestamp, and reason text
-- Inbox displays a counter badge with unread / unactioned count, visible from the global navigation
-- Inbox supports filtering by referral type, originating judge, and case domain (SCT / Traffic)
-- A senior judge cannot approve their own referral (e.g., a senior judge cannot approve a reopen they themselves requested) — this enforces a two-person rule for sensitive transitions
-- When a senior judge takes action, the originating judge receives an in-app notification with the outcome and any reason text
-- All inbox state changes are emitted as audit events on the message bus so that other dashboards (US-029) can reflect counts in real time
-
-**Happy Flow:**
-1. Senior judge logs in (US-030) and sees a "Senior Inbox" badge in the global navigation showing **4 pending items**.
-2. Senior judge clicks the badge and lands on the inbox view, sorted oldest-first.
-3. The top entry is a **reopen request** for case `SCT-2026-0421` from Judge Tan, reason `new_evidence`, justification "Claimant has produced the original quotation document that was not available at the original hearing", age 18 hours.
-4. Senior judge clicks the entry; the right pane opens the case context with the new document, the original decision, and the audit trail.
-5. Senior judge reviews the document, finds the justification reasonable, and clicks **Approve**.
-6. System transitions case `SCT-2026-0421` to "Reopened" (US-037 flow), re-triggers the pipeline (US-005), records an audit event, and notifies Judge Tan that the reopen was approved.
-7. The inbox badge decrements to **3 pending items** and the next entry surfaces.
-8. The next entry is an **escalation referral** from Judge Lim on a Traffic case where Agent 9 raised a critical fairness concern (US-024). Senior judge reviews the agent output, decides this needs a different specialist, and clicks **Reassign** → selects "Senior Judge Wong".
-9. System routes the entry to Senior Judge Wong's inbox, removes it from the current inbox, and records the reassignment in the audit trail.
-10. Senior judge processes the remaining two entries similarly, ending the session with an empty inbox.
-
-**Domain Notes:**
-- SCT: Reopen approvals on cases above the $20,000 threshold should display a warning prompt confirming the senior judge is aware of the jurisdictional limit before approving.
-- Traffic: Escalation referrals on cases involving licence-suspension recommendations should display the proposed sentence prominently, since the senior judge may need to take ownership of sentencing.
-
-**Notes:**
-- US-038 and US-039 are intentionally reserved for follow-up senior-judge stories (e.g., a future "Bulk-Action on Inbox" and "Senior-Judge Analytics Dashboard"), which are out of scope for the MVP.
-- The notification mechanism in this story is **in-app only** for the MVP. Email/SMS notifications are deferred and tracked separately.
-
----
 

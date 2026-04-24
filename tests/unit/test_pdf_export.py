@@ -210,8 +210,8 @@ class TestCaseReportPdfEndpoint:
         assert resp.status_code == 404
 
     async def test_clerk_cannot_export_other_users_case(self, monkeypatch):
-        owner = _make_user(role=UserRole.clerk, email="owner@example.com")
-        intruder = _make_user(role=UserRole.clerk, email="intruder@example.com")
+        owner = _make_user(role=UserRole.admin, email="owner@example.com")
+        intruder = _make_user(role=UserRole.admin, email="intruder@example.com")
         case_id = uuid.uuid4()
         case_row = _make_case_row(case_id, owner.id)
         mock_db = _build_mock_session(case_row)

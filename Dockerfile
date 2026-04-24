@@ -26,6 +26,6 @@ RUN groupadd -r vcagent && useradd -r -g vcagent vcagent
 USER vcagent
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/app
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
-    CMD python -c "import src.shared.config; print('ok')"
-ENTRYPOINT ["python", "-m", "solace_agent_mesh.cli.main"]
-CMD ["--config", "/app/configs/agents/case-processing.yaml"]
+    CMD python -c "import httpx; httpx.get('http://localhost:8001/api/v1/health')" || exit 1
+ENTRYPOINT ["uvicorn"]
+CMD ["src.api.app:app", "--host", "0.0.0.0", "--port", "8001"]

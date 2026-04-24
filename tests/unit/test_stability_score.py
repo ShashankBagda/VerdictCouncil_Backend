@@ -71,10 +71,10 @@ def _decided_case_state(verdict: str = "liable", confidence: int = 80) -> CaseSt
 
 
 def _mock_runner_with_verdicts(verdicts: list[str]):
-    """Return a mock MeshPipelineRunner whose run_from returns a state with the next verdict.
+    """Return a mock GraphPipelineRunner whose run_what_if returns a state with the next verdict.
 
     compute_stability_score runs N perturbations in parallel via
-    asyncio.gather. Each call to run_from consumes one verdict from the
+    asyncio.gather. Each call to run_what_if consumes one verdict from the
     list (cycled), letting the test assert how many perturbations held
     vs. flipped against the original.
     """
@@ -82,7 +82,7 @@ def _mock_runner_with_verdicts(verdicts: list[str]):
     verdict_idx = [0]
     lock = asyncio.Lock()
 
-    async def mock_run_from(state, start_agent, run_id=None):
+    async def mock_run_what_if(state, start_agent, run_id=None):
         async with lock:
             v = verdicts[verdict_idx[0] % len(verdicts)]
             verdict_idx[0] += 1
@@ -96,7 +96,7 @@ def _mock_runner_with_verdicts(verdicts: list[str]):
         }
         return state
 
-    runner.run_from = AsyncMock(side_effect=mock_run_from)
+    runner.run_what_if = AsyncMock(side_effect=mock_run_what_if)
     return runner
 
 

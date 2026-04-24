@@ -27,8 +27,8 @@ We consolidated to 9 agents using four guiding principles:
 | 5 | Witness Analysis | Witness Identification + Testimony Anticipation + Credibility Assessment | 3 → 1 |
 | 6 | Legal Knowledge | Legal Rule Retrieval + Precedent Retrieval | 2 → 1 |
 | 7 | Argument Construction | Claim/Prosecution Advocate + Defense/Respondent Advocate + Balanced Assessment | 3 → 1 |
-| 8 | Deliberation | Deliberation Engine | 1 → 1 |
-| 9 | Governance & Verdict | Fairness/Bias Audit + Verdict Recommendation | 2 → 1 |
+| 8 | Hearing Analysis | Hearing Analysis (renamed from Deliberation) | 1 → 1 |
+| 9 | Hearing Governance | Fairness/Bias Audit + Gate 4 Review Preparation | 2 → 1 |
 | | **Total** | | **18 → 9** |
 
 **Net reduction:** 9 fewer inter-agent transitions, approximately 50% reduction in orchestration overhead.
@@ -91,9 +91,9 @@ The 9 agents are organized into 4 logical layers reflecting the judicial reasoni
 │  │  (gpt-5)              │    │  (gpt-5.4)                    │  │
 │  └──────────────────────┘    └──────────────────────────────┘  │
 ├─────────────────────────────────────────────────────────────────┤
-│                   LAYER 4: JUDICIAL DECISION                    │
+│               LAYER 4: HEARING PREPARATION & GOVERNANCE         │
 │  ┌──────────────────────┐    ┌──────────────────────────────┐  │
-│  │  Deliberation         │───▶│  Governance & Verdict         │  │
+│  │  Hearing Analysis     │───▶│  Hearing Governance           │  │
 │  │  (gpt-5.4)            │    │  (gpt-5.4)                    │  │
 │  └──────────────────────┘    └──────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
@@ -104,13 +104,13 @@ The 9 agents are organized into 4 logical layers reflecting the judicial reasoni
 | **Layer 1: Case Preparation** | Case Processing, Complexity & Routing | Intake, structuring, jurisdiction validation, complexity assessment, routing | gpt-5.4-nano, gpt-5.4-nano |
 | **Layer 2: Evidence Reconstruction** | Evidence Analysis, Fact Reconstruction, Witness Analysis | Analyze evidence, extract facts, build timeline, assess witnesses | gpt-5, gpt-5, gpt-5-mini |
 | **Layer 3: Legal Reasoning** | Legal Knowledge, Argument Construction | Retrieve applicable law and precedents, construct both sides' arguments | gpt-5, gpt-5.4 |
-| **Layer 4: Judicial Decision** | Deliberation, Governance & Verdict | Reason from evidence to conclusion, audit for fairness, produce recommendation | gpt-5.4, gpt-5.4 |
+| **Layer 4: Hearing Preparation & Governance** | Hearing Analysis, Hearing Governance | Build hearing analysis with preliminary conclusion (Gate 3), audit for fairness (Gate 4) — judge records own decision | gpt-5.4, gpt-5.4 |
 
 **Model assignment rationale:**
 - **gpt-5.4-nano** for administrative tasks (parsing, structuring, complexity classification) — fast and cost-efficient.
 - **gpt-5-mini** for witness analysis requiring efficient reasoning — good balance of reasoning capability and speed.
 - **gpt-5** for evidence analysis and legal retrieval — strong instruction-following for structured extraction with large context windows.
-- **gpt-5.4** for deep reasoning tasks (argument construction, deliberation, governance) — maximum reasoning capability for high-stakes judicial analysis.
+- **gpt-5.4** for deep reasoning tasks (argument construction, hearing analysis, hearing governance) — maximum reasoning capability for high-stakes judicial analysis.
 
 > For the complete technology matrix and model selection strategy, see [Part 4: Tech Stack](04-tech-stack.md).
 
@@ -211,34 +211,28 @@ class CaseState:
                                     #        strength_comparison}
                                     # Both include: {judicial_questions: [dict]}
 
-    # --- Deliberation (written by Deliberation) ---
-    deliberation: dict              # {
+    # --- Hearing Analysis (written by hearing-analysis, Gate 3) ---
+    hearing_analyses: list[dict]    # One entry per pipeline run. Each entry:
+                                    # {
+                                    #   run_id,
                                     #   established_facts, applicable_law,
                                     #   application: [{element, evidence, satisfied}],
                                     #   argument_evaluation,
                                     #   witness_impact, precedent_alignment,
                                     #   preliminary_conclusion,
-                                    #   uncertainty_flags: [str]
+                                    #   uncertainty_flags: [str],
+                                    #   fairness_check: {          ← written by hearing-governance
+                                    #     balance_assessment, unsupported_claims,
+                                    #     logical_fallacies, demographic_bias_check,
+                                    #     evidence_completeness,
+                                    #     precedent_cherry_picking,
+                                    #     critical_issues_found: bool,
+                                    #     audit_passed: bool
+                                    #   }
                                     # }
 
-    # --- Governance (written by Governance & Verdict) ---
-    fairness_check: dict            # {
-                                    #   balance_assessment, unsupported_claims,
-                                    #   logical_fallacies, demographic_bias_check,
-                                    #   evidence_completeness,
-                                    #   precedent_cherry_picking,
-                                    #   critical_issues_found: bool,
-                                    #   audit_passed: bool
-                                    # }
-    verdict_recommendation: dict    # SCT: {recommended_order, amount, legal_basis,
-                                    #        reasoning_summary}
-                                    # Traffic: {recommended_verdict, sentence,
-                                    #           sentencing_range}
-                                    # Both: {confidence_score, uncertainty_factors,
-                                    #         alternative_outcomes, fairness_report}
-
-    # --- Judge (written externally after Judge review) ---
-    judge_decision: dict            # {accepted, modified, rejected, notes, final_order}
+    # --- Judge (written externally after Gate 4 review) ---
+    judicial_decision: dict         # {verdict, reasoning, notes, recorded_at}
 
     # --- Audit (appended by every agent) ---
     audit_log: list[dict]           # [{agent, timestamp, action,
@@ -322,24 +316,24 @@ The complete pipeline flow with SAM topic routing:
                     │  │Prosecn.│ │Defense│ │   parallel analysis)
                     │  └────────┘ └──────┘ │
                     └──────────────────────┘
-                           │  .../request/deliberation
+                           │  .../request/hearing-analysis
                            ▼
                     ┌──────────────────┐
-                    │   Deliberation    │
+                    │ Hearing Analysis  │  ◀── Gate 3 pause (judge reviews)
                     └──────────────────┘
-                           │  .../request/governance-verdict
+                           │  .../request/hearing-governance
                            ▼
                     ┌──────────────────────┐
-                    │ Governance & Verdict  │
+                    │  Hearing Governance   │  ◀── Gate 4 pause (judge records decision)
                     │                      │
-                    │  Phase 1: Audit      │
+                    │  Fairness Audit      │
                     │     │                │
                     │  ┌──┴──┐             │
                     │  │     │             │
                     │ FAIL  PASS           │
                     │  │     │             │
-                    │[HALT]  Phase 2:      │
-                    │        Verdict       │
+                    │[HALT]  Governance    │
+                    │        Summary       │
                     └──────────────────────┘
                            │  .../request/web-gateway
                            ▼
@@ -366,9 +360,9 @@ The complete pipeline flow with SAM topic routing:
 | 6 | Witness Analysis | `verdictcouncil/a2a/v1/agent/response/witness-analysis` | Layer2Aggregator |
 | 7 | Layer2Aggregator | `verdictcouncil/a2a/v1/agent/request/legal-knowledge` | Legal Knowledge |
 | 7 | Legal Knowledge | `verdictcouncil/a2a/v1/agent/request/argument-construction` | Argument Construction |
-| 8 | Argument Construction | `verdictcouncil/a2a/v1/agent/request/deliberation` | Deliberation |
-| 9 | Deliberation | `verdictcouncil/a2a/v1/agent/request/governance-verdict` | Governance & Verdict |
-| 10 | Governance & Verdict | `verdictcouncil/a2a/v1/agent/request/web-gateway` | Web Gateway |
+| 8 | Argument Construction | `verdictcouncil/a2a/v1/agent/request/hearing-analysis` | Hearing Analysis |
+| 9 | Hearing Analysis | `verdictcouncil/a2a/v1/agent/request/hearing-governance` | Hearing Governance |
+| 10 | Hearing Governance | `verdictcouncil/a2a/v1/agent/request/web-gateway` | Web Gateway |
 
 **Parallel execution note:** For traffic cases, Argument Construction internally runs prosecution and defense analysis in parallel within the single agent invocation. This is handled at the prompt level (the model produces both analyses in one response) rather than at the orchestration level — no additional SAM topics are needed.
 
@@ -461,19 +455,19 @@ IF route == "escalate_human":
 
 Triggers: high complexity, potential precedent-setting impact, vulnerable parties without adequate safeguards, cross-jurisdictional issues requiring judicial discretion.
 
-**Halt Point 2: Governance & Verdict (Phase 1 Audit)**
+**Halt Point 2: Hearing Governance (Fairness Audit)**
 
 ```
 IF critical_issues_found == true:
     status = "escalated"
-    Pipeline HALTS BEFORE verdict generation
-    Fairness audit report sent to Judge
-    No verdict recommendation is produced
+    Pipeline HALTS
+    Fairness audit report sent to Judge at Gate 4
+    Judge reviews findings before recording any decision
 ```
 
 Triggers: systematic bias detected, reasoning relies on facts not in evidence, critical logical fallacies, demographic bias indicators, evidence from one party systematically overlooked.
 
-The separation between audit and verdict within the Governance agent is critical: the fairness check MUST pass before any verdict recommendation is generated. A partial verdict (one that failed governance) must never reach the Judge.
+The fairness audit is the final gate before the judge records a decision. If critical issues are found, the pipeline halts and the case is flagged. No AI verdict recommendation is ever produced — the judge decides.
 
 ### Error Handling
 
@@ -530,13 +524,13 @@ Every agent's output is validated against a JSON schema before it is written to 
 
 Every message published to and consumed from the Solace Event Broker is logged with timestamp, source, destination, and payload hash. This creates a complete, immutable audit trail that cannot be modified by any agent. Any discrepancy between an agent's claimed output and the broker's recorded payload is detectable.
 
-### Governance Agent as Final Gate
+### Hearing Governance Agent as Final Gate
 
-The Governance & Verdict Agent serves as the last line of defense. It audits the entire reasoning chain for logical consistency, unsupported claims, and bias before producing a verdict recommendation. If the reasoning chain has been corrupted by injected content at any earlier stage, the Governance audit is designed to catch the resulting inconsistencies.
+The Hearing Governance Agent serves as the last line of defense. It audits the entire reasoning chain for logical consistency, unsupported claims, and bias. If the reasoning chain has been corrupted by injected content at any earlier stage, the Governance audit is designed to catch the resulting inconsistencies.
 
-### Human-in-the-Loop
+### Human-in-the-Loop (4-Gate HITL)
 
-No recommendation reaches the Judge without passing the Governance audit. The Judge retains full authority to accept, modify, or reject any recommendation. The system is advisory — it cannot take autonomous action.
+The pipeline pauses after each of four gates for judge review before proceeding. No AI verdict recommendation is ever generated — the judge reviews the governance summary at Gate 4 and records their own decision. The system is advisory only and cannot take autonomous action.
 
 ### Defense Summary
 

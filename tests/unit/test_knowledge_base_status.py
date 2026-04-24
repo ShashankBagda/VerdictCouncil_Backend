@@ -270,7 +270,7 @@ async def test_knowledge_base_status_per_judge_retrieve_failure_stays_initialize
 
 
 async def test_knowledge_base_status_non_judge_forbidden():
-    clerk = _make_user(role=UserRole.clerk)
+    clerk = _make_user(role=UserRole.admin)
     app = _app_with_overrides(clerk)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         resp = await ac.get("/api/v1/knowledge-base/status")

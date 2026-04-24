@@ -15,71 +15,64 @@ branch_labels = None
 depends_on = None
 
 
+def _e(name: str) -> sa.Enum:
+    """Return a name-only enum reference that never auto-creates/drops the type."""
+    return sa.Enum(name=name, create_type=False)
+
+
 def upgrade() -> None:
     # -----------------------------------------------------------------------
-    # Enum types
+    # Enum types — created via raw SQL so SQLAlchemy 2.x _on_table_create
+    # does not fire a duplicate CREATE TYPE during op.create_table().
     # -----------------------------------------------------------------------
-    user_role = sa.Enum("judge", "admin", "clerk", name="userrole", create_type=False)
-    case_domain = sa.Enum(
-        "small_claims", "traffic_violation",
-        name="casedomain", create_type=False,
-    )
-    case_status = sa.Enum(
-        "pending", "processing", "ready_for_review", "decided",
-        "rejected", "escalated", "closed", "failed",
-        name="casestatus", create_type=False,
-    )
-    case_complexity = sa.Enum("low", "medium", "high", name="casecomplexity", create_type=False)
-    case_route = sa.Enum(
-        "proceed_automated", "proceed_with_review", "escalate_human",
-        name="caseroute", create_type=False,
-    )
-    party_role = sa.Enum(
-        "claimant", "respondent", "accused", "prosecution",
-        name="partyrole", create_type=False,
-    )
-    evidence_type = sa.Enum(
-        "documentary", "testimonial", "physical", "digital", "expert",
-        name="evidencetype", create_type=False,
-    )
-    evidence_strength = sa.Enum("strong", "medium", "weak", name="evidencestrength", create_type=False)
-    fact_confidence = sa.Enum("high", "medium", "low", "disputed", name="factconfidence", create_type=False)
-    fact_status = sa.Enum("agreed", "disputed", name="factstatus", create_type=False)
-    precedent_source = sa.Enum("curated", "live_search", name="precedentsource", create_type=False)
-    argument_side = sa.Enum(
-        "prosecution", "defense", "claimant", "respondent",
-        name="argumentside", create_type=False,
-    )
-    recommendation_type = sa.Enum(
-        "compensation", "repair", "dismiss", "guilty", "not_guilty", "reduced",
-        name="recommendationtype", create_type=False,
-    )
-    modification_type = sa.Enum(
-        "fact_toggle", "evidence_exclusion", "witness_credibility", "legal_interpretation",
-        name="modificationtype", create_type=False,
-    )
-    scenario_status = sa.Enum(
-        "pending", "running", "completed", "failed", "cancelled",
-        name="scenariostatus", create_type=False,
-    )
-    stability_classification = sa.Enum(
-        "stable", "moderately_sensitive", "highly_sensitive",
-        name="stabilityclassification", create_type=False,
-    )
-    stability_status = sa.Enum(
-        "pending", "computing", "completed", "failed",
-        name="stabilitystatus", create_type=False,
-    )
-
-    # Create all enum types
-    for enum in [
-        user_role, case_domain, case_status, case_complexity, case_route,
-        party_role, evidence_type, evidence_strength, fact_confidence,
-        fact_status, precedent_source, argument_side, recommendation_type,
-        modification_type, scenario_status, stability_classification,
-        stability_status,
-    ]:
-        enum.create(op.get_bind(), checkfirst=True)
+    op.execute(sa.text("CREATE TYPE userrole AS ENUM ('judge', 'admin', 'clerk')"))
+    op.execute(sa.text("CREATE TYPE casedomain AS ENUM ('small_claims', 'traffic_violation')"))
+    op.execute(sa.text(
+        "CREATE TYPE casestatus AS ENUM ("
+        "'pending', 'processing', 'ready_for_review', 'decided',"
+        "'rejected', 'escalated', 'closed', 'failed')"
+    ))
+    op.execute(sa.text("CREATE TYPE casecomplexity AS ENUM ('low', 'medium', 'high')"))
+    op.execute(sa.text(
+        "CREATE TYPE caseroute AS ENUM ("
+        "'proceed_automated', 'proceed_with_review', 'escalate_human')"
+    ))
+    op.execute(sa.text(
+        "CREATE TYPE partyrole AS ENUM ('claimant', 'respondent', 'accused', 'prosecution')"
+    ))
+    op.execute(sa.text(
+        "CREATE TYPE evidencetype AS ENUM "
+        "('documentary', 'testimonial', 'physical', 'digital', 'expert')"
+    ))
+    op.execute(sa.text("CREATE TYPE evidencestrength AS ENUM ('strong', 'medium', 'weak')"))
+    op.execute(sa.text(
+        "CREATE TYPE factconfidence AS ENUM ('high', 'medium', 'low', 'disputed')"
+    ))
+    op.execute(sa.text("CREATE TYPE factstatus AS ENUM ('agreed', 'disputed')"))
+    op.execute(sa.text("CREATE TYPE precedentsource AS ENUM ('curated', 'live_search')"))
+    op.execute(sa.text(
+        "CREATE TYPE argumentside AS ENUM "
+        "('prosecution', 'defense', 'claimant', 'respondent')"
+    ))
+    op.execute(sa.text(
+        "CREATE TYPE recommendationtype AS ENUM "
+        "('compensation', 'repair', 'dismiss', 'guilty', 'not_guilty', 'reduced')"
+    ))
+    op.execute(sa.text(
+        "CREATE TYPE modificationtype AS ENUM "
+        "('fact_toggle', 'evidence_exclusion', 'witness_credibility', 'legal_interpretation')"
+    ))
+    op.execute(sa.text(
+        "CREATE TYPE scenariostatus AS ENUM "
+        "('pending', 'running', 'completed', 'failed', 'cancelled')"
+    ))
+    op.execute(sa.text(
+        "CREATE TYPE stabilityclassification AS ENUM "
+        "('stable', 'moderately_sensitive', 'highly_sensitive')"
+    ))
+    op.execute(sa.text(
+        "CREATE TYPE stabilitystatus AS ENUM ('pending', 'computing', 'completed', 'failed')"
+    ))
 
     # -----------------------------------------------------------------------
     # 1. users
@@ -89,7 +82,7 @@ def upgrade() -> None:
         sa.Column("id", UUID(as_uuid=True), primary_key=True),
         sa.Column("name", sa.String(255), nullable=False),
         sa.Column("email", sa.String(255), unique=True, nullable=False),
-        sa.Column("role", user_role, nullable=False),
+        sa.Column("role", _e("userrole"), nullable=False),
         sa.Column("password_hash", sa.String(255), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True)),
@@ -114,11 +107,11 @@ def upgrade() -> None:
     op.create_table(
         "cases",
         sa.Column("id", UUID(as_uuid=True), primary_key=True),
-        sa.Column("domain", case_domain, nullable=False),
-        sa.Column("status", case_status, nullable=False, server_default="pending"),
+        sa.Column("domain", _e("casedomain"), nullable=False),
+        sa.Column("status", _e("casestatus"), nullable=False, server_default="pending"),
         sa.Column("jurisdiction_valid", sa.Boolean()),
-        sa.Column("complexity", case_complexity),
-        sa.Column("route", case_route),
+        sa.Column("complexity", _e("casecomplexity")),
+        sa.Column("route", _e("caseroute")),
         sa.Column("created_by", UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True)),
@@ -134,7 +127,7 @@ def upgrade() -> None:
         sa.Column("id", UUID(as_uuid=True), primary_key=True),
         sa.Column("case_id", UUID(as_uuid=True), sa.ForeignKey("cases.id", ondelete="CASCADE"), nullable=False),
         sa.Column("name", sa.String(255), nullable=False),
-        sa.Column("role", party_role, nullable=False),
+        sa.Column("role", _e("partyrole"), nullable=False),
         sa.Column("contact_info", JSONB),
     )
     op.create_index("ix_parties_case_id", "parties", ["case_id"])
@@ -162,8 +155,8 @@ def upgrade() -> None:
         sa.Column("id", UUID(as_uuid=True), primary_key=True),
         sa.Column("case_id", UUID(as_uuid=True), sa.ForeignKey("cases.id", ondelete="CASCADE"), nullable=False),
         sa.Column("document_id", UUID(as_uuid=True), sa.ForeignKey("documents.id")),
-        sa.Column("evidence_type", evidence_type, nullable=False),
-        sa.Column("strength", evidence_strength),
+        sa.Column("evidence_type", _e("evidencetype"), nullable=False),
+        sa.Column("strength", _e("evidencestrength")),
         sa.Column("admissibility_flags", JSONB),
         sa.Column("linked_claims", JSONB),
     )
@@ -180,8 +173,8 @@ def upgrade() -> None:
         sa.Column("event_time", sa.Time()),
         sa.Column("description", sa.Text(), nullable=False),
         sa.Column("source_document_id", UUID(as_uuid=True), sa.ForeignKey("documents.id")),
-        sa.Column("confidence", fact_confidence),
-        sa.Column("status", fact_status),
+        sa.Column("confidence", _e("factconfidence")),
+        sa.Column("status", _e("factstatus")),
         sa.Column("corroboration", JSONB),
     )
     op.create_index("ix_facts_case_id", "facts", ["case_id"])
@@ -230,7 +223,7 @@ def upgrade() -> None:
         sa.Column("reasoning_summary", sa.Text()),
         sa.Column("similarity_score", sa.Float()),
         sa.Column("distinguishing_factors", sa.Text()),
-        sa.Column("source", precedent_source),
+        sa.Column("source", _e("precedentsource")),
         sa.Column("url", sa.String(255)),
     )
     op.create_index("ix_precedents_case_id", "precedents", ["case_id"])
@@ -242,7 +235,7 @@ def upgrade() -> None:
         "arguments",
         sa.Column("id", UUID(as_uuid=True), primary_key=True),
         sa.Column("case_id", UUID(as_uuid=True), sa.ForeignKey("cases.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("side", argument_side, nullable=False),
+        sa.Column("side", _e("argumentside"), nullable=False),
         sa.Column("legal_basis", sa.Text(), nullable=False),
         sa.Column("supporting_evidence", JSONB),
         sa.Column("weaknesses", sa.Text()),
@@ -271,7 +264,7 @@ def upgrade() -> None:
         "verdicts",
         sa.Column("id", UUID(as_uuid=True), primary_key=True),
         sa.Column("case_id", UUID(as_uuid=True), sa.ForeignKey("cases.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("recommendation_type", recommendation_type, nullable=False),
+        sa.Column("recommendation_type", _e("recommendationtype"), nullable=False),
         sa.Column("recommended_outcome", sa.Text(), nullable=False),
         sa.Column("sentence", JSONB),
         sa.Column("confidence_score", sa.Integer()),
@@ -310,10 +303,10 @@ def upgrade() -> None:
         sa.Column("case_id", UUID(as_uuid=True), sa.ForeignKey("cases.id", ondelete="CASCADE"), nullable=False),
         sa.Column("original_run_id", sa.String(255), nullable=False),
         sa.Column("scenario_run_id", sa.String(255), unique=True, nullable=False),
-        sa.Column("modification_type", modification_type, nullable=False),
+        sa.Column("modification_type", _e("modificationtype"), nullable=False),
         sa.Column("modification_description", sa.Text()),
         sa.Column("modification_payload", JSONB),
-        sa.Column("status", scenario_status, nullable=False, server_default="pending"),
+        sa.Column("status", _e("scenariostatus"), nullable=False, server_default="pending"),
         sa.Column("created_by", UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("completed_at", sa.DateTime(timezone=True)),
@@ -349,11 +342,11 @@ def upgrade() -> None:
         sa.Column("case_id", UUID(as_uuid=True), sa.ForeignKey("cases.id", ondelete="CASCADE"), nullable=False),
         sa.Column("run_id", sa.String(255), nullable=False),
         sa.Column("score", sa.Integer(), nullable=False),
-        sa.Column("classification", stability_classification, nullable=False),
+        sa.Column("classification", _e("stabilityclassification"), nullable=False),
         sa.Column("perturbation_count", sa.Integer(), nullable=False),
         sa.Column("perturbations_held", sa.Integer(), nullable=False),
         sa.Column("perturbation_details", JSONB),
-        sa.Column("status", stability_status, nullable=False, server_default="pending"),
+        sa.Column("status", _e("stabilitystatus"), nullable=False, server_default="pending"),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("completed_at", sa.DateTime(timezone=True)),
     )

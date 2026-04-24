@@ -138,6 +138,10 @@ async def startup(ctx: dict[str, Any]) -> None:
     Both tasks run for the lifetime of the worker process and are
     cancelled by arq during shutdown.
     """
+    from src.pipeline.observability import configure_mlflow
+
+    configure_mlflow()
+
     arq_redis: ArqRedis = ctx["redis"]
     ctx["_dispatcher_task"] = asyncio.create_task(dispatcher_loop(arq_redis))
     ctx["_stuck_recovery_task"] = asyncio.create_task(stuck_recovery_loop())

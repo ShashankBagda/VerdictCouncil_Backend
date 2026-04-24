@@ -18,7 +18,6 @@ if TYPE_CHECKING:
 class UserRole(str, enum.Enum):
     judge = "judge"
     admin = "admin"
-    clerk = "clerk"
     senior_judge = "senior_judge"
 
 

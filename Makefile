@@ -1,9 +1,13 @@
-.PHONY: install lint typecheck test migrate infra-up infra-down solace-bootstrap dev clean openapi-snapshot openapi-check smoke-contract
+.PHONY: install prefetch-sanitizer lint typecheck test migrate reset-db infra-up infra-down dev clean openapi-snapshot openapi-check smoke-contract
 
 install: ## Install dependencies
 	python3.12 -m venv .venv
 	.venv/bin/pip install --upgrade pip
 	.venv/bin/pip install -e ".[dev]"
+	@$(MAKE) prefetch-sanitizer || echo "warn: sanitizer model prefetch failed (no internet?). First upload will be slow."
+
+prefetch-sanitizer: ## Pre-download the llm-guard DeBERTa-v3 classifier model (~415 MB, one-time)
+	.venv/bin/python -m scripts.prefetch_sanitizer_model
 
 lint: ## Run linter
 	.venv/bin/ruff check src/ tests/
@@ -25,17 +29,16 @@ test-cov: ## Run tests with coverage
 migrate: ## Run database migrations
 	.venv/bin/python -m alembic upgrade head
 
-infra-up: ## Start local infrastructure (PostgreSQL, Redis, Solace)
+reset-db: ## Wipe and recreate schema from models, then stamp alembic to head
+	.venv/bin/python -m scripts.reset_db
+
+infra-up: ## Start local infrastructure (PostgreSQL, Redis, MLflow)
 	docker compose -f docker-compose.infra.yml up -d
 
 infra-down: ## Stop local infrastructure
 	docker compose -f docker-compose.infra.yml down
 
-solace-bootstrap: ## Provision the verdictcouncil VPN + vc-agent user on the local broker
-	@set -a; [ -f .env ] && . ./.env; set +a; \
-	./scripts/solace-bootstrap.sh
-
-dev: ## Start all agents via honcho (hybrid mode)
+dev: ## Start the API and arq worker via honcho
 	.venv/bin/honcho -f Procfile.dev start
 
 clean: ## Remove build artifacts

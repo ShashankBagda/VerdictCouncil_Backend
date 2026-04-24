@@ -1,13 +1,2 @@
-web-gateway:          .venv/bin/solace-agent-mesh run configs/gateway/web-gateway.yaml
-case-processing:      .venv/bin/solace-agent-mesh run configs/agents/case-processing.yaml
-complexity-routing:   .venv/bin/solace-agent-mesh run configs/agents/complexity-routing.yaml
-evidence-analysis:    .venv/bin/solace-agent-mesh run configs/agents/evidence-analysis.yaml
-fact-reconstruction:  .venv/bin/solace-agent-mesh run configs/agents/fact-reconstruction.yaml
-witness-analysis:     .venv/bin/solace-agent-mesh run configs/agents/witness-analysis.yaml
-legal-knowledge:      .venv/bin/solace-agent-mesh run configs/agents/legal-knowledge.yaml
-argument-construction: .venv/bin/solace-agent-mesh run configs/agents/argument-construction.yaml
-deliberation:         .venv/bin/solace-agent-mesh run configs/agents/deliberation.yaml
-governance-verdict:   .venv/bin/solace-agent-mesh run configs/agents/governance-verdict.yaml
-layer2-aggregator:    .venv/bin/solace-agent-mesh run configs/services/layer2-aggregator.yaml
 api:                  .venv/bin/uvicorn src.api.app:app --host 0.0.0.0 --port 8001 --reload
 arq-worker:           .venv/bin/arq src.workers.worker_settings.WorkerSettings

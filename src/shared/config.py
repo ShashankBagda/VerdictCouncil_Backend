@@ -4,10 +4,6 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     # Required
     openai_api_key: str = ""
-    solace_broker_url: str = "tcp://localhost:55555"
-    solace_broker_vpn: str = "verdictcouncil"
-    solace_broker_username: str = "vc-agent"
-    solace_broker_password: str = "vc-agent-password"
     database_url: str = "postgresql://vc_dev:vc_dev_password@localhost:5432/verdictcouncil"
     redis_url: str = "redis://localhost:6379/0"
     jwt_secret: str = "change-me-in-production"  # validated at startup
@@ -33,17 +29,28 @@ class Settings(BaseSettings):
     # Per-judge knowledge base upload limits (bytes). 25MB default keeps us
     # under the 50MB ingress limit in k8s/base/ingress.yaml.
     kb_max_upload_bytes: int = 26214400
+    # Per-domain KB upload limit (bytes). 50MB default.
+    domain_kb_max_upload_bytes: int = 52428800
+    # Per-case document upload limit (bytes). 50MB default.
+    case_doc_max_upload_bytes: int = 52428800
+    # llm-guard DeBERTa-v3 classifier is now wired in on top of the regex pre-filter.
+    # Upload route is open; both flags default True in production.
+    # Set DOMAIN_UPLOADS_ENABLED=false or CLASSIFIER_SANITIZER_ENABLED=false in .env to override.
+    domain_uploads_enabled: bool = True
+    # When True, classify_text_async() in sanitization.py runs the DeBERTa-v3 classifier
+    # on each document page during admin KB ingest (parse_document run_classifier=True path).
+    classifier_sanitizer_enabled: bool = True
 
     def model_post_init(self, __context: object) -> None:
         import warnings
 
-        if self.jwt_secret == "change-me-in-production" and self.log_level != "DEBUG":
+        if self.jwt_secret == "change-me-in-production":
             warnings.warn(
                 "JWT_SECRET is using the default value. "
                 "Set a secure secret via the JWT_SECRET environment variable.",
                 stacklevel=2,
             )
-        if not self.cookie_secure and self.log_level != "DEBUG":
+        if not self.cookie_secure:
             warnings.warn(
                 "COOKIE_SECURE is False. Session cookies will be sent over "
                 "insecure HTTP. This must ONLY be used in local development.",
@@ -55,11 +62,6 @@ class Settings(BaseSettings):
     fastapi_host: str = "0.0.0.0"  # nosec B104 — intentional: container needs all-interface binding
     fastapi_port: int = 8000
     log_level: str = "INFO"
-    # Feature flag — when True, the live POST /process route runs the case
-    # via MeshPipelineRunner instead of the in-process PipelineRunner.
-    # Defaults False so the mesh path lands dark; flip on once the
-    # integration suite is green.
-    use_mesh_runner: bool = False
     precedent_cache_ttl_seconds: int = 86400
     pair_api_url: str = "https://search.pair.gov.sg/api/v1/search"
     pair_circuit_breaker_threshold: int = 3
@@ -67,7 +69,7 @@ class Settings(BaseSettings):
 
     # MLflow tracing (LLMSecOps observability)
     mlflow_enabled: bool = False
-    mlflow_tracking_uri: str = "http://localhost:5000"
+    mlflow_tracking_uri: str = "http://localhost:5001"
     mlflow_experiment: str = "verdictcouncil-pipeline"
 
     # OpenAI Models
@@ -76,6 +78,10 @@ class Settings(BaseSettings):
     openai_model_efficient_reasoning: str = "gpt-5-mini"
     openai_model_strong_reasoning: str = "gpt-5"
     openai_model_frontier_reasoning: str = "gpt-5.4"
+    # Intake extractor — defaults to the lightweight tier so it runs without
+    # org verification. Override via env if the org is verified and you want
+    # the efficient-reasoning model's better structured-output behaviour.
+    openai_model_intake: str = ""
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 

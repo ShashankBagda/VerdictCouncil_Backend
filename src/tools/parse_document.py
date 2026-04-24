@@ -14,9 +14,18 @@ import openai
 
 from src.shared.config import settings
 from src.shared.retry import retry_with_backoff
-from src.shared.sanitization import sanitize_document_content
+from src.shared.sanitization import SanitizationResult, classify_text_async, sanitize_text
 
 logger = logging.getLogger(__name__)
+
+_client: openai.AsyncOpenAI | None = None
+
+
+def _get_client() -> openai.AsyncOpenAI:
+    global _client
+    if _client is None:
+        _client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
+    return _client
 
 
 class DocumentParseError(Exception):
@@ -34,33 +43,27 @@ async def _extract_via_openai(
     extract_tables: bool,
     ocr_enabled: bool,
 ) -> dict:
-    """Call OpenAI chat completion to extract text from a file attachment."""
+    """Call OpenAI Responses API to extract text from a file attachment."""
     table_instruction = "Also extract all tables as structured data." if extract_tables else ""
     ocr_instruction = "This may be a scanned document - use OCR." if ocr_enabled else ""
 
-    response = await client.chat.completions.create(
+    response = await client.responses.create(
         model=settings.openai_model_lightweight,
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "Extract all text content from the provided document. "
-                    "Preserve paragraph structure and formatting. "
-                    "If the document contains tables, extract each table as a "
-                    "JSON array of rows."
-                ),
-            },
+        input=[
             {
                 "role": "user",
                 "content": [
                     {
-                        "type": "file",
-                        "file": {"file_id": file_id},
+                        "type": "input_file",
+                        "file_id": file_id,
                     },
                     {
-                        "type": "text",
+                        "type": "input_text",
                         "text": (
-                            "Extract all text from this document. "
+                            "Extract all text content from this document. "
+                            "Preserve paragraph structure and formatting. "
+                            "If the document contains tables, extract each table as a "
+                            "JSON array of rows. "
                             f"{table_instruction} "
                             f"{ocr_instruction} "
                             "Return JSON with keys: "
@@ -71,19 +74,29 @@ async def _extract_via_openai(
                         ),
                     },
                 ],
-            },
+            }
         ],
-        response_format={"type": "json_object"},
+        text={"format": {"type": "json_object"}},
     )
-    return json.loads(response.choices[0].message.content)
+    return json.loads(response.output_text)
 
 
 async def parse_document(
     file_id: Annotated[str, "OpenAI File ID of the uploaded document"],
     extract_tables: Annotated[bool, "Whether to extract tabular data"] = True,
-    ocr_enabled: Annotated[bool, "Whether to enable OCR for scanned documents"] = False,
+    ocr_enabled: Annotated[bool, "Whether to enable OCR for scanned/image documents"] = False,
+    run_classifier: Annotated[bool, "Enable DeBERTa-v3 classifier on top of regex"] = False,
 ) -> dict:
     """Parse an uploaded document via the OpenAI Files API.
+
+    D13 NOTE: The in-process pipeline runner short-circuits this call when
+    pages for `file_id` are already hydrated in CaseState.raw_documents
+    (see runner.py:_execute_tool_call / _get_cached_pages).  This function
+    is only reached on a true cache miss, or when called directly by the
+    domain-upload route (which never has state).  No `state` parameter is
+    needed here because there is no SAM DynamicTool wrapping this function
+    — the tool is `function_name: parse_document` (in-process only), so
+    the mesh path never calls it.
 
     Args:
         file_id: OpenAI File ID of the uploaded document (e.g., "file-abc123").
@@ -98,7 +111,7 @@ async def parse_document(
     Raises:
         DocumentParseError: If parsing fails or no text is extracted.
     """
-    client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
+    client = _get_client()
 
     # Retrieve file metadata
     try:
@@ -121,44 +134,72 @@ async def parse_document(
     except (json.JSONDecodeError, openai.APIError) as exc:
         raise DocumentParseError(f"Failed to parse document {file_id}: {exc}") from exc
 
-    extracted_text = parsed.get("text", "")
+    raw_extracted_text = parsed.get("text", "")
     extracted_tables = parsed.get("tables", []) if extract_tables else []
     raw_pages = parsed.get("pages", [])
     metadata["page_count"] = parsed.get("page_count")
     metadata["word_count"] = parsed.get("word_count")
 
-    if not extracted_text.strip():
+    if not raw_extracted_text.strip():
         raise DocumentParseError(
             f"No text content extracted from document {file_id}. "
             "Document may be corrupt or unsupported format."
         )
 
-    # Sanitize extracted text to strip prompt-injection patterns
-    extracted_text = sanitize_document_content(extracted_text)
-
-    # Sanitize per-page text
+    # Sanitize once per page (single pass — avoids double-scanning the same content).
+    # Full document text is derived by joining sanitized pages so the two are consistent.
+    total_regex_hits = 0
+    total_classifier_hits = 0
     pages: list[dict] = []
-    for page in raw_pages:
-        page_text = sanitize_document_content(page.get("text", ""))
-        pages.append(
-            {
-                "page_number": page.get("page_number"),
-                "text": page_text,
-                "tables": page.get("tables", []),
-            }
-        )
 
-    if not pages:
-        # If the model didn't return per-page breakdown, synthesize a single page
+    if raw_pages:
+        for page in raw_pages:
+            regex_result = sanitize_text(page.get("text", ""))
+            page_text = regex_result.text
+            total_regex_hits += regex_result.regex_hits
+
+            if run_classifier and settings.classifier_sanitizer_enabled:
+                page_text, _score = await classify_text_async(page_text)
+                if page_text == "[CONTENT_BLOCKED_BY_SCANNER]":
+                    total_classifier_hits += 1
+
+            pages.append(
+                {
+                    "page_number": page.get("page_number"),
+                    "text": page_text,
+                    "tables": page.get("tables", []),
+                }
+            )
+        extracted_text = "\n".join(p["text"] for p in pages)
+    else:
+        # No per-page breakdown: sanitize the full text once and synthesise a single page
+        regex_result = sanitize_text(raw_extracted_text)
+        extracted_text = regex_result.text
+        total_regex_hits += regex_result.regex_hits
+
+        if run_classifier and settings.classifier_sanitizer_enabled:
+            extracted_text, _score = await classify_text_async(extracted_text)
+            if extracted_text == "[CONTENT_BLOCKED_BY_SCANNER]":
+                total_classifier_hits += 1
+
         pages = [{"page_number": 1, "text": extracted_text, "tables": extracted_tables}]
         parsing_notes.append("Per-page breakdown unavailable; full text placed on page 1.")
 
+    sanitization = SanitizationResult(
+        text=extracted_text,
+        regex_hits=total_regex_hits,
+        classifier_hits=total_classifier_hits,
+        chunks_scanned=len(pages),
+    )
+
     logger.info(
-        "Parsed document %s (%s): %d pages, %d tables",
+        "Parsed document %s (%s): %d pages, %d tables, regex_hits=%d, classifier_hits=%d",
         file_id,
         filename,
         len(pages),
         len(extracted_tables),
+        total_regex_hits,
+        total_classifier_hits,
     )
 
     return {
@@ -170,4 +211,5 @@ async def parse_document(
         "tables": extracted_tables,
         "metadata": metadata,
         "parsing_notes": parsing_notes,
+        "sanitization": sanitization,
     }

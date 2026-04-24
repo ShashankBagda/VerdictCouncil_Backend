@@ -96,6 +96,7 @@ class CaseState(BaseModel):
     run_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     parent_run_id: str | None = None
     domain: CaseDomainEnum | None = None
+    domain_vector_store_id: str | None = None
     status: CaseStatusEnum = CaseStatusEnum.pending
     parties: list[dict[str, Any]] = Field(default_factory=list)
     case_metadata: dict[str, Any] = Field(default_factory=dict)

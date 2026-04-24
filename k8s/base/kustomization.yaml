@@ -3,23 +3,7 @@ kind: Kustomization
 
 resources:
   - namespace.yaml
-  - secrets.yaml
-  - solace-statefulset.yaml
-  - deployment-web-gateway.yaml
   - deployment-api-service.yaml
-  - deployment-case-processing.yaml
-  - deployment-complexity-routing.yaml
-  - deployment-evidence-analysis.yaml
-  - deployment-fact-reconstruction.yaml
-  - deployment-witness-analysis.yaml
-  - deployment-legal-knowledge.yaml
-  - deployment-argument-construction.yaml
-  - deployment-deliberation.yaml
-  - deployment-governance-verdict.yaml
-  - deployment-layer2-aggregator.yaml
   - cronjob-stuck-case-watchdog.yaml
-  - service-web-gateway.yaml
   - service-api-service.yaml
-  - service-solace.yaml
   - ingress.yaml
-  - hpa-web-gateway.yaml

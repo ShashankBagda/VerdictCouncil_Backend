@@ -6,12 +6,17 @@ from datetime import date, datetime, time
 from typing import Any
 from uuid import UUID
 
+import logging
+import warnings
+from uuid import UUID
+
 from pydantic import BaseModel, Field, model_validator
 
 from src.models.case import (
     ArgumentSide,
     CaseDomain,
     CaseStatus,
+    DocumentKind,
     EvidenceStrength,
     EvidenceType,
     FactConfidence,
@@ -19,13 +24,6 @@ from src.models.case import (
     PartyRole,
     PrecedentSource,
 )
-
-KNOWN_TRAFFIC_OFFENCE_CODES = {
-    "RTA-S64",
-    "RTA-S65",
-    "RTA-S67",
-    "RTA-S69",
-}
 
 
 class CasePartyCreateRequest(BaseModel):
@@ -36,11 +34,24 @@ class CasePartyCreateRequest(BaseModel):
     )
 
 
-class CaseCreateRequest(BaseModel):
-    """Create a new case for processing."""
+_schema_logger = logging.getLogger(__name__)
 
-    domain: CaseDomain = Field(
-        ..., description="Legal domain of the case", examples=["small_claims"]
+
+class CaseCreateRequest(BaseModel):
+    """Create a new case for processing.
+
+    Accepts both the canonical ``domain_id`` (UUID FK) and the legacy
+    ``domain`` enum string. During the dual-write parallel-run window both
+    are accepted; once old clients migrate, the enum alias will be dropped.
+    """
+
+    domain_id: UUID | None = Field(
+        default=None, description="UUID of the Domain row (canonical, preferred)"
+    )
+    domain: CaseDomain | None = Field(
+        default=None,
+        description="[Deprecated] Legacy domain enum. Use domain_id instead.",
+        examples=["small_claims"],
     )
     title: str = Field(..., min_length=1, max_length=255)
     description: str | None = Field(default=None, max_length=5000)
@@ -52,10 +63,24 @@ class CaseCreateRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_domain_requirements(self) -> CaseCreateRequest:
+        if self.domain_id is None and self.domain is None:
+            raise ValueError("Either domain_id or domain must be provided.")
+
+        if self.domain is not None and self.domain_id is None:
+            warnings.warn(
+                "CaseCreateRequest.domain (enum) is deprecated; send domain_id instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            _schema_logger.warning("Deprecated domain enum used in case create request")
+
         if len(self.parties) < 2:
             raise ValueError("At least two parties are required for case intake.")
 
-        if self.domain == CaseDomain.small_claims:
+        # Domain-specific validation on enum code (works for both legacy and new path)
+        domain_code = self.domain.value if self.domain else None
+
+        if domain_code == CaseDomain.small_claims.value:
             if self.claim_amount is None:
                 raise ValueError("SCT cases require claim_amount.")
             if self.claim_amount > 30000:
@@ -65,13 +90,63 @@ class CaseCreateRequest(BaseModel):
                     "SCT claim_amount above $20,000 requires consent_to_higher_claim_limit."
                 )
 
-        if self.domain == CaseDomain.traffic_violation:
+        if domain_code == CaseDomain.traffic_violation.value:
             if not self.offence_code:
                 raise ValueError("Traffic cases require offence_code.")
-            if self.offence_code not in KNOWN_TRAFFIC_OFFENCE_CODES:
-                raise ValueError(f"Unknown traffic offence code: {self.offence_code}")
 
         return self
+
+
+class CaseDraftCreateRequest(BaseModel):
+    """Create an intake draft. Domain is the only hard requirement — parties,
+    offence code, description, etc. come later from the extraction + confirm
+    round-trip. Judge picks the jurisdiction; everything else is read from
+    typed documents the judge uploads against the draft."""
+
+    domain_id: UUID | None = Field(default=None)
+    domain: CaseDomain | None = Field(default=None)
+    filed_date: date | None = Field(default=None)
+
+    @model_validator(mode="after")
+    def require_domain(self) -> CaseDraftCreateRequest:
+        if self.domain_id is None and self.domain is None:
+            raise ValueError("Either domain_id or domain must be provided.")
+        return self
+
+
+class CaseConfirmRequest(BaseModel):
+    """Judge's confirmed intake payload. Transitions a case from
+    awaiting_intake_confirmation → pending so the pipeline can start. Values
+    here are what the judge has either accepted from the extractor or typed
+    themselves via the 'I'll type it' fallback."""
+
+    title: str = Field(..., min_length=1, max_length=255)
+    description: str | None = Field(default=None, max_length=5000)
+    filed_date: date | None = Field(default=None)
+    parties: list[CasePartyCreateRequest] = Field(default_factory=list)
+    claim_amount: float | None = Field(default=None, ge=0)
+    consent_to_higher_claim_limit: bool = Field(default=False)
+    offence_code: str | None = Field(default=None, max_length=100)
+
+    @model_validator(mode="after")
+    def validate_parties_min(self) -> CaseConfirmRequest:
+        if len(self.parties) < 2:
+            raise ValueError("At least two parties are required to confirm intake.")
+        return self
+
+
+class CaseIntakeMessageRequest(BaseModel):
+    """Judge's free-text correction on the intake confirm chat. The extractor
+    consumes this as an additional instruction and re-emits updated proposed
+    fields over the SSE channel."""
+
+    content: str = Field(..., min_length=1, max_length=4000)
+
+
+class DocumentUploadMetadata(BaseModel):
+    """Optional form-data sidecar on document upload. Omitted kind → 'other'."""
+
+    kind: DocumentKind = Field(default=DocumentKind.other)
 
 
 class CaseJurisdictionResponse(BaseModel):
@@ -99,6 +174,7 @@ class DocumentResponse(BaseModel):
     openai_file_id: str | None = None
     filename: str = Field(..., description="Original filename")
     file_type: str | None = Field(None, description="MIME type or extension")
+    kind: DocumentKind = Field(DocumentKind.other, description="Typed-slot kind")
     uploaded_at: datetime | None = Field(None, description="Upload timestamp")
 
     model_config = {"from_attributes": True}
@@ -277,6 +353,10 @@ class CaseDetailResponse(CaseResponse):
     )
     audit_logs: list[AuditLogSummary] = Field(
         default_factory=list, description="Audit trail entries"
+    )
+    domain_has_vector_store: bool = Field(
+        False,
+        description="True when the case's domain has an active vector store (admin-uploaded materials).",
     )
 
 

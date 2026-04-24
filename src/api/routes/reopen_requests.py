@@ -37,7 +37,7 @@ async def create_reopen_request(
     case_id: UUID,
     body: ReopenRequestCreateRequest,
     db: DBSession,
-    current_user: User = require_role(UserRole.judge),
+    current_user: User = require_role(UserRole.judge, UserRole.admin),
 ) -> ReopenRequest:
     case = (await db.execute(select(Case).where(Case.id == case_id))).scalar_one_or_none()
     if not case:
@@ -82,7 +82,7 @@ async def create_reopen_request(
 async def list_reopen_requests(
     case_id: UUID,
     db: DBSession,
-    current_user: User = require_role(UserRole.judge),
+    current_user: User = require_role(UserRole.judge, UserRole.admin),
 ) -> ReopenRequestListResponse:
     result = await db.execute(select(ReopenRequest).where(ReopenRequest.case_id == case_id))
     items = list(result.scalars().all())
@@ -104,7 +104,7 @@ async def review_reopen_request(
     request_id: UUID,
     body: ReopenRequestReviewRequest,
     db: DBSession,
-    current_user: User = require_role(UserRole.judge),
+    current_user: User = require_role(UserRole.judge, UserRole.admin),
 ) -> ReopenRequest:
     result = await db.execute(
         select(ReopenRequest).where(

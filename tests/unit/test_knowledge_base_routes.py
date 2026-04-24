@@ -82,7 +82,7 @@ async def test_initialize_is_idempotent_returns_created_false():
 
 
 async def test_initialize_forbidden_for_non_judge():
-    clerk = _make_user(role=UserRole.clerk)
+    clerk = _make_user(role=UserRole.admin)
     app = _app_for(clerk)
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:
@@ -165,7 +165,7 @@ async def test_upload_document_too_large_returns_413():
 
 
 async def test_upload_document_forbidden_for_non_judge():
-    clerk = _make_user(role=UserRole.clerk)
+    clerk = _make_user(role=UserRole.admin)
     app = _app_for(clerk)
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as ac:

@@ -182,7 +182,7 @@ async def test_evidence_gaps_no_gaps():
 
 async def test_evidence_gaps_non_judge_forbidden():
     case_id = uuid.uuid4()
-    clerk = _make_user(role=UserRole.clerk)
+    clerk = _make_user(role=UserRole.admin)
     mock_db = _build_mock_session()
 
     app = _app_with_overrides(mock_db, clerk)

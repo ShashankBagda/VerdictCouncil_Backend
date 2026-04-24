@@ -21,6 +21,7 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from src.models.domain import Domain
 
 # ---------------------------------------------------------------------------
 # Enums
@@ -33,6 +34,11 @@ class CaseDomain(str, enum.Enum):
 
 
 class CaseStatus(str, enum.Enum):
+    # Pre-pipeline intake states (docs-as-source-of-truth flow).
+    # draft → extracting → awaiting_intake_confirmation → pending.
+    draft = "draft"
+    extracting = "extracting"
+    awaiting_intake_confirmation = "awaiting_intake_confirmation"
     pending = "pending"
     processing = "processing"
     ready_for_review = "ready_for_review"
@@ -49,6 +55,23 @@ class CaseStatus(str, enum.Enum):
     awaiting_review_gate2 = "awaiting_review_gate2"
     awaiting_review_gate3 = "awaiting_review_gate3"
     awaiting_review_gate4 = "awaiting_review_gate4"
+
+
+class DocumentKind(str, enum.Enum):
+    # Traffic-court document kinds. "other" is the back-compat default for
+    # pre-existing rows and for domains without a typed slot schema.
+    # `in_car_camera` is retained for back-compat with pre-migration rows
+    # only; new intakes do not expose it (no image/video uploads).
+    notice_of_traffic_offence = "notice_of_traffic_offence"
+    charge_sheet = "charge_sheet"
+    police_report = "police_report"
+    witness_statement = "witness_statement"
+    speed_camera_record = "speed_camera_record"
+    evidence_bundle = "evidence_bundle"
+    in_car_camera = "in_car_camera"
+    medical_report = "medical_report"
+    letter_of_mitigation = "letter_of_mitigation"
+    other = "other"
 
 
 class CaseComplexity(str, enum.Enum):
@@ -137,6 +160,13 @@ class Case(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     jurisdiction_valid: Mapped[bool | None] = mapped_column(Boolean)
     complexity: Mapped[CaseComplexity | None] = mapped_column(Enum(CaseComplexity))
     route: Mapped[CaseRoute | None] = mapped_column(Enum(CaseRoute))
+    domain_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("domains.id"), nullable=True
+    )
+    domain_ref: Mapped[Domain | None] = relationship(
+        "Domain", foreign_keys=[domain_id], lazy="select"
+    )
+
     # Anchor for What-If rehydration: the run_id of the most recent terminal
     # pipeline run for this case. Written by persist_case_results at the end
     # of a successful run; read by what_if/stability to load the real
@@ -144,6 +174,9 @@ class Case(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     latest_run_id: Mapped[str | None] = mapped_column(String(36))
     gate_state: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     judicial_decision: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # Proposed fields produced by the intake extraction service before the
+    # judge confirms. Shape: {fields, confidences, citations[], model, ran_at}.
+    intake_extraction: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_by: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
     )
@@ -207,6 +240,13 @@ class Document(UUIDPrimaryKeyMixin, Base):
     openai_file_id: Mapped[str | None] = mapped_column(String(255))
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
     file_type: Mapped[str | None] = mapped_column(String(100))
+    # Typed slot this document was uploaded against. Drives intake extraction
+    # (e.g. only notice_of_traffic_offence / charge_sheet are treated as
+    # authoritative for party + offence facts). `other` is the back-compat
+    # default for untyped uploads.
+    kind: Mapped[DocumentKind] = mapped_column(
+        Enum(DocumentKind), nullable=False, server_default=DocumentKind.other.value
+    )
     pages: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     uploaded_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id")
