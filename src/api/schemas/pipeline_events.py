@@ -98,6 +98,18 @@ class AgentEvent(BaseModel):
     ts: str
 
 
+class NarrationEvent(BaseModel):
+    """Natural-language summary chunk emitted by an agent after its analysis."""
+
+    kind: Literal["narration"] = "narration"
+    schema_version: Literal[1] = 1
+    case_id: str
+    agent: str
+    content: str
+    chunk_index: int = 0
+    ts: str
+
+
 class HeartbeatEvent(BaseModel):
     """Keepalive frame emitted on each SSE heartbeat tick."""
 
@@ -116,6 +128,6 @@ class AuthExpiringEvent(BaseModel):
 
 #: Discriminated union of all SSE event shapes on both streaming endpoints.
 Event = Annotated[
-    PipelineProgressEvent | AgentEvent | HeartbeatEvent | AuthExpiringEvent,
+    PipelineProgressEvent | AgentEvent | NarrationEvent | HeartbeatEvent | AuthExpiringEvent,
     Field(discriminator="kind"),
 ]
