@@ -2,68 +2,68 @@
 
 > **Reality vs. Target State — read this first**
 >
-> This document describes both the **live implementation** and **target design**. The table below records the key differences between what the actual workflow files do today and what the architecture diagram and later sections describe as the intended state. All gaps are tracked for remediation.
+> This document mirrors the live CI/CD, flags gaps, and points at the manifests you can actually `kubectl apply`. The target columns are aspirations tracked for follow-up — the YAML and behaviour described below are what runs today unless explicitly marked *(target)*.
 >
-> | Area | Live (`.github/workflows/*.yml`) | Target / This doc describes |
+> | Area | Live | Target |
 > |---|---|---|
-> | Staging trigger | Push to `development` branch | Push to `release/**` branch |
-> | Docker build | Single `Dockerfile` at repo root, one image tagged per deploy | Per-agent `./docker/{agent}/Dockerfile` with matrix build |
-> | Staging smoke tests | Not implemented (deploy + rollout only) | Full smoke test job: health check + end-to-end case submission + polling |
-> | Production canary tests | Not implemented (deploy + rollout only) | Canary test job: health check + case submission + polling |
-> | GitHub Release creation | Not implemented | Automatic `gh release create` after production deploy |
-> | Security scan gate | `pip-audit` + `bandit` advisory (`continue-on-error: true`) | Hard CI failure |
-> | Integration tests in CI | Not run (no Postgres/Redis services wired) | Dedicated job with managed service containers |
->
-> The Mermaid diagrams in §6.7 and §6.8 reflect the **target architecture**. The YAML snippets in §6.4 and §6.5 reflect the **target workflow**. The live `ci.yml` in §6.2 is a faithful mirror of the actual file.
+> | Staging trigger | Push to `development` | Push to `release/**` |
+> | Production trigger | Push to `main` | Push to `main` (unchanged) + `v*` tag |
+> | Image strategy | Single image, shared between API and worker runtimes | Same (no change planned) |
+> | Worker deployment | Not yet deployed to K8s; runs in local dev only | `arq-worker` Deployment in `k8s/base/` |
+> | Smoke / canary tests | Not implemented | Post-deploy smoke (staging) + canary (prod) |
+> | Coverage gate | `--cov-fail-under=65` enforced | 80 |
+> | SAST / SCA / DAST | Advisory (`continue-on-error: true`) | SAST hard fail; DAST gated on a live FastAPI + Postgres |
+> | Release tagging / GitHub Release | Not automated | `gh release create` on successful prod deploy |
+
+---
 
 ## 6.1 Platform Overview
 
-VerdictCouncil deploys to **DigitalOcean** using the following managed services:
+VerdictCouncil deploys to **DigitalOcean**:
 
 | Service | Purpose | Why |
 |---|---|---|
 | **DOKS** (DigitalOcean Kubernetes Service) | Container orchestration | Managed control plane, automatic upgrades, integrated load balancer |
 | **DOCR** (DigitalOcean Container Registry) | Docker image storage | Native DOKS integration, no image pull secrets needed |
-| **DO Managed PostgreSQL** | Case records, audit logs | Automated backups, failover, connection pooling — no StatefulSet to manage |
-| **DO Managed Redis** | Precedent caching, session state | Managed HA, eviction policies, TLS — no StatefulSet to manage |
-| **DO Load Balancer** | HTTPS ingress | Auto-provisioned by K8s ingress controller, Let's Encrypt integration |
-| **DO Spaces** | Backup storage, artifacts | S3-compatible object storage for database exports and CI artifacts |
+| **DO Managed PostgreSQL 16** | Case records, graph checkpoints, audit logs | Automated backups, failover, connection pooling |
+| **DO Managed Redis 7** | arq queue, precedent cache, PAIR rate-limit tokens | Managed HA, TLS, eviction policies |
+| **DO Load Balancer** | HTTPS ingress | Auto-provisioned by NGINX ingress controller; Let's Encrypt via cert-manager |
+| **DO Spaces** | Backup storage, CI artifacts | S3-compatible object storage |
 
 ### CI/CD Platform
 
-**GitHub Actions** drives all automation, using `doctl` (DigitalOcean CLI) for deployment:
+**GitHub Actions** drives all automation, using `doctl` for deployment.
 
 | Workflow | Trigger | Purpose | Target |
 |---|---|---|---|
-| `ci.yml` | Push to any branch (`**`); PR into `development` or `main` | Ruff lint + format check, pytest with coverage, OpenAPI snapshot, `pip-audit` + `bandit` (advisory), Docker build verification | — |
-| `staging-deploy.yml` | **Push to `development`** *(live)* / `release/**` *(target)* | Build single image, push to DOCR (`rc-{sha}` tag), deploy all 12 agent deployments via `kubectl set image`, wait 300s for rollout | DOKS staging namespace |
-| `production-deploy.yml` | Push to `main` | Build image (`v{semver}` tag), deploy to DOKS production via `kubectl apply`, wait for rollout | DOKS production namespace |
+| `ci.yml` | Push to any branch; PR into `development` or `main` | lint → unit tests (65% cov) → SAST (bandit + semgrep) → SCA (pip-audit + safety + cyclonedx-bom SBOM) → DAST (smoke FastAPI behind a Postgres service, header + contract checks) → docker build verification → security summary | — |
+| `staging-deploy.yml` | Push to `development` *(live)* / `release/**` *(target)* | Build single image, push to DOCR as `rc-{sha}`, `kubectl apply -k k8s/overlays/staging/`, render secrets, run Alembic, roll `api-service` | DOKS `verdictcouncil-staging` |
+| `production-deploy.yml` | Push to `main` | Build image with `v{semver}` + `latest` tags, `kubectl apply -k k8s/overlays/production/`, render secrets, run Alembic, roll all deployments | DOKS `verdictcouncil` |
 
 ### GitHub Secrets Required
 
-| Secret | Description | Used By |
-|---|---|---|
-| `DIGITALOCEAN_ACCESS_TOKEN` | DO API token (read/write) | All deploy workflows |
-| `DOCR_REGISTRY_NAME` | Container registry name (e.g., `verdictcouncil`) | Build & push jobs |
-| `DOKS_CLUSTER_ID_STAGING` | DOKS cluster ID for staging | Staging deploy |
-| `DOKS_CLUSTER_ID_PRODUCTION` | DOKS cluster ID for production | Production deploy |
-| `STAGING_URL` | Staging gateway URL (e.g., `https://staging-api.verdictcouncil.sg`) | Smoke tests |
-| `STAGING_TEST_PASSWORD` | Test account password for staging | Smoke tests |
-| `PRODUCTION_URL` | Production gateway URL (e.g., `https://api.verdictcouncil.sg`) | Canary tests |
-| `CANARY_TEST_PASSWORD` | Canary test account password | Canary tests |
+| Secret | Purpose |
+|---|---|
+| `DIGITALOCEAN_ACCESS_TOKEN` | All deploy workflows |
+| `DOCR_REGISTRY` | Fully qualified registry prefix (e.g. `registry.digitalocean.com/verdictcouncil`) |
+| `DOKS_STAGING_CLUSTER_ID` | Staging DOKS cluster ID |
+| `DOKS_PRODUCTION_CLUSTER_ID` | Production DOKS cluster ID |
+| `OPENAI_API_KEY` | Application secret — rendered into the K8s secret at deploy time |
+| `OPENAI_VECTOR_STORE_ID` | Application secret — rendered at deploy time |
+| `STAGING_DATABASE_URL`, `STAGING_REDIS_URL`, `STAGING_JWT_SECRET`, `STAGING_FRONTEND_ORIGINS` | Staging env wiring |
+| `DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`, `FRONTEND_ORIGINS` | Production env wiring |
 
-Application secrets (OPENAI_API_KEY, database credentials, etc.) are stored as Kubernetes Secrets in each DOKS cluster — not as GitHub Secrets. See [Part 8: Infrastructure Setup](08-infrastructure-setup.md) for provisioning instructions.
+Application secrets are **not** stored as plain K8s secrets in git; the deploy job renders them from GitHub Secrets into `verdictcouncil-secrets` via `kubectl create secret --dry-run=client | kubectl apply -f -`. The pod reads them via `envFrom: secretRef`.
 
 ---
 
-## 6.2 CI Workflow
+## 6.2 CI Workflow (live)
 
-The live workflow (`.github/workflows/ci.yml`) runs five jobs on every push and on PRs into `development` or `main`. Security scanning runs in advisory mode (`continue-on-error: true`); `mypy` and coverage gating are not currently enforced and are tracked as follow-up work.
+Seven jobs run on every push and on PRs into `development` or `main`. The DAST job spins up a Postgres service and a bare FastAPI instance; it runs basic header checks and the API contract tests. Security scans currently run in advisory mode — fix the findings on follow-up rather than trust the green tick.
 
 ```yaml
-# .github/workflows/ci.yml — mirror of the live file
+# .github/workflows/ci.yml — live (summary)
 name: CI
-
 on:
   push:
     branches: ["**"]
@@ -71,1067 +71,502 @@ on:
     branches: [development, main]
 
 jobs:
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - run: pip install ruff
-      - run: ruff check src/ tests/
-      - run: ruff format --check src/ tests/
-
-  test:
-    runs-on: ubuntu-latest
-    needs: lint
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - run: pip install -e ".[dev]"
-      - run: pytest tests/ -v --tb=short --cov=src --cov-report=term-missing
-        env:
-          OPENAI_API_KEY: ""
-
-  openapi:
-    runs-on: ubuntu-latest
-    needs: lint
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - run: pip install -e .
-      - name: Regenerate OpenAPI snapshot
-        run: python -m scripts.export_openapi docs/openapi.json
-      - name: Verify docs/openapi.json is up to date
-        run: |
-          if ! git diff --exit-code docs/openapi.json; then
-            echo "::error::docs/openapi.json is out of date — run 'make openapi-snapshot' locally and commit the diff"
-            exit 1
-          fi
-
-  security:
-    runs-on: ubuntu-latest
-    needs: lint
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - run: pip install pip-audit bandit
-      - run: pip install -e .
-      - run: pip-audit
-        continue-on-error: true
-      - run: bandit -r src/ -ll
-        continue-on-error: true
-
-  docker:
-    runs-on: ubuntu-latest
-    needs: test
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: false
-          tags: verdictcouncil:test
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+  lint:                 # ruff check + ruff format --check on src/ and tests/
+  unit-tests:           # pytest --cov=src --cov-fail-under=65 (OPENAI_API_KEY blanked)
+  sast:                 # bandit -r src/ + semgrep (p/security-audit, p/owasp-top-ten) → SARIF upload
+  sca:                  # pip-audit --desc + safety check + cyclonedx-bom SBOM
+  dast:                 # Postgres service; start uvicorn on :8000; header check; tests/integration/test_api_contract.py
+  build:                # docker buildx with GHA cache (no push)
+  security-summary:     # aggregates pip-audit + bandit output (advisory)
 ```
 
-### Gaps vs. target state
-
-The table below records differences between the live workflow and the production CI we aim for. Each row is tracked for follow-up rather than described as already in place.
+### Gaps vs. target
 
 | Area | Today | Target |
 |---|---|---|
-| Type checking | Not run in CI | `mypy src/` enforced in `lint` job |
-| Coverage gate | `--cov-report=term-missing` only (advisory) | `--cov-fail-under=80` enforced |
-| Security scans | `pip-audit` + `bandit` advisory (`continue-on-error`) | Both enforced as hard failures |
-| Integration tests | No Postgres/Redis services in CI; `tests/integration/*` run only when `INTEGRATION_TESTS=1` | Dedicated `integration-tests` job with managed services |
+| Type checking | Not run | `mypy src/` in `lint` job |
+| Coverage gate | 65 | 80 |
+| SAST enforcement | `continue-on-error: true` on bandit + semgrep | Hard failure on medium+ findings |
+| Integration tests | Not run in CI (run locally via `INTEGRATION_TESTS=1`) | Dedicated `integration-tests` job with Postgres + Redis services |
+| Frontend snapshot diffing | N/A here | See frontend repo |
 
 ---
 
 ## 6.3 Docker Strategy
 
-### Single Image Architecture
+### Single image, two runtimes
 
-All SAM agents share the same runtime, tools, and dependencies. A single Docker image contains the full SAM installation with all YAML configs and Python tools. Each Kubernetes deployment mounts a different config file via the `--config` argument.
+The API (uvicorn) and the arq worker ship from the same image. The K8s manifests override `command`/`args` to select the entrypoint.
 
 ```dockerfile
-# Dockerfile
-# Stage 1: Builder — install all dependencies
+# Dockerfile — single source of truth for both api and worker
 FROM python:3.12-slim AS builder
-
 WORKDIR /build
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential \
     && rm -rf /var/lib/apt/lists/*
-
 COPY pyproject.toml .
+COPY src/ src/
 RUN pip install --no-cache-dir --prefix=/install .
 
-# Stage 2: Runtime — minimal image
 FROM python:3.12-slim AS runtime
-
 WORKDIR /app
-
-# Copy installed packages from builder
+# WeasyPrint deps for PDF export (hearing-pack endpoint)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b libcairo2 \
+    libgdk-pixbuf-2.0-0 fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /install /usr/local
-
-# Copy all source code, tools, and configs
 COPY src/ /app/src/
 COPY configs/ /app/configs/
-
-# Non-root user for security
 RUN groupadd -r vcagent && useradd -r -g vcagent vcagent
 USER vcagent
-
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONPATH=/app
-
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/app
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
-    CMD python -c "import sys; sys.exit(0)"
-
-# Default entrypoint; override --config per deployment
-ENTRYPOINT ["python", "-m", "solace_agent_mesh.main"]
-CMD ["--config", "/app/configs/agents/case-processing.yaml"]
+    CMD python -c "import httpx; httpx.get('http://localhost:8001/api/v1/health')" || exit 1
+ENTRYPOINT ["uvicorn"]
+CMD ["src.api.app:app", "--host", "0.0.0.0", "--port", "8001"]
 ```
 
-Each K8s deployment overrides the CMD to point to a different YAML config:
+K8s overrides:
 
 ```yaml
-# Example: case-processing deployment
-containers:
-  - name: case-processing
-    image: registry.digitalocean.com/{registry_name}/verdictcouncil:{tag}
-    args: ["--config", "/app/configs/agents/case-processing.yaml"]
+# api-service (live in k8s/base/deployment-api-service.yaml)
+command: ["uvicorn"]
+args: ["src.api.app:app", "--host", "0.0.0.0", "--port", "8001"]
+
+# arq-worker (target — not yet in k8s/base/)
+command: ["arq"]
+args: ["src.workers.worker_settings.WorkerSettings"]
 ```
 
-### Image Naming Convention
-
-Images are stored in DigitalOcean Container Registry (DOCR):
+### Image naming
 
 ```
-registry.digitalocean.com/{registry_name}/verdictcouncil:{tag}
+{DOCR_REGISTRY}/verdictcouncil:{tag}
 ```
 
-Tag formats:
-- Feature builds: `feat-{branch}-{sha}` (never pushed)
-- Staging: `rc-{sha}` + `staging-latest`
-- Production: `v1.2.0` (semver from git tag) + `latest`
+| Stage | Tag | Source |
+|---|---|---|
+| Feature CI | (no push) | GHA cache only |
+| Staging | `rc-{sha}` | `staging-deploy.yml` |
+| Production | `v{semver}` + `latest` | `production-deploy.yml` (reads `git describe --tags --abbrev=0`) |
 
 ### DOCR Integration with DOKS
 
-DOCR registries can be integrated directly with DOKS clusters, eliminating the need for image pull secrets:
-
 ```bash
-doctl registry kubernetes-manifest | kubectl apply -f -
-# or
 doctl kubernetes cluster registry add <cluster-id>
 ```
 
-Once integrated, DOKS nodes can pull images from DOCR without authentication configuration.
+Once bound, DOKS nodes pull from DOCR without image pull secrets.
 
 ---
 
-## 6.4 Staging Deploy Workflow
+## 6.4 Staging Deploy Workflow (live)
 
 ```yaml
-# .github/workflows/staging-deploy.yml
-name: Staging Deploy
-
+# .github/workflows/staging-deploy.yml — live
+name: Deploy to Staging
 on:
   push:
-    branches:
-      - 'release/**'
-
-env:
-  REGISTRY: registry.digitalocean.com
-  REGISTRY_NAME: ${{ secrets.DOCR_REGISTRY_NAME }}
+    branches: [development]
 
 jobs:
-  build-and-push:
-    name: Build & Push Images
+  deploy:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        agent:
-          - web-gateway
-          - case-processing
-          - complexity-routing
-          - evidence-analysis
-          - fact-reconstruction
-          - witness-analysis
-          - legal-knowledge
-          - argument-construction
-          - deliberation
-          - governance-verdict
-          - layer2-aggregator
-          - whatif-controller
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install doctl
-        uses: digitalocean/action-doctl@v2
-        with:
-          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
-
-      - name: Log in to DOCR
-        run: doctl registry login --expiry-seconds 600
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Extract short SHA
-        id: sha
-        run: echo "short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
-
-      - name: Build and push
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./docker/${{ matrix.agent }}/Dockerfile
-          push: true
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.REGISTRY_NAME }}/${{ matrix.agent }}:rc-${{ steps.sha.outputs.short }}
-            ${{ env.REGISTRY }}/${{ env.REGISTRY_NAME }}/${{ matrix.agent }}:staging-latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  deploy-staging:
-    name: Deploy to DOKS Staging
-    runs-on: ubuntu-latest
-    needs: build-and-push
     environment: staging
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - uses: digitalocean/action-doctl@v2
+        with: { token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }} }
+      - run: doctl registry login
 
-      - name: Install doctl
-        uses: digitalocean/action-doctl@v2
-        with:
-          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
-
-      - name: Configure kubectl for DOKS staging
-        run: doctl kubernetes cluster kubeconfig save ${{ secrets.DOKS_CLUSTER_ID_STAGING }}
-
-      - name: Extract short SHA
-        id: sha
-        run: echo "short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
-
-      - name: Update image tags in manifests
+      - name: Build and push image
         run: |
-          AGENTS=(
-            web-gateway
-            case-processing
-            complexity-routing
-            evidence-analysis
-            fact-reconstruction
-            witness-analysis
-            legal-knowledge
-            argument-construction
-            deliberation
-            governance-verdict
-            layer2-aggregator
-            whatif-controller
-          )
-          for agent in "${AGENTS[@]}"; do
-            sed -i "s|image:.*${agent}:.*|image: ${{ env.REGISTRY }}/${{ env.REGISTRY_NAME }}/${agent}:rc-${{ steps.sha.outputs.short }}|" \
-              k8s/staging/${agent}-deployment.yaml
-          done
+          IMAGE=${{ secrets.DOCR_REGISTRY }}/verdictcouncil:rc-${{ github.sha }}
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
 
-      - name: Apply Kubernetes manifests
-        run: kubectl apply -f k8s/staging/ --namespace verdictcouncil-staging
+      - name: Configure kubectl
+        run: doctl kubernetes cluster kubeconfig save ${{ secrets.DOKS_STAGING_CLUSTER_ID }}
 
-      - name: Wait for rollout
+      - name: Apply manifests
+        run: kubectl apply -k k8s/overlays/staging/
+
+      - name: Render secrets
         run: |
-          DEPLOYMENTS=$(kubectl get deployments -n verdictcouncil-staging -o name)
-          for deploy in $DEPLOYMENTS; do
-            kubectl rollout status "$deploy" -n verdictcouncil-staging --timeout=300s
-          done
+          kubectl create secret generic verdictcouncil-secrets \
+            --namespace verdictcouncil-staging \
+            --from-literal=OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }} \
+            --from-literal=DATABASE_URL=${{ secrets.STAGING_DATABASE_URL }} \
+            --from-literal=REDIS_URL=${{ secrets.STAGING_REDIS_URL }} \
+            --from-literal=JWT_SECRET=${{ secrets.STAGING_JWT_SECRET }} \
+            --from-literal=OPENAI_VECTOR_STORE_ID=${{ secrets.OPENAI_VECTOR_STORE_ID }} \
+            --from-literal=FRONTEND_ORIGINS=${{ secrets.STAGING_FRONTEND_ORIGINS }} \
+            --from-literal=COOKIE_SECURE=true \
+            --from-literal=NAMESPACE=verdictcouncil \
+            --from-literal=FASTAPI_HOST=0.0.0.0 \
+            --from-literal=FASTAPI_PORT=8001 \
+            --dry-run=client -o yaml | kubectl apply -f -
 
-  smoke-test:
-    name: Smoke Test
-    runs-on: ubuntu-latest
-    needs: deploy-staging
-    environment: staging
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Wait for services to stabilise
-        run: sleep 15
-
-      - name: Health check gateway
+      - name: Run database migrations
         run: |
-          STAGING_URL="${{ secrets.STAGING_URL }}"
-          response=$(curl -s -o /dev/null -w "%{http_code}" "${STAGING_URL}/health")
-          if [ "$response" != "200" ]; then
-            echo "Gateway health check failed with status $response"
-            exit 1
-          fi
-          echo "Gateway health check passed"
+          kubectl delete job alembic-migrate --namespace verdictcouncil-staging --ignore-not-found
+          sed "s|verdictcouncil:latest|$IMAGE|g" k8s/base/job-alembic-migrate.yaml | \
+            kubectl apply --namespace verdictcouncil-staging -f -
+          kubectl wait --for=condition=complete job/alembic-migrate \
+            --namespace verdictcouncil-staging --timeout=300s
 
-      - name: Submit test case
+      - name: Roll image
         run: |
-          STAGING_URL="${{ secrets.STAGING_URL }}"
-
-          # Authenticate
-          TOKEN=$(curl -s -X POST "${STAGING_URL}/auth/login" \
-            -H "Content-Type: application/json" \
-            -d '{"email":"test-judge@verdictcouncil.sg","password":"${{ secrets.STAGING_TEST_PASSWORD }}"}' \
-            | jq -r '.token')
-
-          # Submit test case
-          CASE_ID=$(curl -s -X POST "${STAGING_URL}/api/v1/cases" \
-            -H "Authorization: Bearer ${TOKEN}" \
-            -F "documents=@tests/fixtures/test_case.pdf" \
-            -F "domain=small_claims" \
-            | jq -r '.case_id')
-
-          echo "Test case submitted: ${CASE_ID}"
-          echo "case_id=${CASE_ID}" >> "$GITHUB_ENV"
-
-      - name: Wait for pipeline completion
-        run: |
-          STAGING_URL="${{ secrets.STAGING_URL }}"
-          MAX_WAIT=300
-          ELAPSED=0
-          while [ $ELAPSED -lt $MAX_WAIT ]; do
-            STATUS=$(curl -s "${STAGING_URL}/api/v1/cases/${case_id}" \
-              -H "Authorization: Bearer ${TOKEN}" \
-              | jq -r '.status')
-            if [ "$STATUS" = "ready_for_review" ] || [ "$STATUS" = "escalated" ]; then
-              echo "Pipeline completed with status: ${STATUS}"
-              exit 0
-            fi
-            sleep 10
-            ELAPSED=$((ELAPSED + 10))
-            echo "Waiting... (${ELAPSED}s / ${MAX_WAIT}s) — current status: ${STATUS}"
-          done
-          echo "Pipeline did not complete within ${MAX_WAIT}s"
-          exit 1
-
-  notify:
-    name: Notify
-    runs-on: ubuntu-latest
-    needs: [deploy-staging, smoke-test]
-    if: always()
-    steps:
-      - name: Post deployment status
-        run: |
-          if [ "${{ needs.smoke-test.result }}" = "success" ]; then
-            echo "Staging deployment successful"
-          else
-            echo "Staging deployment failed — check workflow logs"
-            exit 1
-          fi
+          kubectl set image -n verdictcouncil-staging \
+            deployment/api-service api-service=$IMAGE
+          kubectl rollout status -n verdictcouncil-staging deployment --timeout=300s
 ```
+
+**Known follow-ups** (not in the live workflow yet):
+
+- Add a **smoke job** that hits `/api/v1/health`, logs in as the staging test user, submits a fixture case, and polls `/api/v1/cases/{id}` until `ready_for_review` or `escalated` (or fails after 300s).
+- Once the arq-worker Deployment lands, roll both: `kubectl set image -n <ns> deployment/arq-worker arq-worker=$IMAGE`.
 
 ---
 
-## 6.5 Production Deploy Workflow
+## 6.5 Production Deploy Workflow (live)
 
 ```yaml
-# .github/workflows/production-deploy.yml
-name: Production Deploy
-
+# .github/workflows/production-deploy.yml — live
+name: Deploy to Production
 on:
   push:
-    branches:
-      - main
-
-env:
-  REGISTRY: registry.digitalocean.com
-  REGISTRY_NAME: ${{ secrets.DOCR_REGISTRY_NAME }}
+    branches: [main]
 
 jobs:
-  build-and-push:
-    name: Build & Push Release Images
+  deploy:
     runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.version.outputs.tag }}
-    strategy:
-      matrix:
-        agent:
-          - web-gateway
-          - case-processing
-          - complexity-routing
-          - evidence-analysis
-          - fact-reconstruction
-          - witness-analysis
-          - legal-knowledge
-          - argument-construction
-          - deliberation
-          - governance-verdict
-          - layer2-aggregator
-          - whatif-controller
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Get version from git tag
-        id: version
-        run: |
-          TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
-          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-          echo "Building version: ${TAG}"
-
-      - name: Install doctl
-        uses: digitalocean/action-doctl@v2
-        with:
-          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
-
-      - name: Log in to DOCR
-        run: doctl registry login --expiry-seconds 600
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build and push
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./docker/${{ matrix.agent }}/Dockerfile
-          push: true
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.REGISTRY_NAME }}/${{ matrix.agent }}:${{ steps.version.outputs.tag }}
-            ${{ env.REGISTRY }}/${{ env.REGISTRY_NAME }}/${{ matrix.agent }}:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  deploy-production:
-    name: Deploy to DOKS Production
-    runs-on: ubuntu-latest
-    needs: build-and-push
     environment: production
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      - uses: actions/checkout@v4
+      - uses: digitalocean/action-doctl@v2
+        with: { token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }} }
+      - run: doctl registry login
 
-      - name: Install doctl
-        uses: digitalocean/action-doctl@v2
-        with:
-          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
-
-      - name: Configure kubectl for DOKS production
-        run: doctl kubernetes cluster kubeconfig save ${{ secrets.DOKS_CLUSTER_ID_PRODUCTION }}
-
-      - name: Get version
-        id: version
+      - name: Build and push image
         run: |
-          TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
-          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "latest")
+          IMAGE=${{ secrets.DOCR_REGISTRY }}/verdictcouncil:$TAG
+          docker build -t "$IMAGE" .
+          docker tag "$IMAGE" ${{ secrets.DOCR_REGISTRY }}/verdictcouncil:latest
+          docker push "$IMAGE"
+          docker push ${{ secrets.DOCR_REGISTRY }}/verdictcouncil:latest
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
 
-      - name: Update image tags in manifests
+      - name: Configure kubectl
+        run: doctl kubernetes cluster kubeconfig save ${{ secrets.DOKS_PRODUCTION_CLUSTER_ID }}
+
+      - name: Apply manifests
+        run: kubectl apply -k k8s/overlays/production/
+
+      - name: Render secrets
         run: |
-          AGENTS=(
-            web-gateway
-            case-processing
-            complexity-routing
-            evidence-analysis
-            fact-reconstruction
-            witness-analysis
-            legal-knowledge
-            argument-construction
-            deliberation
-            governance-verdict
-            layer2-aggregator
-            whatif-controller
-          )
-          for agent in "${AGENTS[@]}"; do
-            sed -i "s|image:.*${agent}:.*|image: ${{ env.REGISTRY }}/${{ env.REGISTRY_NAME }}/${agent}:${{ steps.version.outputs.tag }}|" \
-              k8s/production/${agent}-deployment.yaml
-          done
+          kubectl create secret generic verdictcouncil-secrets \
+            --namespace verdictcouncil \
+            --from-literal=OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }} \
+            --from-literal=DATABASE_URL=${{ secrets.DATABASE_URL }} \
+            --from-literal=REDIS_URL=${{ secrets.REDIS_URL }} \
+            --from-literal=JWT_SECRET=${{ secrets.JWT_SECRET }} \
+            --from-literal=OPENAI_VECTOR_STORE_ID=${{ secrets.OPENAI_VECTOR_STORE_ID }} \
+            --from-literal=FRONTEND_ORIGINS=${{ secrets.FRONTEND_ORIGINS }} \
+            --from-literal=COOKIE_SECURE=true \
+            --from-literal=NAMESPACE=verdictcouncil \
+            --from-literal=FASTAPI_HOST=0.0.0.0 \
+            --from-literal=FASTAPI_PORT=8001 \
+            --dry-run=client -o yaml | kubectl apply -f -
 
-      - name: Apply Kubernetes manifests (rolling update)
-        run: kubectl apply -f k8s/production/ --namespace verdictcouncil
-
-      - name: Wait for rollout
+      - name: Run database migrations
         run: |
-          DEPLOYMENTS=$(kubectl get deployments -n verdictcouncil -o name)
-          for deploy in $DEPLOYMENTS; do
-            kubectl rollout status "$deploy" -n verdictcouncil --timeout=600s
-          done
+          kubectl delete job alembic-migrate --namespace verdictcouncil --ignore-not-found
+          sed "s|verdictcouncil:latest|$IMAGE|g" k8s/base/job-alembic-migrate.yaml | \
+            kubectl apply --namespace verdictcouncil -f -
+          kubectl wait --for=condition=complete job/alembic-migrate \
+            --namespace verdictcouncil --timeout=300s
 
-  verify:
-    name: Production Verification
-    runs-on: ubuntu-latest
-    needs: deploy-production
-    environment: production
-    steps:
-      - name: Health check gateway
+      - name: Roll image
         run: |
-          PROD_URL="${{ secrets.PRODUCTION_URL }}"
-          response=$(curl -s -o /dev/null -w "%{http_code}" "${PROD_URL}/health")
-          if [ "$response" != "200" ]; then
-            echo "Production health check failed with status $response"
-            exit 1
-          fi
-          echo "Production health check passed"
-
-      - name: Canary test case
-        run: |
-          PROD_URL="${{ secrets.PRODUCTION_URL }}"
-
-          TOKEN=$(curl -s -X POST "${PROD_URL}/auth/login" \
-            -H "Content-Type: application/json" \
-            -d '{"email":"canary@verdictcouncil.sg","password":"${{ secrets.CANARY_TEST_PASSWORD }}"}' \
-            | jq -r '.token')
-
-          CASE_ID=$(curl -s -X POST "${PROD_URL}/api/v1/cases" \
-            -H "Authorization: Bearer ${TOKEN}" \
-            -F "documents=@tests/fixtures/canary_case.pdf" \
-            -F "domain=small_claims" \
-            | jq -r '.case_id')
-
-          echo "Canary case submitted: ${CASE_ID}"
-
-          MAX_WAIT=300
-          ELAPSED=0
-          while [ $ELAPSED -lt $MAX_WAIT ]; do
-            STATUS=$(curl -s "${PROD_URL}/api/v1/cases/${CASE_ID}" \
-              -H "Authorization: Bearer ${TOKEN}" \
-              | jq -r '.status')
-            if [ "$STATUS" = "ready_for_review" ] || [ "$STATUS" = "escalated" ]; then
-              echo "Canary passed with status: ${STATUS}"
-              exit 0
-            fi
-            sleep 10
-            ELAPSED=$((ELAPSED + 10))
-          done
-          echo "Canary test did not complete within ${MAX_WAIT}s"
-          exit 1
-
-  create-release:
-    name: Create GitHub Release
-    runs-on: ubuntu-latest
-    needs: verify
-    permissions:
-      contents: write
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Get version
-        id: version
-        run: |
-          TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
-          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-
-      - name: Create GitHub Release
-        run: |
-          gh release create "${{ steps.version.outputs.tag }}" \
-            --title "${{ steps.version.outputs.tag }}" \
-            --generate-notes \
-            --target main
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          kubectl set image -n verdictcouncil deployment --all "*=$IMAGE"
+          kubectl rollout status -n verdictcouncil deployment --timeout=300s
 ```
+
+**Known follow-ups:**
+
+- Add a **canary job** post-deploy that replicates the staging smoke test against the production URL (with a dedicated test account that cannot touch real case data).
+- Automate GitHub Release creation: `gh release create "$TAG" --generate-notes --target main`.
+- Gate the workflow on the presence of a `v*` tag on `HEAD`; fail if tag is missing rather than silently pushing `latest`.
 
 ---
 
-## 6.6 Kubernetes Manifests for DOKS
+## 6.6 Kubernetes Manifests
 
-With DigitalOcean Managed PostgreSQL and Redis, the K8s manifests are simpler — no StatefulSets for databases. The cluster runs only application containers and the Solace broker.
+Layout:
 
-### Deployment Containers (DOKS)
+```
+k8s/
+├── base/
+│   ├── namespace.yaml
+│   ├── deployment-api-service.yaml
+│   ├── service-api-service.yaml
+│   ├── ingress.yaml
+│   ├── cronjob-stuck-case-watchdog.yaml
+│   ├── job-alembic-migrate.yaml            # applied separately by deploy workflow, not via kustomize
+│   ├── secrets.yaml                        # template only; populated at deploy time
+│   └── kustomization.yaml
+└── overlays/
+    ├── staging/
+    │   └── kustomization.yaml              # namespace: verdictcouncil-staging
+    └── production/
+        └── kustomization.yaml              # namespace: verdictcouncil
+```
 
-| Container | Type | Replicas | Notes |
-|---|---|---|---|
-| web-gateway | Deployment | 2-5 (HPA) | Public-facing, auto-scaled |
-| case-processing | Deployment | 1 | Lightweight agent |
-| complexity-routing | Deployment | 1 | Lightweight agent |
-| evidence-analysis | Deployment | 1 | GPU-optional, high memory |
-| fact-reconstruction | Deployment | 1 | High memory |
-| witness-analysis | Deployment | 1 | Medium resources |
-| legal-knowledge | Deployment | 1 | Medium resources |
-| argument-construction | Deployment | 1 | High memory |
-| deliberation | Deployment | 1 | High memory |
-| governance-verdict | Deployment | 1 | High memory |
-| layer2-aggregator | Deployment | 1 | Stateless fan-in barrier |
-| whatif-controller | Deployment | 1 | Scenario orchestrator |
-| solace-broker | StatefulSet | 1 | Event broker (self-hosted) |
+Registered in the base kustomization: `namespace`, `deployment-api-service`, `service-api-service`, `ingress`, `cronjob-stuck-case-watchdog`. The Alembic job is applied separately by the deploy workflows so it can be sed'd to the current image tag.
 
-**Total: 13 pods** (12 Deployments + 1 StatefulSet for Solace)
-
-PostgreSQL and Redis run as DO Managed Services outside the cluster and are accessed via private networking connection strings.
-
-### Agent Deployment + Service (Template)
+### API Service Deployment (live)
 
 ```yaml
-# k8s/base/agent-deployment.yaml (example: case-processing)
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: case-processing
+  name: api-service
   namespace: verdictcouncil
-  labels:
-    app: case-processing
-    component: agent
+  labels: {app: verdictcouncil, component: api-service}
 spec:
   replicas: 1
   selector:
-    matchLabels:
-      app: case-processing
+    matchLabels: {app: verdictcouncil, component: api-service}
   template:
     metadata:
-      labels:
-        app: case-processing
-        component: agent
-      annotations:
-        prometheus.io/scrape: "true"
-        prometheus.io/port: "9090"
+      labels: {app: verdictcouncil, component: api-service}
     spec:
-      serviceAccountName: verdictcouncil-agent
       containers:
-        - name: case-processing
-          image: registry.digitalocean.com/verdictcouncil/case-processing:latest
+        - name: api-service
+          image: verdictcouncil:latest
+          command: ["uvicorn"]
+          args: ["src.api.app:app", "--host", "0.0.0.0", "--port", "8001"]
           ports:
-            - containerPort: 9090
-              name: metrics
+            - containerPort: 8001
           envFrom:
-            - configMapRef:
-                name: agent-common-config
-            - secretRef:
-                name: verdictcouncil-secrets
-          env:
-            - name: AGENT_NAME
-              value: "case-processing"
+            - secretRef: {name: verdictcouncil-secrets}
           resources:
-            requests:
-              cpu: 250m
-              memory: 256Mi
-            limits:
-              cpu: 500m
-              memory: 512Mi
-          readinessProbe:
-            httpGet:
-              path: /health
-              port: 9090
-            initialDelaySeconds: 10
-            periodSeconds: 15
+            requests: {cpu: 250m, memory: 256Mi}
+            limits:   {cpu: 500m, memory: 512Mi}
           livenessProbe:
-            httpGet:
-              path: /health
-              port: 9090
-            initialDelaySeconds: 30
+            httpGet: {path: /metrics, port: 8001}
+            initialDelaySeconds: 15
             periodSeconds: 30
-      restartPolicy: Always
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: case-processing-svc
-  namespace: verdictcouncil
-  labels:
-    app: case-processing
-spec:
-  type: ClusterIP
-  selector:
-    app: case-processing
-  ports:
-    - port: 9090
-      targetPort: 9090
-      name: metrics
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: {path: /metrics, port: 8001}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
 ```
 
-### ConfigMap for Agent Configuration
+### arq Worker Deployment (target — not yet in `k8s/base/`)
 
 ```yaml
-# k8s/base/agent-configmap.yaml
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: agent-common-config
-  namespace: verdictcouncil
-  labels:
-    component: config
-data:
-  SOLACE_BROKER_URL: "tcp://solace-broker-svc:55555"
-  SOLACE_BROKER_VPN: "verdictcouncil"
-  # DATABASE_URL and REDIS_URL point to DO Managed Services via private network.
-  # Connection strings use the private hostname provided by DigitalOcean
-  # (e.g., private-db-verdictcouncil-do-user-xxxxx-0.db.ondigitalocean.com).
-  # Credentials are in the Secret, not here.
-  POSTGRES_HOST: "private-db-verdictcouncil-do-user-xxxxx-0.db.ondigitalocean.com"
-  POSTGRES_PORT: "25060"
-  POSTGRES_DB: "verdictcouncil"
-  REDIS_URL: "rediss://private-redis-verdictcouncil-do-user-xxxxx-0.db.ondigitalocean.com:25061/0"
-  FASTAPI_HOST: "0.0.0.0"
-  FASTAPI_PORT: "8000"
-  LOG_LEVEL: "INFO"
-  NAMESPACE: "verdictcouncil"
-  PRECEDENT_CACHE_TTL_SECONDS: "86400"
-  PAIR_API_URL: "https://search.pair.gov.sg/api/v1/search"
-```
-
-**Note:** DO Managed PostgreSQL uses port `25060` (default) and Managed Redis uses port `25061` with TLS (`rediss://` scheme). The private hostnames are auto-assigned when the databases are created and are only reachable from resources in the same VPC.
-
-### Secret for Credentials
-
-```yaml
-# k8s/base/secrets.yaml (values are base64-encoded placeholders)
-apiVersion: v1
-kind: Secret
-metadata:
-  name: verdictcouncil-secrets
-  namespace: verdictcouncil
-  labels:
-    component: secrets
-type: Opaque
-data:
-  OPENAI_API_KEY: "BASE64_ENCODED_VALUE"
-  SOLACE_BROKER_USERNAME: "BASE64_ENCODED_VALUE"
-  SOLACE_BROKER_PASSWORD: "BASE64_ENCODED_VALUE"
-  POSTGRES_USER: "BASE64_ENCODED_VALUE"
-  POSTGRES_PASSWORD: "BASE64_ENCODED_VALUE"
-  JWT_SECRET: "BASE64_ENCODED_VALUE"
-```
-
-### Solace Broker StatefulSet
-
-The Solace PubSub+ Event Broker runs as a StatefulSet within DOKS since DigitalOcean does not offer a managed Solace service:
-
-```yaml
-# k8s/base/solace-broker-statefulset.yaml
 apiVersion: apps/v1
-kind: StatefulSet
+kind: Deployment
 metadata:
-  name: solace-broker
+  name: arq-worker
   namespace: verdictcouncil
-  labels:
-    app: solace-broker
-    component: broker
+  labels: {app: verdictcouncil, component: arq-worker}
 spec:
-  serviceName: solace-broker-svc
   replicas: 1
   selector:
-    matchLabels:
-      app: solace-broker
+    matchLabels: {app: verdictcouncil, component: arq-worker}
   template:
     metadata:
-      labels:
-        app: solace-broker
-        component: broker
+      labels: {app: verdictcouncil, component: arq-worker}
     spec:
       containers:
-        - name: solace
-          image: solace/solace-pubsub-standard:latest
-          ports:
-            - containerPort: 55555
-              name: smf
-            - containerPort: 8080
-              name: semp
-            - containerPort: 1883
-              name: mqtt
-            - containerPort: 5672
-              name: amqp
-          env:
-            - name: username_admin_globalaccesslevel
-              value: admin
-            - name: username_admin_password
-              valueFrom:
-                secretKeyRef:
-                  name: verdictcouncil-secrets
-                  key: SOLACE_BROKER_PASSWORD
-            - name: system_scaling_maxconnectioncount
-              value: "100"
+        - name: arq-worker
+          image: verdictcouncil:latest
+          command: ["arq"]
+          args: ["src.workers.worker_settings.WorkerSettings"]
+          envFrom:
+            - secretRef: {name: verdictcouncil-secrets}
           resources:
-            requests:
-              cpu: 500m
-              memory: 1Gi
-            limits:
-              cpu: "1"
-              memory: 2Gi
-          volumeMounts:
-            - name: solace-data
-              mountPath: /var/lib/solace
-          readinessProbe:
-            httpGet:
-              path: /health-check/guaranteed-active
-              port: 5550
-            initialDelaySeconds: 30
-            periodSeconds: 10
-          livenessProbe:
-            httpGet:
-              path: /health-check/guaranteed-active
-              port: 5550
-            initialDelaySeconds: 60
-            periodSeconds: 30
-  volumeClaimTemplates:
-    - metadata:
-        name: solace-data
-      spec:
-        accessModes:
-          - ReadWriteOnce
-        storageClassName: do-block-storage
-        resources:
-          requests:
-            storage: 20Gi
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: solace-broker-svc
-  namespace: verdictcouncil
-  labels:
-    app: solace-broker
-spec:
-  type: ClusterIP
-  selector:
-    app: solace-broker
-  ports:
-    - port: 55555
-      targetPort: 55555
-      name: smf
-    - port: 8080
-      targetPort: 8080
-      name: semp
+            requests: {cpu: 500m, memory: 512Mi}
+            limits:   {cpu: 2,    memory: 2Gi}
+          # arq workers have no HTTP probe — check via prometheus_push or a file-based readiness marker
 ```
 
-### HorizontalPodAutoscaler for Web Gateway
+Rationale for keeping the worker separate from the API:
+- Pipeline runs spike CPU/memory while API stays steady; scaling independently is cheaper.
+- A stuck worker must not take the API (and therefore the frontend) down.
+- Logs are easier to reason about when job spans stay inside one container.
+
+### Ingress (live)
 
 ```yaml
-# k8s/base/web-gateway-hpa.yaml
-apiVersion: autoscaling/v2
-kind: HorizontalPodAutoscaler
-metadata:
-  name: web-gateway-hpa
-  namespace: verdictcouncil
-  labels:
-    app: web-gateway
-spec:
-  scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: web-gateway
-  minReplicas: 2
-  maxReplicas: 5
-  metrics:
-    - type: Resource
-      resource:
-        name: cpu
-        target:
-          type: Utilization
-          averageUtilization: 70
-    - type: Resource
-      resource:
-        name: memory
-        target:
-          type: Utilization
-          averageUtilization: 80
-  behavior:
-    scaleUp:
-      stabilizationWindowSeconds: 60
-      policies:
-        - type: Pods
-          value: 1
-          periodSeconds: 60
-    scaleDown:
-      stabilizationWindowSeconds: 300
-      policies:
-        - type: Pods
-          value: 1
-          periodSeconds: 120
-```
-
-### Ingress with DO Load Balancer
-
-DOKS auto-provisions a DigitalOcean Load Balancer when an Ingress resource is created. TLS termination is handled via cert-manager with Let's Encrypt:
-
-```yaml
-# k8s/base/ingress.yaml
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: verdictcouncil-ingress
   namespace: verdictcouncil
   annotations:
-    # DO Load Balancer annotations
-    kubernetes.digitalocean.com/load-balancer-id: ""
-    service.beta.kubernetes.io/do-loadbalancer-protocol: "http"
-    service.beta.kubernetes.io/do-loadbalancer-tls-ports: "443"
-    service.beta.kubernetes.io/do-loadbalancer-redirect-http-to-https: "true"
-    service.beta.kubernetes.io/do-loadbalancer-size-unit: "1"
-    # cert-manager for TLS
     cert-manager.io/cluster-issuer: letsencrypt-prod
-    # Nginx ingress controller settings
-    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
-    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"      # matches case_doc_max_upload_bytes
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"  # allows long SSE streams for in-flight pipelines
 spec:
   ingressClassName: nginx
   tls:
-    - hosts:
-        - api.verdictcouncil.sg
+    - hosts: [api.verdictcouncil.sg]
       secretName: verdictcouncil-tls
   rules:
     - host: api.verdictcouncil.sg
       http:
         paths:
-          - path: /
+          - path: /api/v1
             pathType: Prefix
             backend:
-              service:
-                name: web-gateway-svc
-                port:
-                  number: 8000
+              service: {name: api-service, port: {number: 8001}}
 ```
+
+### Stuck-Case Watchdog CronJob (live)
+
+Runs every 5 minutes; moves cases stuck > 30 min into `failed_retryable`. Shares the same image + secret.
+
+```yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: stuck-case-watchdog
+  namespace: verdictcouncil
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: watchdog
+              image: verdictcouncil:latest
+              command: ["python", "-m", "src.services.stuck_case_watchdog"]
+              envFrom:
+                - secretRef: {name: verdictcouncil-secrets}
+              resources:
+                requests: {cpu: 50m, memory: 128Mi}
+                limits:   {cpu: 100m, memory: 256Mi}
+```
+
+### Alembic Migrate Job (live)
+
+```yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: alembic-migrate
+  namespace: verdictcouncil
+spec:
+  ttlSecondsAfterFinished: 3600
+  backoffLimit: 2
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: migrate
+          image: verdictcouncil:latest
+          command: ["alembic", "upgrade", "head"]
+          envFrom:
+            - secretRef: {name: verdictcouncil-secrets}
+```
+
+### Secret template (not committed with real values)
+
+Production and staging both use `verdictcouncil-secrets` (populated by the deploy workflow). The template exists at `k8s/base/secrets.yaml` as a placeholder; values come from GitHub Secrets via `kubectl create secret --dry-run=client | kubectl apply -f -`.
+
+### HorizontalPodAutoscaler (target)
+
+Not in base yet. When the worker Deployment lands, scale it on queue depth (via a Prometheus adapter metric published by arq) and scale the API on CPU + RPS.
 
 ---
 
-## 6.7 Environment Promotion Diagram
+## 6.7 Environment Promotion
 
-```mermaid
-flowchart LR
-    subgraph Feature["Feature Development"]
-        FEAT["feat/* branch"]
-    end
-
-    subgraph CI["CI Pipeline"]
-        LINT["Lint & Type Check"]
-        UNIT["Unit Tests"]
-        INTEG["Integration Tests"]
-        SEC["Security Scan"]
-        BUILD["Docker Build Test"]
-    end
-
-    subgraph Integration["Integration"]
-        DEV["development branch"]
-    end
-
-    subgraph Staging["Staging Pipeline"]
-        REL["release/* branch"]
-        SBUILD["Build & Push to DOCR<br/>rc-{sha} tags"]
-        SDEPLOY["Deploy to DOKS<br/>namespace:<br/>verdictcouncil-staging"]
-        SMOKE["Smoke Test"]
-    end
-
-    subgraph Production["Production Pipeline"]
-        MAIN["main branch"]
-        PBUILD["Build & Push to DOCR<br/>v{semver} tags"]
-        PDEPLOY["Deploy to DOKS<br/>namespace:<br/>verdictcouncil"]
-        VERIFY["Verify & Canary"]
-        RELEASE["GitHub Release<br/>+ Auto Notes"]
-    end
-
-    FEAT -->|"push / PR"| LINT
-    LINT --> UNIT
-    UNIT --> INTEG
-    LINT --> SEC
-    UNIT --> BUILD
-    SEC --> BUILD
-
-    BUILD -->|"PR merge"| DEV
-
-    DEV -->|"merge when stable"| REL
-    REL --> SBUILD
-    SBUILD --> SDEPLOY
-    SDEPLOY --> SMOKE
-
-    SMOKE -->|"QA approved<br/>merge"| MAIN
-    MAIN --> PBUILD
-    PBUILD --> PDEPLOY
-    PDEPLOY --> VERIFY
-    VERIFY --> RELEASE
-
-    style FEAT fill:#4a9eff,color:#fff
-    style DEV fill:#ffa500,color:#fff
-    style REL fill:#ff6b6b,color:#fff
-    style MAIN fill:#2ecc71,color:#fff
-    style RELEASE fill:#2ecc71,color:#fff
+```
+  ┌─────────────────┐     ┌─────────────────┐     ┌──────────────────┐
+  │   feat/<name>   │ ──▶│   development   │ ──▶│    release/...    │
+  └─────────────────┘     └─────────────────┘     └──────────────────┘
+                               │                          │
+                     staging-deploy.yml (live)     production-deploy.yml
+                               ▼                          ▼
+                      DOKS verdictcouncil-staging   DOKS verdictcouncil
 ```
 
-## 6.8 DigitalOcean Architecture Diagram
+- Feature branches merge into `development` via PR; CI must pass.
+- `development` → staging: push triggers `staging-deploy.yml` (today). Target is to move staging onto `release/**` so that `development` can absorb integration work without auto-deploying.
+- `release/<context>/<tag>` → `main`: merge after staging QA passes. Push to `main` triggers `production-deploy.yml`.
+- Hotfix branches: branch from `main`, PR into `main`, then back-port into `development`.
+
+---
+
+## 6.8 DigitalOcean Architecture
 
 ```mermaid
 flowchart TB
-    subgraph Internet
-        USER["Judge UI / Browser"]
+    subgraph GH[GitHub]
+        REPO[(Repo)]
+        GHA[Actions Runners]
     end
 
-    subgraph DO["DigitalOcean Cloud"]
-        subgraph LB["DO Load Balancer"]
-            DOLB["HTTPS :443<br/>TLS Termination"]
-        end
-
-        subgraph DOKS["DOKS Cluster"]
-            subgraph NS["Namespace: verdictcouncil"]
-                INGRESS["Nginx Ingress Controller"]
-                GW["Web Gateway<br/>(2-5 replicas, HPA)"]
-
-                subgraph L1["Layer 1: Case Prep"]
-                    CP["Case Processing"]
-                    CR["Complexity Routing"]
-                end
-
-                subgraph L2["Layer 2: Evidence"]
-                    EA["Evidence Analysis"]
-                    FR["Fact Reconstruction"]
-                    WA["Witness Analysis"]
-                    AGG["Layer2 Aggregator"]
-                end
-
-                subgraph L3["Layer 3: Legal"]
-                    LK["Legal Knowledge"]
-                    AC["Argument Construction"]
-                end
-
-                subgraph L4["Layer 4: Verdict"]
-                    DL["Deliberation"]
-                    GV["Governance & Verdict"]
-                end
-
-                WC["What-If Controller"]
-
-                subgraph Broker["Solace PubSub+"]
-                    SOL["Broker Pod<br/>+ PVC (do-block-storage)"]
-                end
-            end
-        end
-
-        subgraph Managed["DO Managed Services (Private VPC)"]
-            PG["Managed PostgreSQL 16<br/>Primary + Standby"]
-            RD["Managed Redis 7<br/>HA with TLS"]
-        end
-
-        subgraph Storage["DO Spaces"]
-            S3["Backups & Artifacts<br/>(S3-compatible)"]
-        end
-
-        subgraph Registry["DOCR"]
-            REG["Container Images<br/>12 agent images"]
-        end
+    subgraph DOCR[DOCR]
+        IMG[verdictcouncil image]
     end
 
-    USER --> DOLB
-    DOLB --> INGRESS
-    INGRESS --> GW
-    GW --> SOL
-    SOL --> CP & CR & EA & FR & WA & AGG & LK & AC & DL & GV & WC
-    CP & CR & EA & FR & WA & LK & AC & DL & GV --> PG
-    AGG & LK & GW --> RD
-    REG -.->|"image pull"| DOKS
-    PG -.->|"daily backup"| S3
+    subgraph DOKS_STAGING[DOKS — verdictcouncil-staging]
+        APIS[api-service Deployment]
+        WRKS[arq-worker Deployment — target]
+        WDS[stuck-case-watchdog CronJob]
+        INGS[Ingress → staging-api.verdictcouncil.sg]
+    end
 
-    style DO fill:#0069ff,color:#fff
-    style DOKS fill:#326ce5,color:#fff
-    style Managed fill:#1a1a2e,color:#fff
+    subgraph DOKS_PROD[DOKS — verdictcouncil]
+        APIP[api-service Deployment]
+        WRKP[arq-worker Deployment — target]
+        WDP[stuck-case-watchdog CronJob]
+        INGP[Ingress → api.verdictcouncil.sg]
+    end
+
+    subgraph Managed[DO Managed Services]
+        PGP[(Postgres prod)]
+        RDP[(Redis prod)]
+        PGS[(Postgres staging)]
+        RDS[(Redis staging)]
+    end
+
+    REPO -->|push development| GHA
+    REPO -->|push main| GHA
+    GHA -->|build + push| IMG
+    GHA -->|kubectl apply + rollout| DOKS_STAGING
+    GHA -->|kubectl apply + rollout| DOKS_PROD
+
+    APIS --> PGS
+    WRKS --> PGS
+    APIS --> RDS
+    WRKS --> RDS
+
+    APIP --> PGP
+    WRKP --> PGP
+    APIP --> RDP
+    WRKP --> RDP
+
+    INGS --> APIS
+    INGP --> APIP
 ```
 
 ---
