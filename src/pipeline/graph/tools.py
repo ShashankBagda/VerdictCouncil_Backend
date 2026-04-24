@@ -17,7 +17,24 @@ from pydantic import BaseModel, Field
 
 from src.pipeline.graph.prompts import AGENT_TOOLS
 from src.pipeline.graph.state import GraphState
-from src.tools.sam.search_precedents_tool import _merge_precedent_meta
+
+
+def _merge_precedent_meta(
+    existing: dict[str, Any] | None,
+    new: dict[str, Any],
+) -> dict[str, Any]:
+    """Worst-of merge across multiple search_precedents calls in one node turn.
+
+    First call wins for the initial snapshot. Any subsequent call with
+    source_failed=True escalates the merged record and adopts that call's
+    pair_status. Other fields flow through from the existing record.
+    """
+    if existing is None:
+        return dict(new)
+    if new.get("source_failed"):
+        existing["source_failed"] = True
+        existing["pair_status"] = new.get("pair_status", existing.get("pair_status"))
+    return existing
 
 
 # ---------------------------------------------------------------------------

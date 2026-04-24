@@ -21,23 +21,43 @@ jobs:
 
       - name: Build and push image
         run: |
-          docker build -t ${{ secrets.DOCR_REGISTRY }}/verdictcouncil:rc-${{ github.sha }} .
-          docker push ${{ secrets.DOCR_REGISTRY }}/verdictcouncil:rc-${{ github.sha }}
+          IMAGE=${{ secrets.DOCR_REGISTRY }}/verdictcouncil:rc-${{ github.sha }}
+          docker build -t ${IMAGE} .
+          docker push ${IMAGE}
+          echo "IMAGE=${IMAGE}" >> $GITHUB_ENV
 
-      - name: Deploy to DOKS
+      - name: Configure kubectl
+        run: doctl kubernetes cluster kubeconfig save ${{ secrets.DOKS_STAGING_CLUSTER_ID }}
+
+      - name: Apply manifests
+        run: kubectl apply -k k8s/overlays/staging/
+
+      - name: Render secrets
         run: |
-          doctl kubernetes cluster kubeconfig save ${{ secrets.DOKS_STAGING_CLUSTER_ID }}
+          kubectl create secret generic verdictcouncil-secrets \
+            --namespace verdictcouncil-staging \
+            --from-literal=OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }} \
+            --from-literal=DATABASE_URL=${{ secrets.STAGING_DATABASE_URL }} \
+            --from-literal=REDIS_URL=${{ secrets.STAGING_REDIS_URL }} \
+            --from-literal=JWT_SECRET=${{ secrets.STAGING_JWT_SECRET }} \
+            --from-literal=OPENAI_VECTOR_STORE_ID=${{ secrets.OPENAI_VECTOR_STORE_ID }} \
+            --from-literal=FRONTEND_ORIGINS=${{ secrets.STAGING_FRONTEND_ORIGINS }} \
+            --from-literal=COOKIE_SECURE=true \
+            --from-literal=NAMESPACE=verdictcouncil \
+            --from-literal=FASTAPI_HOST=0.0.0.0 \
+            --from-literal=FASTAPI_PORT=8001 \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Run database migrations
+        run: |
+          kubectl delete job alembic-migrate --namespace verdictcouncil-staging --ignore-not-found
+          sed "s|verdictcouncil:latest|${IMAGE}|g" k8s/base/job-alembic-migrate.yaml | \
+            kubectl apply --namespace verdictcouncil-staging -f -
+          kubectl wait --for=condition=complete job/alembic-migrate \
+            --namespace verdictcouncil-staging --timeout=300s
+
+      - name: Roll image
+        run: |
           kubectl set image -n verdictcouncil-staging \
-            deployment/case-processing case-processing=${{ secrets.DOCR_REGISTRY }}/verdictcouncil:rc-${{ github.sha }} \
-            deployment/complexity-routing complexity-routing=${{ secrets.DOCR_REGISTRY }}/verdictcouncil:rc-${{ github.sha }} \
-            deployment/evidence-analysis evidence-analysis=${{ secrets.DOCR_REGISTRY }}/verdictcouncil:rc-${{ github.sha }} \
-            deployment/fact-reconstruction fact-reconstruction=${{ secrets.DOCR_REGISTRY }}/verdictcouncil:rc-${{ github.sha }} \
-            deployment/witness-analysis witness-analysis=${{ secrets.DOCR_REGISTRY }}/verdictcouncil:rc-${{ github.sha }} \
-            deployment/legal-knowledge legal-knowledge=${{ secrets.DOCR_REGISTRY }}/verdictcouncil:rc-${{ github.sha }} \
-            deployment/argument-construction argument-construction=${{ secrets.DOCR_REGISTRY }}/verdictcouncil:rc-${{ github.sha }} \
-            deployment/deliberation deliberation=${{ secrets.DOCR_REGISTRY }}/verdictcouncil:rc-${{ github.sha }} \
-            deployment/governance-verdict governance-verdict=${{ secrets.DOCR_REGISTRY }}/verdictcouncil:rc-${{ github.sha }} \
-            deployment/web-gateway web-gateway=${{ secrets.DOCR_REGISTRY }}/verdictcouncil:rc-${{ github.sha }} \
-            deployment/layer2-aggregator layer2-aggregator=${{ secrets.DOCR_REGISTRY }}/verdictcouncil:rc-${{ github.sha }} \
-            deployment/api-service api-service=${{ secrets.DOCR_REGISTRY }}/verdictcouncil:rc-${{ github.sha }}
+            deployment/api-service api-service=${IMAGE}
           kubectl rollout status -n verdictcouncil-staging deployment --timeout=300s

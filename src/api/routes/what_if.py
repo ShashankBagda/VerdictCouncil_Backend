@@ -52,7 +52,7 @@ async def _run_whatif_scenario(scenario_id: uuid.UUID) -> None:
         CheckpointSchemaMismatchError,
         load_case_state,
     )
-    from src.pipeline.mesh_runner_factory import get_mesh_runner
+    from src.pipeline.graph.runner import GraphPipelineRunner
     from src.services.database import async_session
     from src.services.whatif_controller.controller import WhatIfController
     from src.services.whatif_controller.diff_engine import generate_diff
@@ -115,7 +115,7 @@ async def _run_whatif_scenario(scenario_id: uuid.UUID) -> None:
                 await db.commit()
                 return
 
-            controller = WhatIfController(await get_mesh_runner())
+            controller = WhatIfController(GraphPipelineRunner())
             modified_state = await controller.create_scenario(
                 case_state,
                 scenario.modification_type.value,
@@ -151,7 +151,7 @@ async def _run_stability_computation(stability_id: uuid.UUID) -> None:
         CheckpointSchemaMismatchError,
         load_case_state,
     )
-    from src.pipeline.mesh_runner_factory import get_mesh_runner
+    from src.pipeline.graph.runner import GraphPipelineRunner
     from src.services.database import async_session
     from src.services.whatif_controller.controller import WhatIfController
 
@@ -207,7 +207,7 @@ async def _run_stability_computation(stability_id: uuid.UUID) -> None:
             # Anchor the stability row at the real terminal run_id.
             stability.run_id = case.latest_run_id
 
-            controller = WhatIfController(await get_mesh_runner())
+            controller = WhatIfController(GraphPipelineRunner())
             score_result = await controller.compute_stability_score(
                 case_state, n=stability.perturbation_count
             )

@@ -138,9 +138,6 @@ async def startup(ctx: dict[str, Any]) -> None:
     Both tasks run for the lifetime of the worker process and are
     cancelled by arq during shutdown.
     """
-    # MeshPipelineRunner runs in this worker process; enabling MLflow
-    # here lets `pipeline_run`/`agent_run` open real runs and return
-    # their UUIDs so the SSE completion event can link to the UI.
     from src.pipeline.observability import configure_mlflow
 
     configure_mlflow()

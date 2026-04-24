@@ -22,15 +22,44 @@ jobs:
       - name: Build and push image
         run: |
           TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "latest")
-          docker build -t ${{ secrets.DOCR_REGISTRY }}/verdictcouncil:$TAG .
-          docker tag ${{ secrets.DOCR_REGISTRY }}/verdictcouncil:$TAG ${{ secrets.DOCR_REGISTRY }}/verdictcouncil:latest
-          docker push ${{ secrets.DOCR_REGISTRY }}/verdictcouncil:$TAG
+          IMAGE=${{ secrets.DOCR_REGISTRY }}/verdictcouncil:${TAG}
+          docker build -t ${IMAGE} .
+          docker tag ${IMAGE} ${{ secrets.DOCR_REGISTRY }}/verdictcouncil:latest
+          docker push ${IMAGE}
           docker push ${{ secrets.DOCR_REGISTRY }}/verdictcouncil:latest
+          echo "IMAGE=${IMAGE}" >> $GITHUB_ENV
 
-      - name: Deploy to DOKS
+      - name: Configure kubectl
+        run: doctl kubernetes cluster kubeconfig save ${{ secrets.DOKS_PRODUCTION_CLUSTER_ID }}
+
+      - name: Apply manifests
+        run: kubectl apply -k k8s/overlays/production/
+
+      - name: Render secrets
         run: |
-          TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "latest")
-          doctl kubernetes cluster kubeconfig save ${{ secrets.DOKS_PRODUCTION_CLUSTER_ID }}
-          kubectl apply -k k8s/overlays/production/
-          kubectl set image -n verdictcouncil deployment --all *=${{ secrets.DOCR_REGISTRY }}/verdictcouncil:$TAG
+          kubectl create secret generic verdictcouncil-secrets \
+            --namespace verdictcouncil \
+            --from-literal=OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }} \
+            --from-literal=DATABASE_URL=${{ secrets.DATABASE_URL }} \
+            --from-literal=REDIS_URL=${{ secrets.REDIS_URL }} \
+            --from-literal=JWT_SECRET=${{ secrets.JWT_SECRET }} \
+            --from-literal=OPENAI_VECTOR_STORE_ID=${{ secrets.OPENAI_VECTOR_STORE_ID }} \
+            --from-literal=FRONTEND_ORIGINS=${{ secrets.FRONTEND_ORIGINS }} \
+            --from-literal=COOKIE_SECURE=true \
+            --from-literal=NAMESPACE=verdictcouncil \
+            --from-literal=FASTAPI_HOST=0.0.0.0 \
+            --from-literal=FASTAPI_PORT=8001 \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Run database migrations
+        run: |
+          kubectl delete job alembic-migrate --namespace verdictcouncil --ignore-not-found
+          sed "s|verdictcouncil:latest|${IMAGE}|g" k8s/base/job-alembic-migrate.yaml | \
+            kubectl apply --namespace verdictcouncil -f -
+          kubectl wait --for=condition=complete job/alembic-migrate \
+            --namespace verdictcouncil --timeout=300s
+
+      - name: Roll image
+        run: |
+          kubectl set image -n verdictcouncil deployment --all "*=${IMAGE}"
           kubectl rollout status -n verdictcouncil deployment --timeout=300s
