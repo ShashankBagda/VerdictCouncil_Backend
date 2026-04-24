@@ -27,8 +27,7 @@ async def pair_health(_: CurrentUser):
     response_model=PairProbeResponse,
     operation_id="pair_health_probe",
     summary="Actively probe PAIR API health",
-    description="Send a lightweight query to the PAIR API and update the circuit "
-    "breaker state based on the result.",
+    description="Send a lightweight query to the PAIR API and update the circuit breaker state based on the result.",  # noqa: E501
 )
 async def pair_probe(_: CurrentUser):
     return await check_pair_health()

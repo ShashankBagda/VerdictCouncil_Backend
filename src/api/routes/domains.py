@@ -527,8 +527,7 @@ async def upload_domain_document(
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             detail=(
-                f"File exceeds maximum size of "
-                f"{settings.domain_kb_max_upload_bytes // 1024 // 1024} MiB"
+                f"File exceeds maximum size of {settings.domain_kb_max_upload_bytes // 1024 // 1024} MiB"  # noqa: E501
             ),
         )
 

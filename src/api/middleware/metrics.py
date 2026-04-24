@@ -67,9 +67,7 @@ class MetricsStore:
                 lines.append("# TYPE http_requests_total counter")
                 for (method, path, st), count in sorted(self._request_counts.items()):
                     lines.append(
-                        f"http_requests_total"
-                        f'{{method="{method}",path="{path}"'
-                        f',status="{st}"}} {count}'
+                        f'http_requests_total{{method="{method}",path="{path}",status="{st}"}} {count}'  # noqa: E501
                     )
 
             # http_request_duration_seconds
@@ -85,8 +83,7 @@ class MetricsStore:
                             f'http_request_duration_seconds_bucket{{{labels},le="{bound}"}} {cnt}'
                         )
                     lines.append(
-                        f"http_request_duration_seconds_bucket"
-                        f'{{{labels},le="+Inf"}} {entry["count"]}'
+                        f'http_request_duration_seconds_bucket{{{labels},le="+Inf"}} {entry["count"]}'  # noqa: E501
                     )
                     lines.append(
                         f"http_request_duration_seconds_sum{{{labels}}} {entry['sum']:.6f}"

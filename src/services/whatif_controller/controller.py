@@ -299,8 +299,7 @@ class WhatIfController:
                                 "new_status": new_status,
                             },
                             "description": (
-                                f"Toggle fact '{fact.get('id', 'unknown')}' "
-                                f"from {fact['status']} to {new_status}"
+                                f"Toggle fact '{fact.get('id', 'unknown')}' from {fact['status']} to {new_status}"  # noqa: E501
                             ),
                         }
                     )

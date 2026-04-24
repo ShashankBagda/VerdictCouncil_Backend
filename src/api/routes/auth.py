@@ -109,8 +109,7 @@ async def register(body: RegisterRequest, db: DBSession) -> User:
     response_model=MessageResponse,
     operation_id="login",
     summary="Authenticate and receive session cookie",
-    description="Verify credentials and set an httpOnly `vc_token` JWT cookie. "
-    "The cookie is valid for 24 hours.",
+    description="Verify credentials and set an httpOnly `vc_token` JWT cookie. The cookie is valid for 24 hours.",  # noqa: E501
     responses={
         401: {"model": ErrorResponse, "description": "Invalid email or password"},
         422: {"model": ValidationErrorResponse, "description": "Validation error"},

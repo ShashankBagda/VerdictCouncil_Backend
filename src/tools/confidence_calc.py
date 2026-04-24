@@ -130,8 +130,7 @@ def confidence_calc(
         classification = "Low"
 
     logger.info(
-        "Confidence calculated: %d (%s) — evidence=%.1f, facts=%.1f, "
-        "witnesses=%.1f, precedents=%.1f",
+        "Confidence calculated: %d (%s) — evidence=%.1f, facts=%.1f, witnesses=%.1f, precedents=%.1f",  # noqa: E501
         confidence_score,
         classification,
         evidence_avg,

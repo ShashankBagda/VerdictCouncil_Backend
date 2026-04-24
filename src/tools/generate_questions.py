@@ -77,8 +77,7 @@ async def generate_questions(
     question_types: Annotated[
         list[str] | None,
         (
-            "Types of questions: 'factual_clarification' | 'evidence_gap'"
-            " | 'credibility_probe' | 'legal_interpretation'"
+            "Types of questions: 'factual_clarification' | 'evidence_gap' | 'credibility_probe' | 'legal_interpretation'"  # noqa: E501
         ),
     ] = None,
     max_questions: Annotated[int, "Maximum number of questions to generate"] = 5,

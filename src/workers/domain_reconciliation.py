@@ -89,10 +89,7 @@ async def _reconcile_one(client, doc: DomainDocument) -> None:
                         _STUCK_THRESHOLD_MINUTES,
                     )
                     live_doc.status = DomainDocumentStatus.failed
-                    live_doc.error_reason = (
-                        f"Stuck in {live_doc.status} for >{_STUCK_THRESHOLD_MINUTES} minutes; "
-                        "manually retry upload"
-                    )
+                    live_doc.error_reason = f"Stuck in {live_doc.status} for >{_STUCK_THRESHOLD_MINUTES} minutes; manually retry upload"  # noqa: E501
                 except Exception:
                     # File gone from OpenAI — definitely failed
                     live_doc.status = DomainDocumentStatus.failed

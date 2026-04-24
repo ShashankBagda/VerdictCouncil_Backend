@@ -1001,8 +1001,7 @@ async def get_case(
     operation_id="export_case_report_pdf",
     summary="Export the case as a PDF report",
     description=(
-        "Render a case summary PDF covering parties, evidence, facts, "
-        "arguments, verdict, and fairness report."
+        "Render a case summary PDF covering parties, evidence, facts, arguments, verdict, and fairness report."  # noqa: E501
     ),
     responses={
         403: {"model": ErrorResponse, "description": "Not authorized to view this case"},
@@ -1033,8 +1032,7 @@ async def export_case_report_pdf(
     operation_id="export_hearing_pack",
     summary="Export the hearing pack zip for a case",
     description=(
-        "Assemble a zip archive of manifest, case summary, evidence, "
-        "facts, arguments, and verdict for in-court review."
+        "Assemble a zip archive of manifest, case summary, evidence, facts, arguments, and verdict for in-court review."  # noqa: E501
     ),
     responses={
         403: {"model": ErrorResponse, "description": "Not authorized to view this case"},

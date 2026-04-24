@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+pytest.importorskip("langchain_core", reason="langchain-core not installed")
 from src.pipeline.graph.prompts import AGENT_TOOLS
 from src.pipeline.graph.tools import PrecedentMetaSideChannel, make_tools
 from src.shared.case_state import CaseState

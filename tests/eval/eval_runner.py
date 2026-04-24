@@ -87,8 +87,7 @@ class TestPipelineEval:
         # Print score report
         print(f"\n--- Eval: {fixture['case_id']} ---")
         print(
-            f"  Completeness: {scores['completeness']:.0%} "
-            f"({scores['populated_fields']}/{scores['total_fields']})"
+            f"  Completeness: {scores['completeness']:.0%} ({scores['populated_fields']}/{scores['total_fields']})"  # noqa: E501
         )
         print(f"  Has hearing analysis: {scores['has_hearing_analysis']}")
         print(f"  Has fairness: {scores['has_fairness']}")

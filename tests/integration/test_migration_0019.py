@@ -98,8 +98,7 @@ async def test_migration_0019_seeded_domains_are_inactive():
     async with async_session() as session:
         result = await session.execute(
             text(
-                "SELECT code, is_active FROM domains "
-                "WHERE code IN ('small_claims', 'traffic_violation')"
+                "SELECT code, is_active FROM domains WHERE code IN ('small_claims', 'traffic_violation')"  # noqa: E501
             )
         )
         rows = {r[0]: r[1] for r in result.fetchall()}
@@ -189,8 +188,7 @@ async def test_migration_0019_downgrade_removes_domains_table():
     async with async_session() as session:
         result = await session.execute(
             text(
-                "SELECT table_name FROM information_schema.tables "
-                "WHERE table_name IN ('domains', 'domain_documents')"
+                "SELECT table_name FROM information_schema.tables WHERE table_name IN ('domains', 'domain_documents')"  # noqa: E501
             )
         )
         remaining = [r[0] for r in result.fetchall()]

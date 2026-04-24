@@ -49,8 +49,7 @@ class PipelineProgressEvent(BaseModel):
     detail: dict[str, Any] | None = Field(
         None,
         description=(
-            "Extra payload for terminal events: "
-            "{'reason': <halt reason>, 'stopped_at': <mesh stage label>}."
+            "Extra payload for terminal events: {'reason': <halt reason>, 'stopped_at': <mesh stage label>}."  # noqa: E501
         ),
     )
     mlflow_run_id: str | None = Field(

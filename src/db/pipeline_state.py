@@ -124,8 +124,7 @@ async def persist_case_state(
             if attempt < _CHECKPOINT_MAX_RETRIES:
                 delay = _CHECKPOINT_RETRY_BASE_DELAY_SECONDS * (2 ** (attempt - 1))
                 logger.warning(
-                    "pipeline_checkpoint upsert transient failure "
-                    "(case_id=%s run_id=%s agent=%s attempt=%d/%d): %s",
+                    "pipeline_checkpoint upsert transient failure (case_id=%s run_id=%s agent=%s attempt=%d/%d): %s",  # noqa: E501
                     case_id,
                     run_id,
                     agent_name,

@@ -47,8 +47,7 @@ async def create_reopen_request(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
-                "Case is currently being processed; "
-                "wait for it to complete before requesting re-analysis."
+                "Case is currently being processed; wait for it to complete before requesting re-analysis."  # noqa: E501
             ),
         )
 
