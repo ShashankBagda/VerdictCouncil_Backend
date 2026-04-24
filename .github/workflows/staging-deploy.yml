@@ -1,0 +1,63 @@
+name: Deploy to Staging
+
+on:
+  push:
+    branches: [development]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install doctl
+        uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+
+      - name: Login to DOCR
+        run: doctl registry login
+
+      - name: Build and push image
+        run: |
+          IMAGE=${{ secrets.DOCR_REGISTRY }}/verdictcouncil:rc-${{ github.sha }}
+          docker build -t ${IMAGE} .
+          docker push ${IMAGE}
+          echo "IMAGE=${IMAGE}" >> $GITHUB_ENV
+
+      - name: Configure kubectl
+        run: doctl kubernetes cluster kubeconfig save ${{ secrets.DOKS_STAGING_CLUSTER_ID }}
+
+      - name: Apply manifests
+        run: kubectl apply -k k8s/overlays/staging/
+
+      - name: Render secrets
+        run: |
+          kubectl create secret generic verdictcouncil-secrets \
+            --namespace verdictcouncil-staging \
+            --from-literal=OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }} \
+            --from-literal=DATABASE_URL=${{ secrets.STAGING_DATABASE_URL }} \
+            --from-literal=REDIS_URL=${{ secrets.STAGING_REDIS_URL }} \
+            --from-literal=JWT_SECRET=${{ secrets.STAGING_JWT_SECRET }} \
+            --from-literal=OPENAI_VECTOR_STORE_ID=${{ secrets.OPENAI_VECTOR_STORE_ID }} \
+            --from-literal=FRONTEND_ORIGINS=${{ secrets.STAGING_FRONTEND_ORIGINS }} \
+            --from-literal=COOKIE_SECURE=true \
+            --from-literal=NAMESPACE=verdictcouncil \
+            --from-literal=FASTAPI_HOST=0.0.0.0 \
+            --from-literal=FASTAPI_PORT=8001 \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Run database migrations
+        run: |
+          kubectl delete job alembic-migrate --namespace verdictcouncil-staging --ignore-not-found
+          sed "s|verdictcouncil:latest|${IMAGE}|g" k8s/base/job-alembic-migrate.yaml | \
+            kubectl apply --namespace verdictcouncil-staging -f -
+          kubectl wait --for=condition=complete job/alembic-migrate \
+            --namespace verdictcouncil-staging --timeout=300s
+
+      - name: Roll image
+        run: |
+          kubectl set image -n verdictcouncil-staging \
+            deployment/api-service api-service=${IMAGE}
+          kubectl rollout status -n verdictcouncil-staging deployment --timeout=300s

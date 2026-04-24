@@ -1,0 +1,355 @@
+{
+  "epics": {
+    "US-001": {
+      "id": "057c79e6-c543-4ce2-959e-323eee315ec0",
+      "identifier": "VER-50"
+    },
+    "US-002": {
+      "id": "1a498997-7c64-4f18-be16-0799550b076a",
+      "identifier": "VER-51"
+    },
+    "US-003": {
+      "id": "960b4168-07a6-4abe-bfea-6abe5a450a0a",
+      "identifier": "VER-52"
+    },
+    "US-004": {
+      "id": "161c0619-7fdd-4e90-a827-2ce53395312e",
+      "identifier": "VER-53"
+    },
+    "US-005": {
+      "id": "92f25175-eaf7-4c59-af40-25bddd4c856f",
+      "identifier": "VER-54"
+    },
+    "US-006": {
+      "id": "be59aab3-3850-4928-acbe-33caa55d0bfb",
+      "identifier": "VER-55"
+    },
+    "US-007": {
+      "id": "b2967c2b-4587-4cd3-9093-699b081acf28",
+      "identifier": "VER-56"
+    },
+    "US-008": {
+      "id": "7737da5e-33a9-4a43-8866-17f98f03f89a",
+      "identifier": "VER-57"
+    },
+    "US-009": {
+      "id": "ebd74669-55b6-4de8-9953-860126aacfae",
+      "identifier": "VER-58"
+    },
+    "US-010": {
+      "id": "4b9a9344-c606-4c0a-8832-2d6cdc60711d",
+      "identifier": "VER-59"
+    },
+    "US-011": {
+      "id": "c36234fb-080e-4de4-a628-7444f7bb2d32",
+      "identifier": "VER-60"
+    },
+    "US-012": {
+      "id": "e8c4489b-3784-4b4e-bfe2-28242593e866",
+      "identifier": "VER-61"
+    },
+    "US-013": {
+      "id": "d13c5f86-aede-4941-b8ad-e631605aa3cc",
+      "identifier": "VER-62"
+    },
+    "US-014": {
+      "id": "a5c781c9-1cbc-450f-99d2-ffbac9df5f14",
+      "identifier": "VER-63"
+    },
+    "US-015": {
+      "id": "ba77eae9-829b-4db2-95ea-10b672a76c8e",
+      "identifier": "VER-64"
+    },
+    "US-016": {
+      "id": "9c9c9359-ec3a-463a-9ff6-c8643d126634",
+      "identifier": "VER-65"
+    },
+    "US-017": {
+      "id": "c242d49e-b841-47e0-a219-6ac110a1ea22",
+      "identifier": "VER-66"
+    },
+    "US-018": {
+      "id": "611fb93b-ac8e-4da0-af71-8d52bef8f4f8",
+      "identifier": "VER-67"
+    },
+    "US-019": {
+      "id": "f7dcf346-0373-4f84-8f3c-2f8dc5de37c1",
+      "identifier": "VER-68"
+    },
+    "US-020": {
+      "id": "010cd83b-d711-4edb-a78b-530e5d03ae62",
+      "identifier": "VER-69"
+    },
+    "US-021": {
+      "id": "4b8129d4-2524-469c-b2db-d88eef682284",
+      "identifier": "VER-70"
+    },
+    "US-022": {
+      "id": "261f2684-4a2f-4c3d-8cd0-08753d202d49",
+      "identifier": "VER-71"
+    },
+    "US-023": {
+      "id": "abe28c08-a7a8-449d-9f8c-d5d147ff306c",
+      "identifier": "VER-72"
+    },
+    "US-024": {
+      "id": "845701e3-dbda-458a-bcfd-bcb9e7f030ad",
+      "identifier": "VER-73"
+    },
+    "US-025": {
+      "id": "60e0c2fb-7f6b-4d57-9b03-ea7f7ebe2106",
+      "identifier": "VER-74"
+    },
+    "US-026": {
+      "id": "0cd91ce3-81a8-4d9f-a44b-e722b5dacd82",
+      "identifier": "VER-75"
+    },
+    "US-027": {
+      "id": "5f0ca88f-ae5f-4058-9cb3-e01c3614e522",
+      "identifier": "VER-76"
+    },
+    "US-028": {
+      "id": "6f6551a2-4711-4ace-9fc9-b8cbd84a7a3d",
+      "identifier": "VER-77"
+    },
+    "US-029": {
+      "id": "d6157fb6-5e42-40fa-bc50-ce160f488e18",
+      "identifier": "VER-78"
+    },
+    "US-030": {
+      "id": "64478e09-1626-4896-891c-8e3f01cb4133",
+      "identifier": "VER-79"
+    },
+    "US-031": {
+      "id": "15e1ccbc-59ad-4de5-812b-e28a1568ffd5",
+      "identifier": "VER-80"
+    },
+    "US-032": {
+      "id": "7cfb68be-be36-4574-b8f2-2e346d914602",
+      "identifier": "VER-81"
+    },
+    "US-033": {
+      "id": "a98fc466-33e8-4ebd-be57-519643595d8c",
+      "identifier": "VER-82"
+    },
+    "US-034": {
+      "id": "90c0d5e5-15f3-442f-af97-07158ed49a32",
+      "identifier": "VER-83"
+    },
+    "US-035": {
+      "id": "e6aad0ab-c921-41ea-b89e-730438743576",
+      "identifier": "VER-84"
+    },
+    "US-036": {
+      "id": "ab36edd5-ba3e-4237-890c-215e30e363b6",
+      "identifier": "VER-85"
+    },
+    "US-037": {
+      "id": "b7b66cb2-dd6a-4fc5-a457-abda26bc1785",
+      "identifier": "VER-86"
+    },
+    "PHASE5-SAM": {
+      "id": "dfd2f59f-85e1-442f-be85-aa0b973aef99",
+      "identifier": "VER-87"
+    },
+    "US-040": {
+      "id": "fd5b2916-e9af-4a66-8227-618293d0d11f",
+      "identifier": "VER-133"
+    }
+  },
+  "relabeled": [
+    "VER-7",
+    "VER-8",
+    "VER-9",
+    "VER-10",
+    "VER-11",
+    "VER-12",
+    "VER-14",
+    "VER-15",
+    "VER-16",
+    "VER-17",
+    "VER-18",
+    "VER-19",
+    "VER-20",
+    "VER-21",
+    "VER-22",
+    "VER-40",
+    "VER-41",
+    "VER-42",
+    "VER-45",
+    "VER-46",
+    "VER-47",
+    "VER-48",
+    "VER-49"
+  ],
+  "split": {
+    "VER-23": {
+      "be": "VER-88",
+      "fe": "VER-89",
+      "parent": "US-026"
+    },
+    "VER-25": {
+      "be": "VER-90",
+      "fe": "VER-91",
+      "parent": "US-006"
+    },
+    "VER-26": {
+      "be": "VER-92",
+      "fe": "VER-93",
+      "parent": "US-007"
+    },
+    "VER-27": {
+      "be": "VER-94",
+      "fe": "VER-95",
+      "parent": "US-008"
+    },
+    "VER-28": {
+      "be": "VER-96",
+      "fe": "VER-97",
+      "parent": "US-011"
+    },
+    "VER-29": {
+      "be": "VER-98",
+      "fe": "VER-99",
+      "parent": "US-013"
+    },
+    "VER-30": {
+      "be": "VER-100",
+      "fe": "VER-101",
+      "parent": "US-014"
+    },
+    "VER-31": {
+      "be": "VER-102",
+      "fe": "VER-103",
+      "parent": "US-018"
+    },
+    "VER-32": {
+      "be": "VER-104",
+      "fe": "VER-105",
+      "parent": "US-019"
+    },
+    "VER-33": {
+      "be": "VER-106",
+      "fe": "VER-107",
+      "parent": "US-022"
+    },
+    "VER-35": {
+      "be": "VER-108",
+      "fe": "VER-109",
+      "parent": "US-020"
+    },
+    "VER-36": {
+      "be": "VER-110",
+      "fe": "VER-111",
+      "parent": "US-027"
+    },
+    "VER-37": {
+      "be": "VER-112",
+      "fe": "VER-113",
+      "parent": "US-028"
+    },
+    "VER-38": {
+      "be": "VER-114",
+      "fe": "VER-115",
+      "parent": "US-029"
+    }
+  },
+  "gap_filler": {
+    "us005-be": {
+      "identifier": "VER-116",
+      "parent": "US-005",
+      "scope": "backend"
+    },
+    "us005-fe": {
+      "identifier": "VER-117",
+      "parent": "US-005",
+      "scope": "frontend"
+    },
+    "us024-be": {
+      "identifier": "VER-118",
+      "parent": "US-024",
+      "scope": "backend"
+    },
+    "us031-be": {
+      "identifier": "VER-119",
+      "parent": "US-031",
+      "scope": "backend"
+    },
+    "us031-fe": {
+      "identifier": "VER-120",
+      "parent": "US-031",
+      "scope": "frontend"
+    },
+    "us032-be": {
+      "identifier": "VER-121",
+      "parent": "US-032",
+      "scope": "backend"
+    },
+    "us032-fe": {
+      "identifier": "VER-122",
+      "parent": "US-032",
+      "scope": "frontend"
+    },
+    "us033-be": {
+      "identifier": "VER-123",
+      "parent": "US-033",
+      "scope": "backend"
+    },
+    "us033-fe": {
+      "identifier": "VER-124",
+      "parent": "US-033",
+      "scope": "frontend"
+    },
+    "us034-be": {
+      "identifier": "VER-125",
+      "parent": "US-034",
+      "scope": "backend"
+    },
+    "us034-fe": {
+      "identifier": "VER-126",
+      "parent": "US-034",
+      "scope": "frontend"
+    },
+    "us035-be": {
+      "identifier": "VER-127",
+      "parent": "US-035",
+      "scope": "backend"
+    },
+    "us035-fe": {
+      "identifier": "VER-128",
+      "parent": "US-035",
+      "scope": "frontend"
+    },
+    "us036-be": {
+      "identifier": "VER-129",
+      "parent": "US-036",
+      "scope": "backend"
+    },
+    "us036-fe": {
+      "identifier": "VER-130",
+      "parent": "US-036",
+      "scope": "frontend"
+    },
+    "us037-be": {
+      "identifier": "VER-131",
+      "parent": "US-037",
+      "scope": "backend"
+    },
+    "us037-fe": {
+      "identifier": "VER-132",
+      "parent": "US-037",
+      "scope": "frontend"
+    }
+  },
+  "doc_id": "b820ae2a-5734-4aae-b2f2-7e1781e429f1",
+  "us040_subissues": {
+    "be": {
+      "id": "d9db1096-b5fd-4ea9-b10c-4424dc121311",
+      "identifier": "VER-134"
+    },
+    "fe": {
+      "id": "0bacc7b6-9154-4a10-9964-4ffecfabb5a5",
+      "identifier": "VER-135"
+    }
+  }
+}

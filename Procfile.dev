@@ -1,0 +1,2 @@
+api:                  .venv/bin/uvicorn src.api.app:app --host 0.0.0.0 --port 8001 --reload
+arq-worker:           .venv/bin/arq src.workers.worker_settings.WorkerSettings

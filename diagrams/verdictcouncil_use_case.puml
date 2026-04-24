@@ -1,0 +1,67 @@
+@startuml
+title VerdictCouncil Use Case Diagram
+left to right direction
+skinparam shadowing false
+skinparam actorStyle awesome
+skinparam usecase {
+  BackgroundColor #FFF9E8
+  BorderColor #8F6A2A
+  ArrowColor #6C757D
+}
+skinparam rectangle {
+  BorderColor #3E4C59
+  BackgroundColor #FFFFFF
+}
+skinparam note {
+  BorderColor #5A6A72
+  BackgroundColor #F7FAFC
+}
+
+actor Judge as "Tribunal Magistrate / Judge"
+actor OpenAI as "OpenAI Platform Services\n(Files API, Vector Stores)"
+actor Judiciary as "Judiciary Search Services\n(judiciary.gov.sg, PAIR)"
+
+rectangle "VerdictCouncil" {
+  usecase UC1 as "Case Intake & Setup\nUS-001, US-002, US-003,\nUS-004, US-005"
+  usecase UC2 as "Evidence & Fact Review\nUS-006, US-007, US-008,\nUS-009, US-010"
+  usecase UC3 as "Witness Review\nUS-011, US-012, US-013"
+  usecase UC4 as "Legal Research\nUS-014, US-015, US-016,\nUS-017"
+  usecase UC5 as "Arguments & Deliberation\nUS-018, US-019, US-020,\nUS-021"
+  usecase UC6 as "Verdict & Governance\nUS-022, US-023, US-024,\nUS-025"
+  usecase UC7 as "Audit, Export & Session\nUS-026, US-027, US-028,\nUS-029, US-030"
+  usecase UC8 as "Advanced Review Scenarios\nUS-031, US-032, US-033"
+
+  note right
+    Internal to VerdictCouncil, not actors in this use case view:
+    - AI Agents 1-9
+    - SAM Web Gateway
+    - Solace broker and audit trail
+    - JWT/session handling
+
+    Agents 1-9:
+    1. Case Processing
+    2. Complexity & Routing
+    3. Evidence Analysis
+    4. Fact Reconstruction
+    5. Witness Analysis
+    6. Legal Knowledge
+    7. Argument Construction
+    8. Deliberation
+    9. Governance & Verdict
+  end note
+}
+
+Judge --> UC1
+Judge --> UC2
+Judge --> UC3
+Judge --> UC4
+Judge --> UC5
+Judge --> UC6
+Judge --> UC7
+Judge --> UC8
+
+OpenAI --> UC1
+OpenAI --> UC4
+Judiciary --> UC4
+
+@enduml

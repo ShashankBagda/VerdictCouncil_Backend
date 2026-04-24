@@ -1,0 +1,252 @@
+"""Unit tests for src.services.whatif_controller.controller.WhatIfController."""
+
+from __future__ import annotations
+
+import copy
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
+from src.shared.case_state import CaseDomainEnum, CaseState, CaseStatusEnum
+
+# ------------------------------------------------------------------ #
+# Helpers
+# ------------------------------------------------------------------ #
+
+
+def _populated_case_state() -> CaseState:
+    """Return a CaseState with realistic populated fields."""
+    return CaseState(
+        domain=CaseDomainEnum.small_claims,
+        status=CaseStatusEnum.ready_for_review,
+        parties=[
+            {"name": "Alice Tan", "role": "claimant"},
+            {"name": "Bob Lee", "role": "respondent"},
+        ],
+        case_metadata={
+            "filed_date": "2026-02-10",
+            "category": "small_claims",
+            "subcategory": "property_damage",
+            "jurisdiction_valid": True,
+        },
+        raw_documents=[
+            {"doc_id": "doc-1", "type": "claim_form", "text": "Claimant alleges damage."},
+        ],
+        evidence_analysis={
+            "evidence_items": [
+                {"id": "ev-1", "type": "photo", "weight": 0.8, "description": "Damaged wall"},
+                {"id": "ev-2", "type": "receipt", "weight": 0.6, "description": "Repair invoice"},
+            ],
+        },
+        extracted_facts={
+            "facts": [
+                {"id": "f-1", "text": "Wall was damaged on 2026-01-15", "status": "agreed"},
+                {"id": "f-2", "text": "Respondent was present at the time", "status": "disputed"},
+            ],
+            "timeline": [
+                {"date": "2026-01-15", "event": "Damage occurred"},
+            ],
+        },
+        witnesses={
+            "witnesses": [
+                {
+                    "id": "w-1",
+                    "name": "Charlie",
+                    "credibility_score": 75,
+                    "statement": "I saw it happen",
+                },
+            ],
+        },
+        legal_rules=[
+            {"statute": "Small Claims Act s12", "relevance": "high"},
+        ],
+        precedents=[
+            {"case_name": "Tan v Lee [2024]", "relevance": 0.85},
+        ],
+        arguments={
+            "prosecution": {"overall_strength": 0.8},
+            "defense": {"overall_strength": 0.4},
+        },
+        hearing_analysis={
+            "preliminary_conclusion": "Balance of evidence favours claimant.",
+            "confidence_score": 80,
+        },
+        fairness_check={
+            "critical_issues_found": False,
+            "audit_passed": True,
+            "issues": [],
+            "recommendations": [],
+        },
+    )
+
+
+def _mock_runner():
+    """Return a mock GraphPipelineRunner whose run_what_if echoes the cloned state."""
+    runner = MagicMock()
+    runner.run_what_if = AsyncMock(side_effect=lambda state, start_agent, run_id=None: state)
+    return runner
+
+
+# ------------------------------------------------------------------ #
+# CHANGE_IMPACT_MAP: modification type -> correct start agent
+# ------------------------------------------------------------------ #
+
+
+class TestChangeImpactMapping:
+    """Verify each modification type dispatches run_what_if at the correct start agent."""
+
+    @pytest.mark.asyncio
+    async def test_fact_toggle_starts_at_argument_construction(self):
+        from src.services.whatif_controller.controller import WhatIfController
+
+        runner = _mock_runner()
+        controller = WhatIfController(runner)
+        state = _populated_case_state()
+
+        await controller.create_scenario(
+            case_state=state,
+            modification_type="fact_toggle",
+            modification_payload={"fact_id": "f-2", "new_status": "agreed"},
+        )
+
+        assert WhatIfController.CHANGE_IMPACT_MAP["fact_toggle"] == "argument-construction"
+        runner.run_what_if.assert_awaited_once()
+        assert runner.run_what_if.await_args.kwargs["start_agent"] == "argument-construction"
+
+    @pytest.mark.asyncio
+    async def test_evidence_exclusion_starts_at_evidence_analysis(self):
+        from src.services.whatif_controller.controller import WhatIfController
+
+        runner = _mock_runner()
+        controller = WhatIfController(runner)
+        state = _populated_case_state()
+
+        await controller.create_scenario(
+            case_state=state,
+            modification_type="evidence_exclusion",
+            modification_payload={"evidence_id": "ev-2", "exclude": True},
+        )
+
+        assert WhatIfController.CHANGE_IMPACT_MAP["evidence_exclusion"] == "evidence-analysis"
+        assert runner.run_what_if.await_args.kwargs["start_agent"] == "evidence-analysis"
+
+    @pytest.mark.asyncio
+    async def test_legal_interpretation_starts_at_legal_knowledge(self):
+        """legal_interpretation mutates legal rules owned by legal-knowledge;
+        re-entering at argument-construction would skip the owner.
+        """
+        from src.services.whatif_controller.controller import WhatIfController
+
+        runner = _mock_runner()
+        controller = WhatIfController(runner)
+        state = _populated_case_state()
+
+        await controller.create_scenario(
+            case_state=state,
+            modification_type="legal_interpretation",
+            modification_payload={"rule_index": 0, "new_application": "narrow"},
+        )
+
+        assert WhatIfController.CHANGE_IMPACT_MAP["legal_interpretation"] == "legal-knowledge"
+        assert runner.run_what_if.await_args.kwargs["start_agent"] == "legal-knowledge"
+
+    @pytest.mark.asyncio
+    async def test_witness_credibility_starts_at_witness_analysis(self):
+        """witness_credibility mutates state.witnesses (owned by witness-analysis);
+        re-entering at argument-construction would skip the owner and leave
+        the credibility change unprocessed.
+        """
+        from src.services.whatif_controller.controller import WhatIfController
+
+        runner = _mock_runner()
+        controller = WhatIfController(runner)
+        state = _populated_case_state()
+
+        await controller.create_scenario(
+            case_state=state,
+            modification_type="witness_credibility",
+            modification_payload={"witness_id": "w-1", "new_credibility_score": 30},
+        )
+
+        assert WhatIfController.CHANGE_IMPACT_MAP["witness_credibility"] == "witness-analysis"
+        assert runner.run_what_if.await_args.kwargs["start_agent"] == "witness-analysis"
+
+
+# ------------------------------------------------------------------ #
+# Scenario isolation and identity
+# ------------------------------------------------------------------ #
+
+
+class TestScenarioIsolation:
+    """Verify that scenarios are properly isolated from the original state."""
+
+    @pytest.mark.asyncio
+    async def test_deep_clone_doesnt_affect_original(self):
+        """Creating a scenario must not mutate the original CaseState."""
+        from src.services.whatif_controller.controller import WhatIfController
+
+        runner = _mock_runner()
+        controller = WhatIfController(runner)
+        original = _populated_case_state()
+        original_dict = original.model_dump()
+
+        await controller.create_scenario(
+            case_state=original,
+            modification_type="fact_toggle",
+            modification_payload={"fact_id": "f-2", "new_status": "agreed"},
+        )
+
+        assert original.model_dump() == original_dict
+
+    @pytest.mark.asyncio
+    async def test_new_run_id_generated(self):
+        """Scenario should get a new run_id; parent_run_id set to the original."""
+        from src.services.whatif_controller.controller import WhatIfController
+
+        runner = _mock_runner()
+        passed_states: list[CaseState] = []
+
+        async def capture(state, start_agent, run_id=None):
+            passed_states.append(copy.deepcopy(state))
+            return state
+
+        runner.run_what_if = AsyncMock(side_effect=capture)
+
+        controller = WhatIfController(runner)
+        original = _populated_case_state()
+        original_run_id = original.run_id
+
+        await controller.create_scenario(
+            case_state=original,
+            modification_type="fact_toggle",
+            modification_payload={"fact_id": "f-2", "new_status": "agreed"},
+        )
+
+        assert len(passed_states) == 1
+        scenario_state = passed_states[0]
+        assert scenario_state.run_id != original_run_id
+        assert scenario_state.parent_run_id == original_run_id
+        # run_what_if invariant: the run_id kwarg must match the state's run_id.
+        assert runner.run_what_if.await_args.kwargs["run_id"] == scenario_state.run_id
+
+
+# ------------------------------------------------------------------ #
+# Invalid modification type
+# ------------------------------------------------------------------ #
+
+
+class TestInvalidModificationType:
+    @pytest.mark.asyncio
+    async def test_unknown_modification_type_raises(self):
+        from src.services.whatif_controller.controller import WhatIfController
+
+        runner = _mock_runner()
+        controller = WhatIfController(runner)
+        state = _populated_case_state()
+
+        with pytest.raises(ValueError, match="Unknown modification_type"):
+            await controller.create_scenario(
+                case_state=state,
+                modification_type="nonexistent_type",
+                modification_payload={},
+            )

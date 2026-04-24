@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.command' | { read -r cmd; echo \"$cmd\" | grep -q '^git push' || exit 0; .venv/bin/ruff format --check src/ tests/ || { echo '{\"decision\":\"block\",\"reason\":\"ruff format --check failed. Run: .venv/bin/ruff format src/ tests/\"}'; exit 0; }; }",
+            "timeout": 30,
+            "statusMessage": "Checking ruff format..."
+          }
+        ]
+      }
+    ]
+  }
+}
