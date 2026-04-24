@@ -7,6 +7,8 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+pytest.importorskip("langchain_core", reason="langchain-core not installed")
 from langchain_core.messages import AIMessage
 
 from src.pipeline.graph.nodes.common import _run_agent_node

@@ -34,6 +34,7 @@ dependencies = [
     # Wraps protectai/deberta-v3-base-prompt-injection-v2 (Apache-2.0, 95%+ recall).
     # See docs/security/rag-corpus-sanitization.md for architecture notes and citations.
     "llm-guard==0.3.16",
+    "jinja2>=3.1.0",
 ]
 
 [project.optional-dependencies]

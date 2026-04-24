@@ -14,6 +14,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+pytest.importorskip("solace_ai_connector", reason="solace-agent-mesh not installed")
 from src.services.layer2_aggregator.a2a import (
     build_send_task_response,
     parse_send_task_response,
