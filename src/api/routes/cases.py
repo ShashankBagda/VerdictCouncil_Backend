@@ -1175,7 +1175,7 @@ async def _run_case_pipeline(case_id: UUID) -> None:
         clear_cancel_flag,
         publish_progress,
     )
-    from src.shared.case_state import CaseState
+    from src.shared.case_state import CaseState, CaseStatusEnum
 
     # Clear any stale cancel flag left over from a previous run so a
     # freshly-started pipeline does not immediately self-cancel.
@@ -1265,9 +1265,11 @@ async def _run_case_pipeline(case_id: UUID) -> None:
                 await db.commit()
         return
 
-    # If the run was cancelled mid-flight the cancel flag is still set;
-    # clear it, flip the DB status, and skip normal persistence.
-    if await check_cancel_flag(case_id):
+    # If the run was cancelled mid-flight the cancel flag is still set and
+    # final_state.status is still "processing" (cancelled runs don't advance
+    # to a gate-pause or completion status). Gate on both to avoid treating
+    # a flag set in the narrow window after a successful run as a cancellation.
+    if await check_cancel_flag(case_id) and final_state.status == CaseStatusEnum.processing:
         await clear_cancel_flag(case_id)
         async with async_session() as db:
             db_case = (

@@ -23,39 +23,21 @@ async def pre_run_guardrail(state: GraphState) -> dict[str, Any]:
     if state.get("is_resume"):
         return {}
 
-    # ------------------------------------------------------------------
-    # Document-pages hydration (DocumentPagesHydrationHook.before_run)
-    # ------------------------------------------------------------------
-    if case.raw_documents:
-        try:
-            from sqlalchemy import select
-
-            from src.models.case import Document
-            from src.services.database import async_session
-
-            file_ids = [
-                d.get("openai_file_id")
-                for d in case.raw_documents
-                if d.get("openai_file_id") and not d.get("pages")
-            ]
-            if file_ids:
-                async with async_session() as db:
-                    result = await db.execute(
-                        select(Document).where(Document.openai_file_id.in_(file_ids))
-                    )
-                    docs_by_file_id = {d.openai_file_id: d for d in result.scalars().all()}
-
-                new_raw = []
-                for raw in case.raw_documents:
-                    fid = raw.get("openai_file_id")
-                    if fid and fid in docs_by_file_id and not raw.get("pages"):
-                        db_pages = docs_by_file_id[fid].pages
-                        if db_pages:
-                            raw = {**raw, "pages": db_pages}
-                    new_raw.append(raw)
-                case = case.model_copy(update={"raw_documents": new_raw})
-        except Exception:
-            logger.exception("Document hydration failed — proceeding with original raw_documents")
+    # Document pages are populated by _run_case_pipeline from the already-loaded
+    # Document ORM objects (intake extraction completes before the pipeline starts).
+    # No DB session is needed here — rely on what's in the case state.
+    missing_pages = [
+        d.get("openai_file_id")
+        for d in (case.raw_documents or [])
+        if d.get("openai_file_id") and not d.get("pages")
+    ]
+    if missing_pages:
+        logger.warning(
+            "case_id=%s: %d document(s) have no pages in state at pipeline start: %s",
+            case.case_id,
+            len(missing_pages),
+            missing_pages,
+        )
 
     # ------------------------------------------------------------------
     # Input injection check (InputGuardrailHook.before_run)
