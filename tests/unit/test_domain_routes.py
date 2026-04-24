@@ -112,7 +112,9 @@ async def test_public_list_domains_returns_200():
     domain = _make_domain()
     session = _FakeSession()
     session.execute = AsyncMock(
-        return_value=MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[domain]))))
+        return_value=MagicMock(
+            scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[domain])))
+        )
     )
     app = _app_with_overrides(judge, session)
 
@@ -129,7 +131,9 @@ async def test_public_list_domains_omits_vector_store_id():
     domain = _make_domain(vector_store_id="vs_secret_store")
     session = _FakeSession()
     session.execute = AsyncMock(
-        return_value=MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[domain]))))
+        return_value=MagicMock(
+            scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[domain])))
+        )
     )
     app = _app_with_overrides(judge, session)
 
@@ -169,7 +173,9 @@ async def test_admin_list_domains_admin_gets_200():
     domain = _make_domain()
     session = _FakeSession()
     session.execute = AsyncMock(
-        return_value=MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[domain]))))
+        return_value=MagicMock(
+            scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[domain])))
+        )
     )
     app = _app_with_overrides(admin, session)
 

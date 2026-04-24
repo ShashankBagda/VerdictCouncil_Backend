@@ -42,9 +42,7 @@ class SearchResult:
     )
 
 
-def _cache_key(
-    query: str, domain: str, vector_store_id: str | None, max_results: int
-) -> str:
+def _cache_key(query: str, domain: str, vector_store_id: str | None, max_results: int) -> str:
     """Generate a deterministic cache key for a search query.
 
     vector_store_id is included to avoid cross-domain cache collisions (H6).
@@ -182,7 +180,9 @@ async def _search_precedents_impl(
         metadata["pair_status"] = "circuit_open"
         try:
             results = await vector_store_search(
-                query, domain, max_results,
+                query,
+                domain,
+                max_results,
                 vector_store_id=vector_store_id,
                 allow_global_fallback=True,
             )
@@ -212,7 +212,9 @@ async def _search_precedents_impl(
             )
             try:
                 results = await vector_store_search(
-                    query, domain, max_results,
+                    query,
+                    domain,
+                    max_results,
                     vector_store_id=vector_store_id,
                     allow_global_fallback=True,
                 )

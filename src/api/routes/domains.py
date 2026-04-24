@@ -248,9 +248,7 @@ async def retire_domain(
     if hard:
         from src.models.case import Case
 
-        live_count_result = await db.execute(
-            select(Case).where(Case.domain_id == domain_id)
-        )
+        live_count_result = await db.execute(select(Case).where(Case.domain_id == domain_id))
         if live_count_result.scalars().first():
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -482,7 +480,10 @@ async def _ingest_domain_document(
         404: {"model": ErrorResponse, "description": "Domain not found"},
         413: {"model": ErrorResponse, "description": "File too large"},
         415: {"model": ErrorResponse, "description": "Unsupported file type"},
-        503: {"model": ErrorResponse, "description": "Uploads temporarily disabled or vector store unavailable"},  # noqa: E501
+        503: {
+            "model": ErrorResponse,
+            "description": "Uploads temporarily disabled or vector store unavailable",
+        },  # noqa: E501
     },
 )
 async def upload_domain_document(

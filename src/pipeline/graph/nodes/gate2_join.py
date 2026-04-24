@@ -5,6 +5,7 @@ The _merge_case reducer has already accumulated their outputs into state["case"]
 This node runs a governance integrity check (ported from GovernanceHaltHook
 for the Gate-2 stage) and surfaces warnings for the builder's conditional edge.
 """
+
 from __future__ import annotations
 
 import logging

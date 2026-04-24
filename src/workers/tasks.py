@@ -154,9 +154,7 @@ async def run_gate_job(ctx: dict[str, Any], job_id: str) -> None:  # noqa: ARG00
                 from sqlalchemy.orm import joinedload as _joinedload
 
                 case_result = await db.execute(
-                    _select(Case)
-                    .where(Case.id == case_id)
-                    .options(_joinedload(Case.domain_ref))
+                    _select(Case).where(Case.id == case_id).options(_joinedload(Case.domain_ref))
                 )
                 case = case_result.scalar_one_or_none()
                 if case is None:
@@ -175,9 +173,7 @@ async def run_gate_job(ctx: dict[str, Any], job_id: str) -> None:  # noqa: ARG00
             from src.tools.exceptions import RetiredDomainError
 
             case_result = await db.execute(
-                _select(Case)
-                .where(Case.id == case_id)
-                .options(_joinedload(Case.domain_ref))
+                _select(Case).where(Case.id == case_id).options(_joinedload(Case.domain_ref))
             )
             live_case = case_result.scalar_one_or_none()
             if live_case is None:
@@ -203,7 +199,8 @@ async def run_gate_job(ctx: dict[str, Any], job_id: str) -> None:  # noqa: ARG00
 
         runner = GraphPipelineRunner()
         final_state = await runner.run_gate(
-            state, gate_name,
+            state,
+            gate_name,
             start_agent=start_agent,
             extra_instructions=instructions,
         )
@@ -261,9 +258,7 @@ async def run_intake_extraction_job(ctx: dict[str, Any], job_id: str) -> None:  
 
         correction = (job.payload or {}).get("correction")
         async with async_session() as db:
-            await run_intake_extraction(
-                db, case_id=job.case_id, correction=correction
-            )
+            await run_intake_extraction(db, case_id=job.case_id, correction=correction)
 
     await _run_with_outbox(job_id, PipelineJobType.intake_extraction, _runner)
 

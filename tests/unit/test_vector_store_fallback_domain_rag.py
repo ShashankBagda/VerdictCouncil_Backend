@@ -88,10 +88,7 @@ async def test_global_fallback_uses_global_store_when_configured():
     # Confirm that the OpenAI call used the global vector store id
     call_kwargs = mock_client.responses.create.call_args
     tools_arg = call_kwargs.kwargs.get("tools") or call_kwargs[1].get("tools") or call_kwargs[0][2]
-    assert any(
-        "vs_global_store" in str(t)
-        for t in tools_arg
-    )
+    assert any("vs_global_store" in str(t) for t in tools_arg)
 
 
 # ------------------------------------------------------------------ #

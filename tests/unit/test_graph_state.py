@@ -83,9 +83,7 @@ class TestMergeCaseSequential:
         assert merged.status == "processing"
 
     def test_non_owned_submodel_preserved(self):
-        base = CaseState(
-            evidence_analysis=EvidenceAnalysis(evidence_items=[{"id": "e1"}])
-        )
+        base = CaseState(evidence_analysis=EvidenceAnalysis(evidence_items=[{"id": "e1"}]))
         update = _base()  # evidence_analysis is None
         merged = _merge_case(base, update)
         assert merged.evidence_analysis is not None
@@ -127,9 +125,7 @@ class TestMergeCaseParallel:
             evidence_analysis=EvidenceAnalysis(evidence_items=[{"id": "e1"}]),
         )
         # Fact agent returns its own update; evidence_analysis is None in its output
-        fact_update = CaseState(
-            extracted_facts=ExtractedFacts(facts=[{"fact": "fact-A"}])
-        )
+        fact_update = CaseState(extracted_facts=ExtractedFacts(facts=[{"fact": "fact-A"}]))
         merged = _merge_case(after_evidence, fact_update)
         # Both owned fields must survive
         assert merged.evidence_analysis is not None
@@ -141,9 +137,7 @@ class TestMergeCaseParallel:
             evidence_analysis=EvidenceAnalysis(evidence_items=[{"id": "e1"}]),
             extracted_facts=ExtractedFacts(facts=[{"fact": "A"}]),
         )
-        witness_update = CaseState(
-            witnesses=Witnesses(witnesses=[{"name": "Alice"}])
-        )
+        witness_update = CaseState(witnesses=Witnesses(witnesses=[{"name": "Alice"}]))
         merged = _merge_case(base, witness_update)
         assert merged.evidence_analysis is not None
         assert merged.extracted_facts is not None
@@ -232,7 +226,12 @@ class TestMergeCaseAuditLog:
     def test_audit_log_parallel_accumulation(self):
         """Each L2 agent appends its own entry; all four must survive."""
         state = _base()
-        for agent in ["evidence-analysis", "fact-reconstruction", "witness-analysis", "legal-knowledge"]:  # noqa: E501
+        for agent in [
+            "evidence-analysis",
+            "fact-reconstruction",
+            "witness-analysis",
+            "legal-knowledge",
+        ]:  # noqa: E501
             entry = self._entry(agent, "completed")
             update = CaseState(audit_log=[entry])
             state = _merge_case(state, update)

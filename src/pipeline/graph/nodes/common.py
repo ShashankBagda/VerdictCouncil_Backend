@@ -94,9 +94,7 @@ async def _run_agent_node(agent_name: str, state: GraphState) -> dict[str, Any]:
     # ------------------------------------------------------------------
     system_prompt = AGENT_PROMPTS[agent_name]
     if extra:
-        system_prompt = (
-            f"{system_prompt}\n\nAdditional instructions from judge:\n{extra}"
-        )
+        system_prompt = f"{system_prompt}\n\nAdditional instructions from judge:\n{extra}"
 
     # ------------------------------------------------------------------
     # Model + tools
@@ -170,9 +168,7 @@ async def _run_agent_node(agent_name: str, state: GraphState) -> dict[str, Any]:
                     tool = _find_tool(tools, fn_name)
                     result_raw = await tool.ainvoke(fn_args)
                 except Exception as exc:
-                    logger.warning(
-                        "Tool '%s' raised in agent '%s': %s", fn_name, agent_name, exc
-                    )
+                    logger.warning("Tool '%s' raised in agent '%s': %s", fn_name, agent_name, exc)
                     result_raw = {"error": str(exc)}
 
                 result_str = json.dumps(result_raw, default=str)
@@ -189,12 +185,8 @@ async def _run_agent_node(agent_name: str, state: GraphState) -> dict[str, Any]:
                     },
                 )
 
-                tool_calls_log.append(
-                    {"tool": fn_name, "arguments": fn_args, "result": result_raw}
-                )
-                tool_result_msgs.append(
-                    ToolMessage(content=result_str, tool_call_id=tc_id)
-                )
+                tool_calls_log.append({"tool": fn_name, "arguments": fn_args, "result": result_raw})
+                tool_result_msgs.append(ToolMessage(content=result_str, tool_call_id=tc_id))
 
             messages.extend(tool_result_msgs)
 
@@ -237,9 +229,7 @@ async def _run_agent_node(agent_name: str, state: GraphState) -> dict[str, Any]:
     try:
         agent_output = json.loads(raw_content)
     except json.JSONDecodeError:
-        logger.error(
-            "Agent '%s' returned non-JSON: %s", agent_name, raw_content[:500]
-        )
+        logger.error("Agent '%s' returned non-JSON: %s", agent_name, raw_content[:500])
         agent_output = {}
 
     agent_output = normalize_agent_output(agent_name, agent_output)
@@ -291,9 +281,7 @@ async def _run_agent_node(agent_name: str, state: GraphState) -> dict[str, Any]:
         action="agent_response",
         input_payload={"state_keys": list(original_dict.keys())},
         output_payload=agent_output,
-        system_prompt=(
-            system_prompt[:200] + "..." if len(system_prompt) > 200 else system_prompt
-        ),
+        system_prompt=(system_prompt[:200] + "..." if len(system_prompt) > 200 else system_prompt),
         llm_response={"content": raw_content[:1000]},
         tool_calls=tool_calls_log or None,
         model=model_name,

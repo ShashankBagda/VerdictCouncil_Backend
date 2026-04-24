@@ -121,11 +121,7 @@ async def test_search_domain_guidance_uses_provided_vector_store_id():
         await search_domain_guidance("test query", vector_store_id="vs_domain_a")
 
     call_kwargs = mock_client.responses.create.await_args
-    tools_arg = (
-        call_kwargs.kwargs.get("tools")
-        or call_kwargs[1].get("tools")
-        or call_kwargs[0][2]
-    )
+    tools_arg = call_kwargs.kwargs.get("tools") or call_kwargs[1].get("tools") or call_kwargs[0][2]
     assert any("vs_domain_a" in str(t) for t in tools_arg), (
         "vector_store_id vs_domain_a must be forwarded to the OpenAI call"
     )
@@ -157,11 +153,7 @@ async def test_domain_a_store_id_does_not_retrieve_domain_b_sentinel():
         await search_domain_guidance("query", vector_store_id=domain_a_store)
 
     call_kwargs = mock_client.responses.create.await_args
-    tools_arg = (
-        call_kwargs.kwargs.get("tools")
-        or call_kwargs[1].get("tools")
-        or call_kwargs[0][2]
-    )
+    tools_arg = call_kwargs.kwargs.get("tools") or call_kwargs[1].get("tools") or call_kwargs[0][2]
     assert any(domain_a_store in str(t) for t in tools_arg)
     assert not any(domain_b_store in str(t) for t in tools_arg), (
         "Domain B's store id must not appear when domain A was requested"
@@ -201,7 +193,9 @@ async def test_openai_api_error_raises_domain_guidance_unavailable():
 @pytest.mark.asyncio
 async def test_search_domain_guidance_respects_max_results():
     """Results are capped at max_results even if OpenAI returns more."""
-    results = [_mock_file_search_result(f"doc_{i}.pdf", 0.9 - i * 0.1, f"Text {i}") for i in range(10)]  # noqa: E501
+    results = [
+        _mock_file_search_result(f"doc_{i}.pdf", 0.9 - i * 0.1, f"Text {i}") for i in range(10)
+    ]  # noqa: E501
     search_call = _mock_file_search_call(results)
     response = _mock_response([search_call])
     mock_client = _mock_openai_client(response)

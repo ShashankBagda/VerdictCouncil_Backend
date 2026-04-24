@@ -172,7 +172,10 @@ async def test_sanitize_text_called_once_per_page(_openai_client):
 
     with (
         patch("src.tools.parse_document._get_client", return_value=client),
-        patch("src.tools.parse_document.sanitize_text", wraps=__import__("src.shared.sanitization", fromlist=["sanitize_text"]).sanitize_text) as mock_sanitize,  # noqa: E501
+        patch(
+            "src.tools.parse_document.sanitize_text",
+            wraps=__import__("src.shared.sanitization", fromlist=["sanitize_text"]).sanitize_text,
+        ) as mock_sanitize,  # noqa: E501
     ):
         await parse_document("file-two-pages")
 

@@ -374,9 +374,7 @@ def _serialize_case_detail(case: Case) -> dict[str, Any]:
             "hearing_analyses": list(case.hearing_analyses or []),
             "audit_logs": list(case.audit_logs or []),
             "domain_has_vector_store": bool(
-                case.domain_ref
-                and case.domain_ref.is_active
-                and case.domain_ref.vector_store_id
+                case.domain_ref and case.domain_ref.is_active and case.domain_ref.vector_store_id
             ),
         }
     )
@@ -518,9 +516,7 @@ async def create_case_draft(
                 detail=f"Domain {body.domain_id} not found",
             )
     elif body.domain is not None:
-        result = await db.execute(
-            select(DomainModel).where(DomainModel.code == body.domain.value)
-        )
+        result = await db.execute(select(DomainModel).where(DomainModel.code == body.domain.value))
         domain_row = result.scalar_one_or_none()
         if domain_row is None:
             raise HTTPException(
@@ -830,13 +826,17 @@ async def stream_intake_events(
                     return
                 remaining = SSE_WATCHDOG_SECONDS - (time.monotonic() - stream_start)
                 if remaining <= 0:
-                    yield "data: " + json.dumps(
-                        {
-                            "type": "error",
-                            "message": "watchdog_timeout",
-                            "ts": datetime.now(UTC).isoformat(),
-                        }
-                    ) + "\n\n"
+                    yield (
+                        "data: "
+                        + json.dumps(
+                            {
+                                "type": "error",
+                                "message": "watchdog_timeout",
+                                "ts": datetime.now(UTC).isoformat(),
+                            }
+                        )
+                        + "\n\n"
+                    )
                     return
                 try:
                     payload = await asyncio.wait_for(

@@ -408,9 +408,7 @@ async def test_ingest_records_classifier_hits_in_admin_event():
 
     admin_events = [obj for obj in bg_session.added if isinstance(obj, AdminEvent)]
     assert admin_events, "No AdminEvent written to the session"
-    upload_event = next(
-        (e for e in admin_events if e.action == "domain_document_uploaded"), None
-    )
+    upload_event = next((e for e in admin_events if e.action == "domain_document_uploaded"), None)
     assert upload_event is not None, "domain_document_uploaded AdminEvent not found"
     assert upload_event.payload["regex_hits"] == 0
     assert upload_event.payload["classifier_hits"] == 1

@@ -4,6 +4,7 @@ The builder adds static parallel edges from this node to evidence_analysis,
 fact_reconstruction, witness_analysis, and legal_knowledge. LangGraph
 executes all 4 in parallel and joins via gate2_join.
 """
+
 from __future__ import annotations
 
 from typing import Any

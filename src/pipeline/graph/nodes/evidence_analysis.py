@@ -1,4 +1,5 @@
 """Gate 2 parallel — evidence analysis agent node."""
+
 from __future__ import annotations
 
 from typing import Any

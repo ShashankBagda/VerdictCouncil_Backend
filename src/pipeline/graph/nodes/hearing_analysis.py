@@ -1,4 +1,5 @@
 """Gate 3 — hearing analysis agent node."""
+
 from __future__ import annotations
 
 from typing import Any

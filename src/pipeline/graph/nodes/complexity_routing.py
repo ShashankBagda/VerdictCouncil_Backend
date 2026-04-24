@@ -1,4 +1,5 @@
 """Gate 1 — complexity routing agent node."""
+
 from __future__ import annotations
 
 from typing import Any

@@ -70,9 +70,7 @@ class _CrossReferenceInput(BaseModel):
     segments: list[dict[str, Any]] = Field(
         description="Document segments to compare. Each: {doc_id, text, page, paragraph}"
     )
-    check_type: str = Field(
-        description="Type of check: 'contradiction' | 'corroboration' | 'all'"
-    )
+    check_type: str = Field(description="Type of check: 'contradiction' | 'corroboration' | 'all'")
 
 
 class _TimelineConstructInput(BaseModel):
@@ -101,9 +99,7 @@ class _ConfidenceCalcInput(BaseModel):
     fact_statuses: list[str] = Field(
         description="Status labels per extracted fact: 'established' | 'disputed' | 'unverified'"
     )
-    witness_scores: list[int] = Field(
-        description="Credibility scores per witness (0-100)"
-    )
+    witness_scores: list[int] = Field(description="Credibility scores per witness (0-100)")
     precedent_similarities: list[float] = Field(
         description="Similarity scores per precedent (0.0-1.0)"
     )
@@ -306,9 +302,7 @@ def make_tools(
         from src.tools.search_domain_guidance import search_domain_guidance
 
         if not vector_store_id:
-            raise DomainGuidanceUnavailable(
-                "No domain_vector_store_id configured for this case"
-            )
+            raise DomainGuidanceUnavailable("No domain_vector_store_id configured for this case")
         return await search_domain_guidance(
             query=query,
             vector_store_id=vector_store_id,

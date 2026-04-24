@@ -131,11 +131,13 @@ class TestRouteAfterComplexityRouting:
 
     def test_awaiting_gate1_review_routes_to_end(self):
         from langgraph.graph import END
+
         state = _state(case=CaseState(status=CaseStatusEnum.awaiting_review_gate1))
         assert _route_after_complexity_routing(state) == END
 
     def test_escalated_routes_to_end(self):
         from langgraph.graph import END
+
         state = _state(case=CaseState(status=CaseStatusEnum.escalated))
         assert _route_after_complexity_routing(state) == END
 
@@ -212,16 +214,12 @@ class TestRouteAfterHearingAnalysis:
         assert _route_after_hearing_analysis(state) == "hearing_governance"
 
     def test_non_null_preliminary_conclusion_triggers_retry(self):
-        case = CaseState(
-            hearing_analysis=HearingAnalysis(preliminary_conclusion="guilty")
-        )
+        case = CaseState(hearing_analysis=HearingAnalysis(preliminary_conclusion="guilty"))
         state = _state(case=case, retry_counts={"hearing-analysis": 0})
         assert _route_after_hearing_analysis(state) == "hearing_analysis"
 
     def test_non_null_at_max_retries_advances(self):
-        case = CaseState(
-            hearing_analysis=HearingAnalysis(preliminary_conclusion="guilty")
-        )
+        case = CaseState(hearing_analysis=HearingAnalysis(preliminary_conclusion="guilty"))
         state = _state(case=case, retry_counts={"hearing-analysis": 1})
         assert _route_after_hearing_analysis(state) == "hearing_governance"
 
@@ -253,6 +251,7 @@ class TestRouteAfterHearingGovernance:
 
     def test_clean_fairness_check_routes_to_end(self):
         from langgraph.graph import END
+
         fc = FairnessCheck(
             critical_issues_found=False,
             audit_passed=True,
@@ -265,5 +264,6 @@ class TestRouteAfterHearingGovernance:
 
     def test_no_fairness_check_routes_to_end(self):
         from langgraph.graph import END
+
         state = _state(case=CaseState(fairness_check=None))
         assert _route_after_hearing_governance(state) == END

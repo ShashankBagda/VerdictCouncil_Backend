@@ -352,16 +352,12 @@ async def upload_documents(
     # Draft intake: the first authoritative document triggers extraction.
     # Anything uploaded after the case has left intake is business-as-usual
     # (evidence / supplementary uploads for an already-pending case).
-    if case.status == CaseStatus.draft and any(
-        k in _INTAKE_TRIGGER_KINDS for k in resolved_kinds
-    ):
+    if case.status == CaseStatus.draft and any(k in _INTAKE_TRIGGER_KINDS for k in resolved_kinds):
         from src.models.pipeline_job import PipelineJobType
         from src.workers.outbox import enqueue_outbox_job
 
         case.status = CaseStatus.extracting
-        await enqueue_outbox_job(
-            db, case_id=case.id, job_type=PipelineJobType.intake_extraction
-        )
+        await enqueue_outbox_job(db, case_id=case.id, job_type=PipelineJobType.intake_extraction)
         await db.commit()
     else:
         await db.commit()

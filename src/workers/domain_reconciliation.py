@@ -137,6 +137,4 @@ async def _check_vector_store_file(client, db, doc: DomainDocument) -> None:
         )
     else:
         # Still in progress — leave it for the next reconciliation pass
-        logger.debug(
-            "DomainDocument %s still indexing (VS status=%s)", doc.id, vs_file.status
-        )
+        logger.debug("DomainDocument %s still indexing (VS status=%s)", doc.id, vs_file.status)
