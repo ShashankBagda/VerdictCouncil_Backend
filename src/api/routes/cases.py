@@ -1302,6 +1302,10 @@ async def _run_case_pipeline(case_id: UUID) -> None:
 
             runner = await get_mesh_runner()
             final_state = await runner.run(initial_state, run_id=initial_state.run_id)
+        elif settings.runner == "graph":
+            from src.pipeline.graph.runner import GraphPipelineRunner
+
+            final_state = await GraphPipelineRunner().run(initial_state)
         else:
             from src.pipeline.runner import PipelineRunner
 
