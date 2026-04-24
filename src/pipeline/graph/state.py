@@ -9,6 +9,28 @@ from typing_extensions import TypedDict
 from src.shared.case_state import AuditEntry, CaseState
 
 
+def _merge_retry_counts(base: dict[str, int], update: dict[str, int]) -> dict[str, int]:
+    """Reducer for retry_counts: union dicts, keeping the max count per agent.
+
+    The retry-router nodes write partial dicts (one agent key at a time). The
+    max-per-key rule ensures a stale parallel path can never reset a counter
+    already advanced by another branch.
+    """
+    merged = dict(base)
+    for k, v in update.items():
+        merged[k] = max(merged.get(k, 0), v)
+    return merged
+
+
+def _merge_dicts(base: dict, update: dict) -> dict:
+    """Reducer for dict fields written by parallel branches: shallow union.
+
+    Later writes for the same key win. Prevents parallel Gate-2 nodes from
+    clobbering each other's entries via last-writer-wins.
+    """
+    return {**base, **update}
+
+
 def _merge_case(base: CaseState, update: CaseState) -> CaseState:
     """Reducer for the 'case' field in GraphState.
 
@@ -73,15 +95,15 @@ class GraphState(TypedDict):
     # Keys are agent names (e.g. "fact-reconstruction")
     extra_instructions: dict[str, str]
 
-    # Retry counter per agent — nodes increment this; conditional edges enforce cap
-    retry_counts: dict[str, int]
+    # Retry counter per agent — incremented by retry-router nodes at the routing boundary
+    retry_counts: Annotated[dict[str, int], _merge_retry_counts]
 
     # Set by any node that escalates or halts the pipeline
     halt: dict[str, Any] | None
 
     # MLflow run IDs written by each node after its agent_run() context manager exits
     # Value is (mlflow_run_id, experiment_id)
-    mlflow_run_ids: dict[str, tuple[str, str]]
+    mlflow_run_ids: Annotated[dict[str, tuple[str, str]], _merge_dicts]
 
     # True when resuming from a checkpoint (skip already-completed gates)
     is_resume: bool
