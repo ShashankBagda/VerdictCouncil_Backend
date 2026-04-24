@@ -118,9 +118,11 @@ async def run_gate_job(ctx: dict[str, Any], job_id: str) -> None:  # noqa: ARG00
         )
         from src.models.case import Case
         from src.pipeline.runner import PipelineRunner
+        from src.pipeline.graph.runner import GraphPipelineRunner
         from src.services.database import async_session
         from src.services.pipeline_events import publish_progress
         from src.shared.case_state import CaseState, CaseStatusEnum
+        from src.shared.config import settings
 
         payload = job.payload or {}
         gate_name = payload.get("gate_name")
@@ -200,8 +202,19 @@ async def run_gate_job(ctx: dict[str, Any], job_id: str) -> None:  # noqa: ARG00
         # Force status to processing before handing to run_gate
         state = state.model_copy(update={"status": CaseStatusEnum.processing})
 
-        runner = PipelineRunner()
-        final_state = await runner.run_gate(state, gate_name, start_agent, instructions)
+        runner = (
+            GraphPipelineRunner()
+            if settings.runner == "graph"
+            else PipelineRunner()
+        )
+        if isinstance(runner, GraphPipelineRunner):
+            final_state = await runner.run_gate(
+                state, gate_name,
+                start_agent=start_agent,
+                extra_instructions=instructions,
+            )
+        else:
+            final_state = await runner.run_gate(state, gate_name, start_agent, instructions)
 
         gate_state_payload = {
             "current_gate": gate_num,
@@ -212,7 +225,7 @@ async def run_gate_job(ctx: dict[str, Any], job_id: str) -> None:  # noqa: ARG00
 
         async with async_session() as db:
             # Flush parsed document pages if any parse_document tool calls ran (US-008)
-            if runner._document_pages_buffer:
+            if hasattr(runner, "_document_pages_buffer") and runner._document_pages_buffer:
                 from sqlalchemy import update as sa_update
 
                 from src.models.case import Document
