@@ -12,7 +12,7 @@ NUS Master of Software Engineering | Agentic AI Architecture Module | March 2026
 
 - [Part 1: User Stories](01-user-stories.md)
 - [Part 2: System Architecture](02-system-architecture.md)
-- [Part 3: Agent Configurations (SAM YAML)](03-agent-configurations.md)
+- [Part 3: Agent Configurations](03-agent-configurations.md)
 - [Part 4: Tech Stack](04-tech-stack.md)
 - [Part 5: Diagrams](05-diagrams.md)
 - [Part 6: CI/CD Pipeline](06-cicd-pipeline.md)
