@@ -1166,9 +1166,11 @@ async def stream_pipeline_status(
 async def _run_case_pipeline(case_id: UUID) -> None:
     """Background task: run the 9-agent pipeline for a case and persist results."""
 
+    from src.api.schemas.pipeline_events import PipelineProgressEvent
     from src.db.persist_case_results import persist_case_results
     from src.models.case import CaseStatus as CaseStatusModel
     from src.services.database import async_session
+    from src.services.pipeline_events import publish_progress
     from src.shared.case_state import CaseState
 
     async with async_session() as db:
@@ -1233,8 +1235,19 @@ async def _run_case_pipeline(case_id: UUID) -> None:
         from src.pipeline.graph.runner import GraphPipelineRunner
 
         final_state = await GraphPipelineRunner().run(initial_state)
-    except Exception:
+    except Exception as exc:
         logger.exception("Pipeline run failed for case_id=%s", case_id)
+        await publish_progress(
+            PipelineProgressEvent(
+                case_id=case_id,
+                agent="pipeline",
+                phase="failed",
+                step=None,
+                ts=datetime.now(UTC),
+                error=str(exc)[:500],
+                detail={"reason": "orchestrator_exception"},
+            )
+        )
         async with async_session() as db:
             db_case = (
                 await db.execute(select(Case).where(Case.id == case_id))
@@ -1277,9 +1290,6 @@ async def _run_case_pipeline(case_id: UUID) -> None:
     # emits it on its own. Without this, the browser holds an open
     # EventSource well past the gate pause and never shows the gate
     # review UI until the next poll tick catches up.
-    from src.api.schemas.pipeline_events import PipelineProgressEvent
-    from src.services.pipeline_events import publish_progress
-
     if status_val.startswith("awaiting_review_gate"):
         close_event = PipelineProgressEvent(
             case_id=case_id,
