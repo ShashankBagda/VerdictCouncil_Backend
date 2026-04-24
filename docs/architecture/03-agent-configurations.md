@@ -265,14 +265,6 @@ broker: &broker_connection
   password: ${SOLACE_BROKER_PASSWORD}
 
 # ──────────────────────────────────────────────
-# Session Service (PostgreSQL)
-# ──────────────────────────────────────────────
-
-session_service: &default_session_service
-  type: database
-  db_url: ${ADK_DATABASE_URL}  # separate DB from the main app; avoids schema conflicts with app sessions table
-
-# ──────────────────────────────────────────────
 # Artifact Service (Filesystem)
 # ──────────────────────────────────────────────
 
