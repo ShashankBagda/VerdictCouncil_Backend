@@ -1,0 +1,303 @@
+{
+  "$defs": {
+    "AgentEvent": {
+      "description": "Fine-grained agent telemetry: thinking, tool calls, LLM responses.",
+      "properties": {
+        "kind": {
+          "const": "agent",
+          "default": "agent",
+          "title": "Kind",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "case_id": {
+          "title": "Case Id",
+          "type": "string"
+        },
+        "agent": {
+          "title": "Agent",
+          "type": "string"
+        },
+        "event": {
+          "enum": [
+            "thinking",
+            "tool_call",
+            "tool_result",
+            "llm_response",
+            "agent_completed"
+          ],
+          "title": "Event",
+          "type": "string"
+        },
+        "content": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Content"
+        },
+        "tool_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tool Name"
+        },
+        "args": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Args"
+        },
+        "result": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Result"
+        },
+        "ts": {
+          "title": "Ts",
+          "type": "string"
+        }
+      },
+      "required": [
+        "case_id",
+        "agent",
+        "event",
+        "ts"
+      ],
+      "title": "AgentEvent",
+      "type": "object"
+    },
+    "AuthExpiringEvent": {
+      "description": "Emitted \u226560 s before the session cookie expires so the client can redirect.",
+      "properties": {
+        "kind": {
+          "const": "auth_expiring",
+          "default": "auth_expiring",
+          "title": "Kind",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "expires_at": {
+          "format": "date-time",
+          "title": "Expires At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "expires_at"
+      ],
+      "title": "AuthExpiringEvent",
+      "type": "object"
+    },
+    "HeartbeatEvent": {
+      "description": "Keepalive frame emitted on each SSE heartbeat tick.",
+      "properties": {
+        "kind": {
+          "const": "heartbeat",
+          "default": "heartbeat",
+          "title": "Kind",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "ts": {
+          "format": "date-time",
+          "title": "Ts",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ts"
+      ],
+      "title": "HeartbeatEvent",
+      "type": "object"
+    },
+    "PipelineProgressEvent": {
+      "description": "Per-agent lifecycle and pipeline-level terminal events.\n\nTwo shapes share this model:\n\n- **Per-agent progress** \u2014 ``agent`` is one of the 9 agent names,\n  ``phase`` is ``\"started\"``/``\"completed\"``/``\"failed\"``, and\n  ``step`` is the 1-indexed position in ``AGENT_ORDER``.\n- **Pipeline-level terminal** \u2014 ``agent == \"pipeline\"`` with\n  ``phase == \"terminal\"`` is emitted on every halt path (L1\n  escalation, L2 barrier timeout, governance halt, orchestrator\n  exception, watchdog timeout). ``step`` is omitted; ``detail``\n  carries ``{\"reason\": ..., \"stopped_at\": ...}``.",
+      "properties": {
+        "kind": {
+          "const": "progress",
+          "default": "progress",
+          "title": "Kind",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "case_id": {
+          "format": "uuid",
+          "title": "Case Id",
+          "type": "string"
+        },
+        "agent": {
+          "description": "Per-agent events: one of the 9 agent names (case-processing, complexity-routing, evidence-analysis, fact-reconstruction, witness-analysis, legal-knowledge, argument-construction, hearing-analysis, hearing-governance). Terminal events use 'pipeline'.",
+          "title": "Agent",
+          "type": "string"
+        },
+        "phase": {
+          "enum": [
+            "started",
+            "completed",
+            "failed",
+            "terminal",
+            "awaiting_review",
+            "cancelled"
+          ],
+          "title": "Phase",
+          "type": "string"
+        },
+        "step": {
+          "anyOf": [
+            {
+              "maximum": 9,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "1-indexed AGENT_ORDER position; omitted for terminal events.",
+          "title": "Step"
+        },
+        "total": {
+          "default": 9,
+          "title": "Total",
+          "type": "integer"
+        },
+        "ts": {
+          "format": "date-time",
+          "title": "Ts",
+          "type": "string"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Truncated error message when phase=failed",
+          "title": "Error"
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Extra payload for terminal events: {'reason': <halt reason>, 'stopped_at': <stage>}.",
+          "title": "Detail"
+        },
+        "mlflow_run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "MLflow run UUID for the nested agent run. Populated on the `completed` phase when MLflow tracing is enabled.",
+          "title": "Mlflow Run Id"
+        },
+        "mlflow_experiment_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "MLflow experiment id owning `mlflow_run_id`. Needed to build the MLflow UI URL because the path includes /experiments/<id>/runs/<run_id>.",
+          "title": "Mlflow Experiment Id"
+        }
+      },
+      "required": [
+        "case_id",
+        "agent",
+        "phase",
+        "ts"
+      ],
+      "title": "PipelineProgressEvent",
+      "type": "object"
+    }
+  },
+  "discriminator": {
+    "mapping": {
+      "agent": "#/$defs/AgentEvent",
+      "auth_expiring": "#/$defs/AuthExpiringEvent",
+      "heartbeat": "#/$defs/HeartbeatEvent",
+      "progress": "#/$defs/PipelineProgressEvent"
+    },
+    "propertyName": "kind"
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/PipelineProgressEvent"
+    },
+    {
+      "$ref": "#/$defs/AgentEvent"
+    },
+    {
+      "$ref": "#/$defs/HeartbeatEvent"
+    },
+    {
+      "$ref": "#/$defs/AuthExpiringEvent"
+    }
+  ]
+}

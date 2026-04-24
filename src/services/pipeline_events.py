@@ -63,17 +63,18 @@ async def publish_agent_event(case_id: str | object, event: dict) -> None:
     This is the free-form counterpart to `publish_progress`. The
     sequential runner emits these from inside its LLM+tool loop so the
     `/case/<id>/building` UI can show what's actually happening beyond
-    agent lifecycle transitions. The event dict is forwarded verbatim
-    to SSE subscribers — keys like `event`, `agent`, `content`,
-    `tool_name`, `args`, `result` are what the frontend's `EventLine`
-    already branches on.
+    agent lifecycle transitions.
+
+    `kind` and `schema_version` are injected here so callers don't need
+    to include them; the published payload conforms to AgentEvent.
 
     Failures are logged but never raised: telemetry must never break a
     running pipeline.
     """
     try:
         r = await _get_redis_client()
-        await r.publish(_channel(case_id), json.dumps(event, default=str))
+        stamped = {"kind": "agent", "schema_version": 1, **event}
+        await r.publish(_channel(case_id), json.dumps(stamped, default=str))
     except Exception:
         logger.exception("Failed to publish agent event")
 

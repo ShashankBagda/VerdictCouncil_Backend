@@ -845,7 +845,12 @@ async def stream_intake_events(
                 except TimeoutError:
                     if producer_done.is_set() and queue.empty():
                         return
-                    yield ": keepalive\n\n"
+                    heartbeat = {
+                        "kind": "heartbeat",
+                        "schema_version": 1,
+                        "ts": datetime.now(UTC).isoformat(),
+                    }
+                    yield f"event: heartbeat\ndata: {json.dumps(heartbeat)}\n\n"
                     continue
                 yield f"data: {payload}\n\n"
                 if producer_done.is_set() and queue.empty():
@@ -1084,6 +1089,8 @@ async def stream_pipeline_status(
         _snap_case = await db.get(Case, case_id)
         if _snap_case is not None:
             snap_event = {
+                "kind": "progress",
+                "schema_version": 1,
                 "case_id": str(case_id),
                 "agent": "pipeline",
                 "phase": "case.status",
@@ -1093,7 +1100,7 @@ async def stream_pipeline_status(
                     "gate_state": _snap_case.gate_state,
                 },
             }
-            yield f"data: {json.dumps(snap_event)}\n\n"
+            yield f"event: progress\ndata: {json.dumps(snap_event)}\n\n"
 
         # Producer-consumer pattern: a background task owns the subscribe()
         # generator for its full lifetime and pushes payloads onto a queue.
@@ -1119,6 +1126,8 @@ async def stream_pipeline_status(
                 remaining = SSE_WATCHDOG_SECONDS - (time.monotonic() - stream_start)
                 if remaining <= 0:
                     timeout_event = {
+                        "kind": "progress",
+                        "schema_version": 1,
                         "case_id": str(case_id),
                         "agent": "pipeline",
                         "phase": "terminal",
@@ -1128,7 +1137,7 @@ async def stream_pipeline_status(
                             "stopped_at": "sse-stream",
                         },
                     }
-                    yield f"data: {json.dumps(timeout_event)}\n\n"
+                    yield f"event: progress\ndata: {json.dumps(timeout_event)}\n\n"
                     return
                 try:
                     payload = await asyncio.wait_for(
@@ -1138,11 +1147,20 @@ async def stream_pipeline_status(
                 except TimeoutError:
                     if producer_done.is_set() and queue.empty():
                         return
-                    # SSE comment lines keep idle connections warm without
-                    # polluting the event log on the subscriber side.
-                    yield ": keepalive\n\n"
+                    heartbeat = {
+                        "kind": "heartbeat",
+                        "schema_version": 1,
+                        "ts": datetime.now(UTC).isoformat(),
+                    }
+                    yield f"event: heartbeat\ndata: {json.dumps(heartbeat)}\n\n"
                     continue
-                yield f"data: {payload}\n\n"
+                # Extract the `kind` field to emit the named SSE event type so
+                # EventSource.addEventListener('progress'/'agent', ...) fires natively.
+                try:
+                    kind = json.loads(payload).get("kind", "progress")
+                except (json.JSONDecodeError, AttributeError):
+                    kind = "progress"
+                yield f"event: {kind}\ndata: {payload}\n\n"
                 if producer_done.is_set() and queue.empty():
                     return
         finally:
