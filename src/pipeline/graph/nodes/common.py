@@ -171,7 +171,18 @@ async def _run_agent_node(agent_name: str, state: GraphState) -> dict[str, Any]:
         token_usage = _token_usage(ai_msg)
 
         # Tool-call loop — manual so we control SSE granularity
+        _MAX_TOOL_ITERATIONS = 10
+        _tool_iteration = 0
         while ai_msg.tool_calls:
+            if _tool_iteration >= _MAX_TOOL_ITERATIONS:
+                logger.warning(
+                    "Agent '%s' reached MAX_TOOL_ITERATIONS=%d; exiting loop",
+                    agent_name,
+                    _MAX_TOOL_ITERATIONS,
+                )
+                break
+            _tool_iteration += 1
+
             tool_result_msgs: list[ToolMessage] = []
 
             for tc in ai_msg.tool_calls:

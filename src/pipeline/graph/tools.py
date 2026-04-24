@@ -9,6 +9,7 @@ node; the caller folds this into CaseState.precedent_source_metadata at exit.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from langchain_core.tools import tool
@@ -190,7 +191,7 @@ def make_tools(
     # timeline_construct
     # ------------------------------------------------------------------
     @tool("timeline_construct", args_schema=_TimelineConstructInput)
-    def timeline_construct_tool(events: list[dict[str, Any]]) -> list[dict]:
+    async def timeline_construct_tool(events: list[dict[str, Any]]) -> list[dict]:
         """Build a chronological timeline from extracted events.
 
         Takes events with date/time information, sorts them chronologically,
@@ -199,7 +200,7 @@ def make_tools(
         """
         from src.tools.timeline_construct import timeline_construct
 
-        return timeline_construct(events=events)  # type: ignore[arg-type]
+        return await asyncio.to_thread(timeline_construct, events=events)  # type: ignore[arg-type]
 
     all_tools["timeline_construct"] = timeline_construct_tool
 

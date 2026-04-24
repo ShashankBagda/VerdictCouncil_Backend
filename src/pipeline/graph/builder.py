@@ -1,7 +1,7 @@
 """Build and compile the VerdictCouncil LangGraph StateGraph.
 
-`build_graph(checkpointer)` is the single entry-point. It assembles the
-fixed-topology DAG and returns a compiled graph ready for invocation.
+`build_graph()` is the single entry-point. It assembles the fixed-topology
+DAG and returns a compiled graph ready for invocation.
 
 Topology (15 nodes):
     START → pre_run_guardrail → case_processing → complexity_routing
@@ -12,15 +12,18 @@ Topology (15 nodes):
          → hearing_governance → END
 Retry-router nodes (gate2_retry_router, hearing_analysis_retry_router) are
 Command-returning nodes that atomically increment retry_counts and route.
+
+LangGraph RetryPolicy (max_attempts=2, initial_interval=1s) is applied to
+the four L2 agents plus argument_construction, hearing_analysis, and
+hearing_governance so transient LLM / network errors auto-recover.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from langgraph.graph import END, START, StateGraph
-from langgraph.types import Command
+from langgraph.types import Command, RetryPolicy
 
 from src.pipeline.graph.nodes.argument_construction import argument_construction
 from src.pipeline.graph.nodes.case_processing import case_processing
@@ -138,7 +141,10 @@ def _route_after_case_processing(state: GraphState) -> str:
 # ---------------------------------------------------------------------------
 
 
-def build_graph(checkpointer: Any = None):
+_FRONTIER_RETRY = RetryPolicy(max_attempts=2, initial_interval=1.0)
+
+
+def build_graph():
     """Build and compile the VerdictCouncil StateGraph."""
     graph = StateGraph(GraphState)
 
@@ -147,16 +153,16 @@ def build_graph(checkpointer: Any = None):
     graph.add_node("case_processing", case_processing)
     graph.add_node("complexity_routing", complexity_routing)
     graph.add_node("gate2_dispatch", gate2_dispatch)
-    graph.add_node("evidence_analysis", evidence_analysis)
-    graph.add_node("fact_reconstruction", fact_reconstruction)
-    graph.add_node("witness_analysis", witness_analysis)
-    graph.add_node("legal_knowledge", legal_knowledge)
+    graph.add_node("evidence_analysis", evidence_analysis, retry_policy=_FRONTIER_RETRY)
+    graph.add_node("fact_reconstruction", fact_reconstruction, retry_policy=_FRONTIER_RETRY)
+    graph.add_node("witness_analysis", witness_analysis, retry_policy=_FRONTIER_RETRY)
+    graph.add_node("legal_knowledge", legal_knowledge, retry_policy=_FRONTIER_RETRY)
     graph.add_node("gate2_join", gate2_join)
     graph.add_node("gate2_retry_router", _gate2_retry_router)
-    graph.add_node("argument_construction", argument_construction)
-    graph.add_node("hearing_analysis", hearing_analysis)
+    graph.add_node("argument_construction", argument_construction, retry_policy=_FRONTIER_RETRY)
+    graph.add_node("hearing_analysis", hearing_analysis, retry_policy=_FRONTIER_RETRY)
     graph.add_node("hearing_analysis_retry_router", _hearing_analysis_retry_router)
-    graph.add_node("hearing_governance", hearing_governance)
+    graph.add_node("hearing_governance", hearing_governance, retry_policy=_FRONTIER_RETRY)
     graph.add_node("terminal", terminal)
 
     # --- Entry ---
@@ -231,4 +237,4 @@ def build_graph(checkpointer: Any = None):
     # Terminal is a sink
     graph.add_edge("terminal", END)
 
-    return graph.compile(checkpointer=checkpointer)
+    return graph.compile()
