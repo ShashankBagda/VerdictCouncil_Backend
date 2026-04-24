@@ -2,7 +2,7 @@
 
 This guide covers one-time provisioning of all DigitalOcean resources needed to run VerdictCouncil in staging and production. After completing these steps, the CI/CD workflows in [Part 6](06-cicd-pipeline.md) will handle all ongoing deployments.
 
-> **For local development**, see [Part 9: Local Development](09-local-development.md) — covers docker-compose, native Python agents, and local K8s via kind.
+> **For local development**, see [Part 9: Local Development](09-local-development.md) — covers the dockerised infra compose + honcho-managed API/Orchestrator/agent processes.
 
 ---
 
@@ -46,7 +46,7 @@ doctl registry get
 
 | Tier | Storage | Included Repos | Price | Use Case |
 |---|---|---|---|---|
-| Starter | 500 MB | 1 | Free | Not sufficient (12 images) |
+| Starter | 500 MB | 1 | Free | Not sufficient once per-agent images ship |
 | Basic | 5 GB | Unlimited | $5/mo | Development/testing |
 | Professional | 50 GB | Unlimited | $12/mo | Production (recommended) |
 
@@ -86,24 +86,26 @@ doctl kubernetes cluster list --format ID,Name
 
 ### 8.3.3 Node Pool Sizing
 
-The system runs 13 pods (12 Deployments + 1 StatefulSet). Resource requirements:
+The canonical deployment runs **12 application pods** (1 API + 1 Orchestrator + 9 agents + 1 stuck-case-watchdog CronJob pod during its 1-minute run) plus the nginx-ingress controller. The three frontier-tier agents carry the heaviest resource requests.
 
 | Component | CPU Request | Memory Request | Count |
 |---|---|---|---|
-| web-gateway | 250m | 256Mi | 2 (HPA min) |
-| Agent pods (×10) | 250m | 256Mi | 10 |
-| layer2-aggregator | 250m | 256Mi | 1 |
-| whatif-controller | 250m | 256Mi | 1 |
-| solace-broker | 500m | 1Gi | 1 |
-| nginx-ingress | 100m | 128Mi | 1 |
-| **Total** | **~4.35 vCPU** | **~5.4 Gi** | **16 pods** |
+| `vc-api` | 250m | 256Mi | 2 (HPA min) |
+| `vc-orchestrator` | 500m | 512Mi | 2 (HPA min) |
+| Lightweight agents (case-processing, complexity-routing) | 250m | 256Mi | 2 |
+| Efficient/Strong agents (evidence, fact, witness, legal-knowledge) | 500m | 512Mi | 4 |
+| Frontier agents (argument, hearing-analysis, hearing-governance) | 500m | 768Mi | 3 |
+| nginx-ingress | 100m | 128Mi | 2 |
+| **Total (one replica each + HPA mins)** | **~4.6 vCPU** | **~5.6 Gi** | **15 pods** |
 
 **Recommended node size:** `s-4vcpu-8gb` ($48/mo each)
 
 | Environment | Nodes | Monthly Cost | Headroom |
 |---|---|---|---|
-| Staging | 2 | $96 | Minimal — sufficient for testing |
-| Production | 3 | $144 | Room for HPA scale-up and rolling updates |
+| Staging | 2 | $96 | Minimal — sufficient for testing; single replica per role |
+| Production | 3 | $144 | Room for HPA scale-up (frontier agents to 2–3 replicas) and rolling updates |
+
+**MVP today** runs only `vc-api` + nginx-ingress in each cluster; the Orchestrator and agent Deployments are tracked as follow-up rollout steps (see §8.13).
 
 ### 8.3.4 Connect DOCR to DOKS
 
@@ -347,14 +349,16 @@ REDIS_URI=$(doctl databases connection <redis-cluster-id> --format URI --no-head
 kubectl create secret generic verdictcouncil-secrets \
   --namespace verdictcouncil \
   --from-literal=OPENAI_API_KEY="sk-proj-..." \
-  --from-literal=SOLACE_BROKER_USERNAME="vc-agent" \
-  --from-literal=SOLACE_BROKER_PASSWORD="<solace-password>" \
-  --from-literal=POSTGRES_USER="vc_app" \
-  --from-literal=POSTGRES_PASSWORD="<pg-password>" \
-  --from-literal=JWT_SECRET="<256-bit-secret>" \
+  --from-literal=OPENAI_VECTOR_STORE_ID="vs_..." \
   --from-literal=DATABASE_URL="${PG_URI}" \
-  --from-literal=REDIS_URL="${REDIS_URI}"
+  --from-literal=REDIS_URL="${REDIS_URI}" \
+  --from-literal=JWT_SECRET="<256-bit-secret>" \
+  --from-literal=AGENT_HMAC_SECRET="<256-bit-secret>" \
+  --from-literal=FRONTEND_ORIGINS="https://app.verdictcouncil.sg" \
+  --from-literal=COOKIE_SECURE="true"
 ```
+
+`AGENT_HMAC_SECRET` is the key used by the Orchestrator to sign `POST /invoke` calls; every agent pod reads the same secret so it can verify incoming requests. Rotate annually or on any suspected leak (rotation is a rolling restart of the Orchestrator + all agent Deployments).
 
 ---
 
@@ -485,6 +489,12 @@ Complete these steps in order:
 - [ ] Create DO Spaces bucket for backups
 - [ ] Install Prometheus + Grafana monitoring stack
 - [ ] Verify: push a test image to DOCR and pull from DOKS
+- [ ] Roll out `vc-api` Deployment + Service + Ingress
+- [ ] Roll out `vc-orchestrator` Deployment (sets `DISPATCH_MODE=remote`)
+- [ ] Roll out 9 agent Deployments + 9 ClusterIP Services (canonical per-agent-container target)
+- [ ] Apply NetworkPolicy restricting `/invoke` ingress to the Orchestrator pod
+- [ ] Generate + store `AGENT_HMAC_SECRET`; confirm agents reject unsigned requests
+- [ ] Configure HPAs (api on CPU+RPS, orchestrator on queue depth, agents on concurrency/latency)
 
 ---
 
@@ -499,9 +509,8 @@ Complete these steps in order:
 | DOCR (Professional) | — | $12 | Shared across environments |
 | DO Load Balancer | $12 | $12 | 1 per cluster (auto-provisioned) |
 | DO Spaces | — | $5 | 250 GB included |
-| Block Storage (Solace PVC) | $4 (20 GB) | $4 (20 GB) | $0.10/GB/mo |
-| **Total** | **~$157/mo** | **~$252/mo** | |
-| **Combined** | | **~$409/mo** | Excluding LLM API costs |
+| **Total** | **~$153/mo** | **~$248/mo** | No broker, no per-pod PVCs |
+| **Combined** | | **~$401/mo** | Excluding LLM API costs |
 
 > LLM API costs are usage-based and estimated at $0.40–$0.55 per case. See [Appendix A](appendices.md#appendix-a-cost-model) for per-case breakdown and monthly projections.
 
