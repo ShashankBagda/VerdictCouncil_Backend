@@ -26,9 +26,6 @@ spec:
           containers:
             - name: watchdog
               image: verdictcouncil:latest
-              # Override the image's default ENTRYPOINT
-              # ("python -m solace_agent_mesh.main") so we run the watchdog
-              # script instead of booting a SAM agent.
               command: ["python", "-m", "src.services.stuck_case_watchdog"]
               envFrom:
                 - secretRef:
