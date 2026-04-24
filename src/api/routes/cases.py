@@ -36,6 +36,7 @@ from src.models.case import (
     Fact,
     Party,
 )
+from src.models.pipeline_event import PipelineEvent
 from src.models.user import User, UserRole
 from src.services.case_report_data import build_case_report_data
 from src.services.hearing_pack import assemble_pack
@@ -1061,6 +1062,59 @@ async def export_hearing_pack(
             "content-disposition": f'attachment; filename="case-{case_id}-hearing-pack.zip"',
         },
     )
+
+
+@router.get(
+    "/{case_id}/events",
+    operation_id="list_pipeline_events",
+    summary="List recorded pipeline events for a case",
+    description=(
+        "Returns a paginated log of every SSE event written to the replay table. "
+        "Useful for debugging and replay without a live SSE stream."
+    ),
+    responses={
+        403: {"model": ErrorResponse, "description": "Not authorized to view this case"},
+        404: {"model": ErrorResponse, "description": "Case not found"},
+    },
+)
+async def list_pipeline_events(
+    case_id: UUID,
+    db: DBSession,
+    current_user: CurrentUser,
+    limit: int = Query(default=100, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+) -> dict[str, Any]:
+    case_row = await db.get(Case, case_id)
+    if case_row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
+    if current_user.role not in (UserRole.admin, UserRole.judge, UserRole.senior_judge):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+
+    rows = await db.execute(
+        select(PipelineEvent)
+        .where(PipelineEvent.case_id == case_id)
+        .order_by(PipelineEvent.ts.asc())
+        .limit(limit)
+        .offset(offset)
+    )
+    events = rows.scalars().all()
+    return {
+        "case_id": str(case_id),
+        "total": len(events),
+        "limit": limit,
+        "offset": offset,
+        "events": [
+            {
+                "id": str(e.id),
+                "kind": e.kind,
+                "schema_version": e.schema_version,
+                "agent": e.agent,
+                "ts": e.ts.isoformat(),
+                "payload": e.payload,
+            }
+            for e in events
+        ],
+    }
 
 
 @router.get(

@@ -8,14 +8,48 @@ that yields events until the case reaches a terminal status (the
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import uuid
 from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
 
 from src.api.schemas.pipeline_events import PipelineProgressEvent
 from src.tools.search_precedents import _get_redis_client
 
 logger = logging.getLogger(__name__)
+
+
+async def _tee_write(case_id: str | object, payload: dict) -> None:
+    """Fire-and-forget INSERT into pipeline_events; never raises."""
+    try:
+        from src.models.pipeline_event import PipelineEvent
+        from src.services.database import async_session
+
+        raw_ts = payload.get("ts")
+        if isinstance(raw_ts, str):
+            ts = datetime.fromisoformat(raw_ts)
+        elif isinstance(raw_ts, datetime):
+            ts = raw_ts
+        else:
+            ts = datetime.now(UTC)
+
+        async with async_session() as db:
+            db.add(
+                PipelineEvent(
+                    id=uuid.uuid4(),
+                    case_id=uuid.UUID(str(case_id)),
+                    kind=str(payload.get("kind", "unknown")),
+                    schema_version=int(payload.get("schema_version", 1)),
+                    agent=payload.get("agent"),
+                    ts=ts,
+                    payload=payload,
+                )
+            )
+            await db.commit()
+    except Exception:
+        logger.exception("pipeline_events tee-write failed for case %s", case_id)
 
 _GOVERNANCE_TERMINAL_PHASES = {"completed", "failed"}
 
@@ -53,6 +87,7 @@ async def publish_progress(event: PipelineProgressEvent) -> None:
     try:
         r = await _get_redis_client()
         await r.publish(_channel(event.case_id), event.model_dump_json())
+        asyncio.create_task(_tee_write(event.case_id, event.model_dump(mode="json")))
     except Exception:
         logger.exception("Failed to publish pipeline progress event")
 
@@ -75,6 +110,7 @@ async def publish_agent_event(case_id: str | object, event: dict) -> None:
         r = await _get_redis_client()
         stamped = {"kind": "agent", "schema_version": 1, **event}
         await r.publish(_channel(case_id), json.dumps(stamped, default=str))
+        asyncio.create_task(_tee_write(case_id, stamped))
     except Exception:
         logger.exception("Failed to publish agent event")
 

@@ -87,3 +87,36 @@ Shadow runner removed along with SAM. LangGraph is now the only runner.
 
 ### Task 14 — Root submodule bump ✅
 - [x] Bumped backend to 224a471 on root main; pushed to origin
+
+---
+
+# LangGraph & Streaming Remediation — Remaining Backend Items
+
+Spec: `/Users/douglasswm/.claude/plans/users-douglasswm-claude-plans-do-deep-r-serene-platypus.md`
+Branch: `feat/langgraph-state-reducers` — PR #74 merged → `development` (`3ebf56f`)
+
+## Merge gate ✅
+
+- [x] **PR #74 review passes** — no blocking comments
+- [x] `pytest tests/pipeline/graph/ -x -q` green in CI (57 tests)
+- [x] `feat/langgraph-state-reducers` merged into `development`
+- [x] Root submodule bump: `7b5e1cf` on root `main`
+
+## P4.21 — pipeline_events replay table ✅
+
+- [x] **Design**: `(id, case_id, kind, schema_version, agent, ts, payload jsonb)` — GIN index on `payload`, composite index on `(case_id, ts)`
+- [x] **Migration**: `alembic/versions/0024_pipeline_events_replay.py` — revision 0024
+- [x] **Tee writes**: fire-and-forget `asyncio.create_task(_tee_write(...))` in `publish_progress` and `publish_agent_event` in `src/services/pipeline_events.py`
+- [x] **Read endpoint**: `GET /api/v1/cases/{id}/events` — paginated, added to `src/api/routes/cases.py`
+- [x] **Verify**: `pytest tests/api/test_pipeline_events_replay.py` → 6 passed
+- [x] **Files**: `alembic/versions/0024_pipeline_events_replay.py`, `src/services/pipeline_events.py`, `src/api/routes/cases.py`, `src/models/pipeline_event.py`
+- [x] Branch: `feat/pipeline-events-replay` → `development`
+
+## End-to-end smoke (run after PR #74 merges and frontend PR #152 merges)
+
+Follow spec Scenarios A–D with `./dev.sh up` from orchestration root:
+
+- [ ] **Scenario A** — kill backend mid-run: error toast surfaces within ~15s (one heartbeat window); today it silently stays on "Polling"
+- [ ] **Scenario B** — `POST /cases/{id}/cancel` from a second tab: both tabs receive `phase=cancelled` terminal frame; pipeline stops within one inter-turn window; token burn stops
+- [ ] **Scenario C** — open two browser tabs on the same case, close one: the remaining tab keeps receiving events; pipeline continues
+- [ ] **Scenario D** — let `vc_token` cookie expire mid-stream: `auth_expiring` event arrives ≥60s before expiry; frontend redirects to `/login`
