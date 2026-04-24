@@ -15,7 +15,7 @@ Generate the JSON Schema doc with::
 """
 
 from datetime import datetime
-from typing import Annotated, Any, Literal, Union
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -116,6 +116,6 @@ class AuthExpiringEvent(BaseModel):
 
 #: Discriminated union of all SSE event shapes on both streaming endpoints.
 Event = Annotated[
-    Union[PipelineProgressEvent, AgentEvent, HeartbeatEvent, AuthExpiringEvent],
+    PipelineProgressEvent | AgentEvent | HeartbeatEvent | AuthExpiringEvent,
     Field(discriminator="kind"),
 ]

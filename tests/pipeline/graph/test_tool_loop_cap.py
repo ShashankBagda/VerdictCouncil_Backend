@@ -81,7 +81,13 @@ class TestToolLoopCap:
                 "src.pipeline.graph.nodes.common.publish_agent_event", new_callable=AsyncMock
             ),
             patch("src.pipeline.graph.nodes.common.check_cancel_flag", return_value=False),
-            patch("src.pipeline.graph.nodes.common.agent_run", return_value=MagicMock(__enter__=MagicMock(return_value=None), __exit__=MagicMock(return_value=False))),
+            patch(
+                "src.pipeline.graph.nodes.common.agent_run",
+                return_value=MagicMock(
+                    __enter__=MagicMock(return_value=None),
+                    __exit__=MagicMock(return_value=False),
+                ),
+            ),
             patch("src.pipeline.graph.nodes.common.persist_case_state", new_callable=AsyncMock),
             patch(
                 "src.pipeline.graph.nodes.common.async_session",
@@ -147,7 +153,13 @@ class TestToolLoopCap:
                 "src.pipeline.graph.nodes.common.publish_agent_event", new_callable=AsyncMock
             ),
             patch("src.pipeline.graph.nodes.common.check_cancel_flag", return_value=False),
-            patch("src.pipeline.graph.nodes.common.agent_run", return_value=MagicMock(__enter__=MagicMock(return_value=None), __exit__=MagicMock(return_value=False))),
+            patch(
+                "src.pipeline.graph.nodes.common.agent_run",
+                return_value=MagicMock(
+                    __enter__=MagicMock(return_value=None),
+                    __exit__=MagicMock(return_value=False),
+                ),
+            ),
             patch("src.pipeline.graph.nodes.common.persist_case_state", new_callable=AsyncMock),
             patch(
                 "src.pipeline.graph.nodes.common.async_session",

@@ -48,6 +48,8 @@ from src.shared.validation import (
 
 logger = logging.getLogger(__name__)
 
+_MAX_TOOL_ITERATIONS = 10
+
 
 def _resolve_model(agent_name: str) -> str:
     tier = AGENT_MODEL_TIER[agent_name]
@@ -171,7 +173,6 @@ async def _run_agent_node(agent_name: str, state: GraphState) -> dict[str, Any]:
         token_usage = _token_usage(ai_msg)
 
         # Tool-call loop — manual so we control SSE granularity
-        _MAX_TOOL_ITERATIONS = 10
         _tool_iteration = 0
         while ai_msg.tool_calls:
             if _tool_iteration >= _MAX_TOOL_ITERATIONS:

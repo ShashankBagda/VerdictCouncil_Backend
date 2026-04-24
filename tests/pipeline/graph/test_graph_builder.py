@@ -235,13 +235,15 @@ class TestHearingAnalysisRetryRouter:
 
     def test_non_null_preliminary_conclusion_triggers_retry_and_increments(self):
         case = CaseState(hearing_analysis=HearingAnalysis(preliminary_conclusion="guilty"))
-        cmd = _hearing_analysis_retry_router(_state(case=case, retry_counts={"hearing-analysis": 0}))
+        state = _state(case=case, retry_counts={"hearing-analysis": 0})
+        cmd = _hearing_analysis_retry_router(state)
         assert cmd.goto == "hearing_analysis"
         assert cmd.update == {"retry_counts": {"hearing-analysis": 1}}
 
     def test_non_null_at_max_retries_advances(self):
         case = CaseState(hearing_analysis=HearingAnalysis(preliminary_conclusion="guilty"))
-        cmd = _hearing_analysis_retry_router(_state(case=case, retry_counts={"hearing-analysis": 1}))
+        state = _state(case=case, retry_counts={"hearing-analysis": 1})
+        cmd = _hearing_analysis_retry_router(state)
         assert cmd.goto == "hearing_governance"
         assert not cmd.update
 

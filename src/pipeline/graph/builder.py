@@ -106,7 +106,11 @@ def _hearing_analysis_retry_router(state: GraphState) -> Command:
         and retry_counts.get("hearing-analysis", 0) < _MAX_RETRIES
     ):
         return Command(
-            update={"retry_counts": {"hearing-analysis": retry_counts.get("hearing-analysis", 0) + 1}},
+            update={
+                "retry_counts": {
+                    "hearing-analysis": retry_counts.get("hearing-analysis", 0) + 1,
+                },
+            },
             goto="hearing_analysis",
         )
 

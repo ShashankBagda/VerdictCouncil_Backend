@@ -11,13 +11,9 @@ and GraphPipelineRunner are all lazy-imported inside the function body.
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
 from src.api.schemas.pipeline_events import PipelineProgressEvent
-
 
 # ---------------------------------------------------------------------------
 # Helpers
