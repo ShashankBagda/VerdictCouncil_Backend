@@ -155,8 +155,31 @@ def build_graph(checkpointer: Any = None):
     graph.add_node("terminal", terminal)
 
     # --- Entry ---
+    # When start_agent is set (gate-by-gate / what-if), skip to the named node.
+    _jump_targets = {
+        "case_processing": "case_processing",
+        "gate2_dispatch": "gate2_dispatch",
+        "argument_construction": "argument_construction",
+        "hearing_governance": "hearing_governance",
+        # Allow individual L2 agent retries as entry
+        "evidence_analysis": "evidence_analysis",
+        "fact_reconstruction": "fact_reconstruction",
+        "witness_analysis": "witness_analysis",
+        "legal_knowledge": "legal_knowledge",
+    }
+
+    def _route_after_pre_run_guardrail(state: GraphState) -> str:
+        start = state.get("start_agent")
+        if start and start in _jump_targets:
+            return start
+        return "case_processing"
+
     graph.add_edge(START, "pre_run_guardrail")
-    graph.add_edge("pre_run_guardrail", "case_processing")
+    graph.add_conditional_edges(
+        "pre_run_guardrail",
+        _route_after_pre_run_guardrail,
+        {**_jump_targets, "case_processing": "case_processing"},
+    )
 
     # --- Gate 1 ---
     graph.add_conditional_edges(
