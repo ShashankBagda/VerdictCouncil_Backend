@@ -1,5 +1,3 @@
-/Users/douglasswm/Project/AAS/VER/VerdictCouncil_Backend/.venv/lib/python3.12/site-packages/pydantic/main.py:263: UserWarning: COOKIE_SECURE is False. Session cookies will be sent over insecure HTTP. This must ONLY be used in local development.
-  validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
 {
   "openapi": "3.1.0",
   "info": {
@@ -1846,6 +1844,104 @@
           },
           "404": {
             "description": "Case not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (60 requests/minute per client IP)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the rate limit resets",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/cases/{case_id}/cancel": {
+      "post": {
+        "tags": [
+          "cases"
+        ],
+        "summary": "Request cancellation of a running pipeline",
+        "description": "Signals the pipeline to stop at the next inter-turn window. SSE disconnect does NOT cancel the run \u2014 use this endpoint instead.",
+        "operationId": "cancel_case_pipeline",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Case Id"
+            }
+          },
+          {
+            "name": "vc_token",
+            "in": "cookie",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Vc Token"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Case not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Case is not currently processing",
             "content": {
               "application/json": {
                 "schema": {

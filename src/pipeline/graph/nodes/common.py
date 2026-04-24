@@ -31,7 +31,11 @@ from src.pipeline.graph.state import GraphState
 from src.pipeline.graph.tools import make_tools
 from src.pipeline.observability import agent_run
 from src.services.database import async_session
-from src.services.pipeline_events import publish_agent_event, publish_progress
+from src.services.pipeline_events import (
+    check_cancel_flag,
+    publish_agent_event,
+    publish_progress,
+)
 from src.shared.audit import append_audit_entry
 from src.shared.case_state import CaseState, CaseStatusEnum
 from src.shared.config import settings
@@ -43,6 +47,8 @@ from src.shared.validation import (
 )
 
 logger = logging.getLogger(__name__)
+
+_MAX_TOOL_ITERATIONS = 10
 
 
 def _resolve_model(agent_name: str) -> str:
@@ -67,6 +73,21 @@ def _token_usage(ai_msg: AIMessage) -> dict[str, int] | None:
         "completion_tokens": meta.get("output_tokens", 0),
         "total_tokens": meta.get("total_tokens", 0),
     }
+
+
+async def _cancelled_halt(case_id: str, agent_name: str) -> dict[str, Any]:
+    """Publish the SSE cancel frame and return a halt dict for the graph."""
+    await publish_progress(
+        PipelineProgressEvent(
+            case_id=case_id,  # type: ignore[arg-type]
+            agent="pipeline",
+            phase="cancelled",
+            step=None,
+            ts=datetime.now(UTC),
+            detail={"reason": "cancelled_by_user", "stopped_at": agent_name},
+        )
+    )
+    return {"halt": {"reason": "cancelled_by_user", "stopped_at": agent_name}}
 
 
 async def _sse_thinking(case_id: str, agent_name: str, model_name: str, n_tools: int) -> None:
@@ -95,6 +116,11 @@ async def _run_agent_node(agent_name: str, state: GraphState) -> dict[str, Any]:
     system_prompt = AGENT_PROMPTS[agent_name]
     if extra:
         system_prompt = f"{system_prompt}\n\nAdditional instructions from judge:\n{extra}"
+    system_prompt = (
+        f"{system_prompt}\n\n"
+        "OUTPUT FORMAT: Respond with ONLY a single valid JSON object — no prose, "
+        "no markdown fences, no commentary. Your entire response must parse as JSON."
+    )
 
     # ------------------------------------------------------------------
     # Model + tools
@@ -102,10 +128,7 @@ async def _run_agent_node(agent_name: str, state: GraphState) -> dict[str, Any]:
     model_name = _resolve_model(agent_name)
     tools, precedent_meta = make_tools(state, agent_name)
 
-    llm_base = ChatOpenAI(
-        model=model_name,
-        model_kwargs={"response_format": {"type": "json_object"}},
-    )
+    llm_base = ChatOpenAI(model=model_name)
     llm = llm_base.bind_tools(tools) if tools else llm_base
 
     # ------------------------------------------------------------------
@@ -121,6 +144,12 @@ async def _run_agent_node(agent_name: str, state: GraphState) -> dict[str, Any]:
             ts=datetime.now(UTC),
         )
     )
+
+    # ------------------------------------------------------------------
+    # Pre-turn cancel check
+    # ------------------------------------------------------------------
+    if await check_cancel_flag(case_id):
+        return await _cancelled_halt(case_id, agent_name)
 
     # ------------------------------------------------------------------
     # MLflow span + LLM loop
@@ -144,7 +173,17 @@ async def _run_agent_node(agent_name: str, state: GraphState) -> dict[str, Any]:
         token_usage = _token_usage(ai_msg)
 
         # Tool-call loop — manual so we control SSE granularity
+        _tool_iteration = 0
         while ai_msg.tool_calls:
+            if _tool_iteration >= _MAX_TOOL_ITERATIONS:
+                logger.warning(
+                    "Agent '%s' reached MAX_TOOL_ITERATIONS=%d; exiting loop",
+                    agent_name,
+                    _MAX_TOOL_ITERATIONS,
+                )
+                break
+            _tool_iteration += 1
+
             tool_result_msgs: list[ToolMessage] = []
 
             for tc in ai_msg.tool_calls:
@@ -202,6 +241,9 @@ async def _run_agent_node(agent_name: str, state: GraphState) -> dict[str, Any]:
                     "ts": datetime.now(UTC).isoformat(),
                 },
             )
+
+            if await check_cancel_flag(case_id):
+                return await _cancelled_halt(case_id, agent_name)
 
             ai_msg = await llm.ainvoke(messages)
             messages.append(ai_msg)

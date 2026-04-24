@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import Any
 
 from src.pipeline.graph.builder import build_graph
 from src.pipeline.graph.state import GraphState
@@ -31,8 +30,8 @@ _GATE_ENTRY_NODE: dict[str, str] = {
 class GraphPipelineRunner:
     """LangGraph-backed pipeline runner with PipelineRunner-compatible surface."""
 
-    def __init__(self, checkpointer: Any = None) -> None:
-        self._graph = build_graph(checkpointer=checkpointer)
+    def __init__(self) -> None:
+        self._graph = build_graph()
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -58,17 +57,9 @@ class GraphPipelineRunner:
             start_agent=start_agent,
         )
 
-    async def _invoke(
-        self,
-        initial_state: GraphState,
-        thread_id: str | None = None,
-    ) -> CaseState:
+    async def _invoke(self, initial_state: GraphState) -> CaseState:
         """Invoke the compiled graph and return the final CaseState."""
-        config: dict = {}
-        if thread_id:
-            config["configurable"] = {"thread_id": thread_id}
-
-        result = await self._graph.ainvoke(initial_state, config=config or None)
+        result = await self._graph.ainvoke(initial_state)
         return result["case"]
 
     # ------------------------------------------------------------------
@@ -89,7 +80,7 @@ class GraphPipelineRunner:
             run_id=run_id,
             mode="langgraph",
         ):
-            result = await self._invoke(initial_state, thread_id=run_id)
+            result = await self._invoke(initial_state)
 
         return result
 
@@ -133,7 +124,7 @@ class GraphPipelineRunner:
             run_id=run_id,
             mode="langgraph",
         ):
-            result = await self._invoke(initial_state, thread_id=run_id)
+            result = await self._invoke(initial_state)
 
         gate_pause_status = CaseStatusEnum[f"awaiting_review_{gate_name}"]
         result = result.model_copy(update={"status": gate_pause_status})
@@ -165,4 +156,4 @@ class GraphPipelineRunner:
             start_agent=start_agent,
             is_resume=True,
         )
-        return await self._invoke(initial_state, thread_id=run_id)
+        return await self._invoke(initial_state)

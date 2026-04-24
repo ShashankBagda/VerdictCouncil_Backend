@@ -845,7 +845,12 @@ async def stream_intake_events(
                 except TimeoutError:
                     if producer_done.is_set() and queue.empty():
                         return
-                    yield ": keepalive\n\n"
+                    heartbeat = {
+                        "kind": "heartbeat",
+                        "schema_version": 1,
+                        "ts": datetime.now(UTC).isoformat(),
+                    }
+                    yield f"event: heartbeat\ndata: {json.dumps(heartbeat)}\n\n"
                     continue
                 yield f"data: {payload}\n\n"
                 if producer_done.is_set() and queue.empty():
@@ -1074,6 +1079,27 @@ async def stream_pipeline_status(
     db: DBSession,
     current_user: CurrentUser,
 ) -> StreamingResponse:
+    import jwt as _jwt
+
+    # Read vc_token from the cookie header directly so we can surface
+    # impending expiry without keeping the DB session open for the
+    # lifetime of the SSE stream.
+    vc_token = request.cookies.get("vc_token")
+
+    token_expires_at: datetime | None = None
+    if vc_token:
+        try:
+            payload = _jwt.decode(
+                vc_token,
+                options={"verify_signature": False, "verify_exp": False},
+                algorithms=["HS256"],
+            )
+            exp = payload.get("exp")
+            if exp:
+                token_expires_at = datetime.fromtimestamp(exp, UTC)
+        except Exception:
+            pass  # auth already validated by CurrentUser; expiry warning is best-effort
+
     await _load_case_for_export(case_id, db, current_user)
 
     async def event_generator():
@@ -1084,6 +1110,8 @@ async def stream_pipeline_status(
         _snap_case = await db.get(Case, case_id)
         if _snap_case is not None:
             snap_event = {
+                "kind": "progress",
+                "schema_version": 1,
                 "case_id": str(case_id),
                 "agent": "pipeline",
                 "phase": "case.status",
@@ -1093,7 +1121,7 @@ async def stream_pipeline_status(
                     "gate_state": _snap_case.gate_state,
                 },
             }
-            yield f"data: {json.dumps(snap_event)}\n\n"
+            yield f"event: progress\ndata: {json.dumps(snap_event)}\n\n"
 
         # Producer-consumer pattern: a background task owns the subscribe()
         # generator for its full lifetime and pushes payloads onto a queue.
@@ -1119,6 +1147,8 @@ async def stream_pipeline_status(
                 remaining = SSE_WATCHDOG_SECONDS - (time.monotonic() - stream_start)
                 if remaining <= 0:
                     timeout_event = {
+                        "kind": "progress",
+                        "schema_version": 1,
                         "case_id": str(case_id),
                         "agent": "pipeline",
                         "phase": "terminal",
@@ -1128,7 +1158,7 @@ async def stream_pipeline_status(
                             "stopped_at": "sse-stream",
                         },
                     }
-                    yield f"data: {json.dumps(timeout_event)}\n\n"
+                    yield f"event: progress\ndata: {json.dumps(timeout_event)}\n\n"
                     return
                 try:
                     payload = await asyncio.wait_for(
@@ -1138,11 +1168,36 @@ async def stream_pipeline_status(
                 except TimeoutError:
                     if producer_done.is_set() and queue.empty():
                         return
-                    # SSE comment lines keep idle connections warm without
-                    # polluting the event log on the subscriber side.
-                    yield ": keepalive\n\n"
+                    now = datetime.now(UTC)
+                    heartbeat = {
+                        "kind": "heartbeat",
+                        "schema_version": 1,
+                        "ts": now.isoformat(),
+                    }
+                    yield f"event: heartbeat\ndata: {json.dumps(heartbeat)}\n\n"
+                    # Emit auth_expiring when the session cookie will expire within
+                    # 2 × heartbeat interval (≥ 60 s warning window at default 15 s
+                    # heartbeat). Best-effort: skip if token expiry is unavailable.
+                    if token_expires_at is not None:
+                        secs_left = (token_expires_at - now).total_seconds()
+                        if 0 < secs_left <= 2 * SSE_HEARTBEAT_SECONDS + 60:
+                            auth_expiring = {
+                                "kind": "auth_expiring",
+                                "schema_version": 1,
+                                "expires_at": token_expires_at.isoformat(),
+                            }
+                            yield (
+                                f"event: auth_expiring\n"
+                                f"data: {json.dumps(auth_expiring)}\n\n"
+                            )
                     continue
-                yield f"data: {payload}\n\n"
+                # Extract the `kind` field to emit the named SSE event type so
+                # EventSource.addEventListener('progress'/'agent', ...) fires natively.
+                try:
+                    kind = json.loads(payload).get("kind", "progress")
+                except (json.JSONDecodeError, AttributeError):
+                    kind = "progress"
+                yield f"event: {kind}\ndata: {payload}\n\n"
                 if producer_done.is_set() and queue.empty():
                     return
         finally:
@@ -1166,10 +1221,20 @@ async def stream_pipeline_status(
 async def _run_case_pipeline(case_id: UUID) -> None:
     """Background task: run the 9-agent pipeline for a case and persist results."""
 
+    from src.api.schemas.pipeline_events import PipelineProgressEvent
     from src.db.persist_case_results import persist_case_results
     from src.models.case import CaseStatus as CaseStatusModel
     from src.services.database import async_session
-    from src.shared.case_state import CaseState
+    from src.services.pipeline_events import (
+        check_cancel_flag,
+        clear_cancel_flag,
+        publish_progress,
+    )
+    from src.shared.case_state import CaseState, CaseStatusEnum
+
+    # Clear any stale cancel flag left over from a previous run so a
+    # freshly-started pipeline does not immediately self-cancel.
+    await clear_cancel_flag(case_id)
 
     async with async_session() as db:
         from sqlalchemy.orm import joinedload as _joinedload
@@ -1233,8 +1298,34 @@ async def _run_case_pipeline(case_id: UUID) -> None:
         from src.pipeline.graph.runner import GraphPipelineRunner
 
         final_state = await GraphPipelineRunner().run(initial_state)
-    except Exception:
+    except Exception as exc:
         logger.exception("Pipeline run failed for case_id=%s", case_id)
+        await publish_progress(
+            PipelineProgressEvent(
+                case_id=case_id,
+                agent="pipeline",
+                phase="failed",
+                step=None,
+                ts=datetime.now(UTC),
+                error=str(exc)[:500],
+                detail={"reason": "orchestrator_exception"},
+            )
+        )
+        async with async_session() as db:
+            db_case = (
+                await db.execute(select(Case).where(Case.id == case_id))
+            ).scalar_one_or_none()
+            if db_case:
+                db_case.status = CaseStatusModel.failed
+                await db.commit()
+        return
+
+    # If the run was cancelled mid-flight the cancel flag is still set and
+    # final_state.status is still "processing" (cancelled runs don't advance
+    # to a gate-pause or completion status). Gate on both to avoid treating
+    # a flag set in the narrow window after a successful run as a cancellation.
+    if await check_cancel_flag(case_id) and final_state.status == CaseStatusEnum.processing:
+        await clear_cancel_flag(case_id)
         async with async_session() as db:
             db_case = (
                 await db.execute(select(Case).where(Case.id == case_id))
@@ -1277,9 +1368,6 @@ async def _run_case_pipeline(case_id: UUID) -> None:
     # emits it on its own. Without this, the browser holds an open
     # EventSource well past the gate pause and never shows the gate
     # review UI until the next poll tick catches up.
-    from src.api.schemas.pipeline_events import PipelineProgressEvent
-    from src.services.pipeline_events import publish_progress
-
     if status_val.startswith("awaiting_review_gate"):
         close_event = PipelineProgressEvent(
             case_id=case_id,
@@ -1348,6 +1436,43 @@ async def process_case(
     await db.commit()
 
     return MessageResponse(message="Pipeline started")
+
+
+@router.post(
+    "/{case_id}/cancel",
+    response_model=MessageResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    operation_id="cancel_case_pipeline",
+    summary="Request cancellation of a running pipeline",
+    description=(
+        "Signals the pipeline to stop at the next inter-turn window. "
+        "SSE disconnect does NOT cancel the run — use this endpoint instead."
+    ),
+    responses={
+        404: {"model": ErrorResponse, "description": "Case not found"},
+        409: {"model": ErrorResponse, "description": "Case is not currently processing"},
+    },
+)
+async def cancel_case_pipeline(
+    case_id: UUID,
+    db: DBSession,
+    current_user: CurrentUser,
+) -> MessageResponse:
+    result = await db.execute(select(Case).where(Case.id == case_id))
+    case = result.scalar_one_or_none()
+    if not case:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
+
+    if case.status != CaseStatus.processing:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Case is not currently processing",
+        )
+
+    from src.services.pipeline_events import set_cancel_flag
+
+    await set_cancel_flag(case_id)
+    return MessageResponse(message="Cancellation requested")
 
 
 # Statuses from which the pipeline can be restarted by a judge.

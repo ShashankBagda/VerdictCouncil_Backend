@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from src.pipeline.graph.builder import (
+    _gate2_retry_router,
+    _hearing_analysis_retry_router,
     _route_after_case_processing,
     _route_after_complexity_routing,
-    _route_after_gate2_join,
-    _route_after_hearing_analysis,
     _route_after_hearing_governance,
     build_graph,
 )
@@ -45,7 +45,7 @@ class TestBuildGraph:
         g = build_graph()
         assert g is not None
 
-    def test_graph_has_all_13_nodes(self):
+    def test_graph_has_all_15_nodes(self):
         g = build_graph()
         nodes = set(g.get_graph().nodes.keys())
         expected = {
@@ -59,8 +59,10 @@ class TestBuildGraph:
             "witness_analysis",
             "legal_knowledge",
             "gate2_join",
+            "gate2_retry_router",
             "argument_construction",
             "hearing_analysis",
+            "hearing_analysis_retry_router",
             "hearing_governance",
             "terminal",
             "__end__",
@@ -147,14 +149,15 @@ class TestRouteAfterComplexityRouting:
 
 
 # ---------------------------------------------------------------------------
-# _route_after_gate2_join
+# _gate2_retry_router
 # ---------------------------------------------------------------------------
 
 
-class TestRouteAfterGate2Join:
+class TestGate2RetryRouter:
     def test_halt_routes_to_terminal(self):
-        state = _state(halt={"reason": "barrier_timeout"})
-        assert _route_after_gate2_join(state) == "terminal"
+        cmd = _gate2_retry_router(_state(halt={"reason": "barrier_timeout"}))
+        assert cmd.goto == "terminal"
+        assert not cmd.update
 
     def test_all_complete_advances_to_argument_construction(self):
         case = CaseState(
@@ -163,18 +166,20 @@ class TestRouteAfterGate2Join:
             witnesses=Witnesses(witnesses=[{"name": "Alice"}]),
             legal_rules=[{"rule": "R1"}],
         )
-        state = _state(case=case)
-        assert _route_after_gate2_join(state) == "argument_construction"
+        cmd = _gate2_retry_router(_state(case=case))
+        assert cmd.goto == "argument_construction"
+        assert not cmd.update
 
-    def test_missing_evidence_triggers_retry_when_under_limit(self):
+    def test_missing_evidence_triggers_retry_and_increments_counter(self):
         case = CaseState(
             evidence_analysis=None,
             extracted_facts=ExtractedFacts(facts=[{"fact": "A"}]),
             witnesses=Witnesses(witnesses=[{"name": "Alice"}]),
             legal_rules=[{"rule": "R1"}],
         )
-        state = _state(case=case, retry_counts={"evidence-analysis": 0})
-        assert _route_after_gate2_join(state) == "evidence_analysis"
+        cmd = _gate2_retry_router(_state(case=case, retry_counts={"evidence-analysis": 0}))
+        assert cmd.goto == "evidence_analysis"
+        assert cmd.update == {"retry_counts": {"evidence-analysis": 1}}
 
     def test_missing_evidence_at_max_retries_advances(self):
         case = CaseState(
@@ -183,49 +188,69 @@ class TestRouteAfterGate2Join:
             witnesses=Witnesses(witnesses=[{"name": "Alice"}]),
             legal_rules=[{"rule": "R1"}],
         )
-        state = _state(case=case, retry_counts={"evidence-analysis": 1})
-        # At max retries — advance rather than loop
-        assert _route_after_gate2_join(state) == "argument_construction"
+        cmd = _gate2_retry_router(_state(case=case, retry_counts={"evidence-analysis": 1}))
+        assert cmd.goto == "argument_construction"
+        assert not cmd.update
 
-    def test_missing_legal_rules_triggers_retry(self):
+    def test_missing_legal_rules_triggers_retry_and_increments_counter(self):
         case = CaseState(
             evidence_analysis=EvidenceAnalysis(evidence_items=[{"id": "e1"}]),
             extracted_facts=ExtractedFacts(facts=[{"fact": "A"}]),
             witnesses=Witnesses(witnesses=[{"name": "Alice"}]),
-            legal_rules=[],  # empty
+            legal_rules=[],
         )
-        state = _state(case=case, retry_counts={})
-        assert _route_after_gate2_join(state) == "legal_knowledge"
+        cmd = _gate2_retry_router(_state(case=case, retry_counts={}))
+        assert cmd.goto == "legal_knowledge"
+        assert cmd.update == {"retry_counts": {"legal-knowledge": 1}}
+
+    def test_first_failed_agent_wins_retry_priority(self):
+        """evidence-analysis is checked first; both being empty routes to evidence_analysis."""
+        case = CaseState(
+            evidence_analysis=None,
+            extracted_facts=None,
+            witnesses=Witnesses(witnesses=[{"name": "Alice"}]),
+            legal_rules=[{"rule": "R1"}],
+        )
+        cmd = _gate2_retry_router(_state(case=case, retry_counts={}))
+        assert cmd.goto == "evidence_analysis"
+        assert cmd.update == {"retry_counts": {"evidence-analysis": 1}}
 
 
 # ---------------------------------------------------------------------------
-# _route_after_hearing_analysis
+# _hearing_analysis_retry_router
 # ---------------------------------------------------------------------------
 
 
-class TestRouteAfterHearingAnalysis:
+class TestHearingAnalysisRetryRouter:
     def test_halt_routes_to_terminal(self):
-        state = _state(halt={"reason": "test"})
-        assert _route_after_hearing_analysis(state) == "terminal"
+        cmd = _hearing_analysis_retry_router(_state(halt={"reason": "test"}))
+        assert cmd.goto == "terminal"
+        assert not cmd.update
 
     def test_null_preliminary_conclusion_advances(self):
         case = CaseState(hearing_analysis=HearingAnalysis(preliminary_conclusion=None))
-        state = _state(case=case)
-        assert _route_after_hearing_analysis(state) == "hearing_governance"
+        cmd = _hearing_analysis_retry_router(_state(case=case))
+        assert cmd.goto == "hearing_governance"
+        assert not cmd.update
 
-    def test_non_null_preliminary_conclusion_triggers_retry(self):
+    def test_non_null_preliminary_conclusion_triggers_retry_and_increments(self):
         case = CaseState(hearing_analysis=HearingAnalysis(preliminary_conclusion="guilty"))
         state = _state(case=case, retry_counts={"hearing-analysis": 0})
-        assert _route_after_hearing_analysis(state) == "hearing_analysis"
+        cmd = _hearing_analysis_retry_router(state)
+        assert cmd.goto == "hearing_analysis"
+        assert cmd.update == {"retry_counts": {"hearing-analysis": 1}}
 
     def test_non_null_at_max_retries_advances(self):
         case = CaseState(hearing_analysis=HearingAnalysis(preliminary_conclusion="guilty"))
         state = _state(case=case, retry_counts={"hearing-analysis": 1})
-        assert _route_after_hearing_analysis(state) == "hearing_governance"
+        cmd = _hearing_analysis_retry_router(state)
+        assert cmd.goto == "hearing_governance"
+        assert not cmd.update
 
     def test_no_hearing_analysis_advances(self):
-        state = _state(case=CaseState(hearing_analysis=None))
-        assert _route_after_hearing_analysis(state) == "hearing_governance"
+        cmd = _hearing_analysis_retry_router(_state(case=CaseState(hearing_analysis=None)))
+        assert cmd.goto == "hearing_governance"
+        assert not cmd.update
 
 
 # ---------------------------------------------------------------------------
