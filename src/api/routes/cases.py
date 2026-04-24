@@ -1078,7 +1078,31 @@ async def stream_pipeline_status(
     request: Request,
     db: DBSession,
     current_user: CurrentUser,
+    vc_token: str | None = None,
 ) -> StreamingResponse:
+    from fastapi import Cookie as _Cookie
+    import jwt as _jwt
+
+    # Read vc_token from the cookie header directly so we can surface
+    # impending expiry without keeping the DB session open for the
+    # lifetime of the SSE stream.
+    if vc_token is None:
+        vc_token = request.cookies.get("vc_token")
+
+    token_expires_at: datetime | None = None
+    if vc_token:
+        try:
+            payload = _jwt.decode(
+                vc_token,
+                options={"verify_signature": False, "verify_exp": False},
+                algorithms=["HS256"],
+            )
+            exp = payload.get("exp")
+            if exp:
+                token_expires_at = datetime.fromtimestamp(exp, UTC)
+        except Exception:
+            pass  # auth already validated by CurrentUser; expiry warning is best-effort
+
     await _load_case_for_export(case_id, db, current_user)
 
     async def event_generator():
@@ -1147,12 +1171,28 @@ async def stream_pipeline_status(
                 except TimeoutError:
                     if producer_done.is_set() and queue.empty():
                         return
+                    now = datetime.now(UTC)
                     heartbeat = {
                         "kind": "heartbeat",
                         "schema_version": 1,
-                        "ts": datetime.now(UTC).isoformat(),
+                        "ts": now.isoformat(),
                     }
                     yield f"event: heartbeat\ndata: {json.dumps(heartbeat)}\n\n"
+                    # Emit auth_expiring when the session cookie will expire within
+                    # 2 × heartbeat interval (≥ 60 s warning window at default 15 s
+                    # heartbeat). Best-effort: skip if token expiry is unavailable.
+                    if token_expires_at is not None:
+                        secs_left = (token_expires_at - now).total_seconds()
+                        if 0 < secs_left <= 2 * SSE_HEARTBEAT_SECONDS + 60:
+                            auth_expiring = {
+                                "kind": "auth_expiring",
+                                "schema_version": 1,
+                                "expires_at": token_expires_at.isoformat(),
+                            }
+                            yield (
+                                f"event: auth_expiring\n"
+                                f"data: {json.dumps(auth_expiring)}\n\n"
+                            )
                     continue
                 # Extract the `kind` field to emit the named SSE event type so
                 # EventSource.addEventListener('progress'/'agent', ...) fires natively.
