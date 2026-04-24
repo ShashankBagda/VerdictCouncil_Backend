@@ -66,13 +66,14 @@ async def _analyze_documents(
 
 async def cross_reference(
     segments: Annotated[
-        list[CrossReferenceSegment],
-        "List of document segments to compare. Each segment: {doc_id, text, page, paragraph}",
-    ],
+        list[CrossReferenceSegment] | None,
+        "List of document segments to compare. Each segment: {doc_id, text, page, paragraph}. "
+        "Build from raw_documents[].parsed_text slices. Requires at least 2 segments.",
+    ] = None,
     check_type: Annotated[
         str,
         "Type of cross-reference check: 'contradiction' | 'corroboration' | 'all'",
-    ],
+    ] = "all",
 ) -> dict:
     """Compare document segments to find contradictions and corroborations.
 
@@ -90,7 +91,7 @@ async def cross_reference(
     Raises:
         CrossReferenceError: If analysis fails.
     """
-    if len(segments) < 2:
+    if not segments or len(segments) < 2:
         return {
             "contradictions": [],
             "corroborations": [],

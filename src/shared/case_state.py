@@ -116,6 +116,8 @@ class CaseState(BaseModel):
     legal_rules: list[dict[str, Any]] = Field(default_factory=list)
     precedents: list[dict[str, Any]] = Field(default_factory=list)
     precedent_source_metadata: dict[str, Any] | None = None
+    legal_elements_checklist: list[dict[str, Any]] = Field(default_factory=list)
+    suppressed_citations: list[dict[str, Any]] = Field(default_factory=list)
 
     # Arguments (written by Argument Construction)
     arguments: dict[str, Any] | None = None
