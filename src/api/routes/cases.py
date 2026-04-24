@@ -1078,16 +1078,13 @@ async def stream_pipeline_status(
     request: Request,
     db: DBSession,
     current_user: CurrentUser,
-    vc_token: str | None = None,
 ) -> StreamingResponse:
-    from fastapi import Cookie as _Cookie
     import jwt as _jwt
 
     # Read vc_token from the cookie header directly so we can surface
     # impending expiry without keeping the DB session open for the
     # lifetime of the SSE stream.
-    if vc_token is None:
-        vc_token = request.cookies.get("vc_token")
+    vc_token = request.cookies.get("vc_token")
 
     token_expires_at: datetime | None = None
     if vc_token:
