@@ -167,12 +167,42 @@ async def _search_precedents_impl(
         logger.warning("Redis cache read failed; proceeding with live search")
         r = None
 
+    results: list[dict] = []
+    used_fallback = False
+
+    # When no API key is configured the PAIR endpoint is unavailable; skip straight
+    # to the vector store so we never attempt an unauthenticated HTTP request.
+    if settings.pair_api_key is None:
+        metadata["pair_status"] = "disabled"
+        metadata["fallback_used"] = True
+        try:
+            if r is None:
+                r = await _get_redis_client()
+            results = await vector_store_search(
+                query,
+                domain,
+                max_results,
+                vector_store_id=vector_store_id,
+                allow_global_fallback=True,
+            )
+        except VectorStoreError as exc:
+            logger.warning("Vector store search failed: %s", exc)
+            metadata["source_failed"] = True
+        if results:
+            try:
+                if r is not None:
+                    await r.set(
+                        cache_k,
+                        json.dumps({"precedents": results, "metadata": metadata}),
+                        ex=settings.precedent_cache_ttl_seconds,
+                    )
+            except Exception:
+                pass
+        return SearchResult(precedents=results, metadata=metadata)
+
     # Check circuit breaker state (with recovery timeout check)
     pair_breaker = get_pair_search_breaker()
     breaker_state = await pair_breaker.check_recovery()
-
-    results: list[dict] = []
-    used_fallback = False
 
     if breaker_state == CircuitState.OPEN:
         # Circuit is open — skip PAIR, go straight to fallback

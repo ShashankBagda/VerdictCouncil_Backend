@@ -17,6 +17,19 @@ def _mock_httpx_response(status_code=200):
 
 
 # ------------------------------------------------------------------ #
+# Disabled — no API key configured
+# ------------------------------------------------------------------ #
+@pytest.mark.asyncio
+async def test_disabled_when_no_api_key():
+    with patch("src.tools.pair_health.settings") as mock_settings:
+        mock_settings.pair_api_key = None
+        result = await check_pair_health()
+
+    assert result["status"] == "disabled"
+    assert "reason" in result
+
+
+# ------------------------------------------------------------------ #
 # Probe success -> records success
 # ------------------------------------------------------------------ #
 @pytest.mark.asyncio
@@ -31,9 +44,12 @@ async def test_probe_success_records_success():
     mock_breaker = AsyncMock()
 
     with (
+        patch("src.tools.pair_health.settings") as mock_settings,
         patch("src.tools.pair_health.httpx.AsyncClient", return_value=mock_http_client),
         patch("src.tools.pair_health.get_pair_search_breaker", return_value=mock_breaker),
     ):
+        mock_settings.pair_api_key = "test-key"
+        mock_settings.pair_api_url = "https://search.pair.gov.sg/api/v1/search"
         result = await check_pair_health()
 
     assert result["status"] == "healthy"
@@ -56,9 +72,12 @@ async def test_probe_failure_records_failure():
     mock_breaker = AsyncMock()
 
     with (
+        patch("src.tools.pair_health.settings") as mock_settings,
         patch("src.tools.pair_health.httpx.AsyncClient", return_value=mock_http_client),
         patch("src.tools.pair_health.get_pair_search_breaker", return_value=mock_breaker),
     ):
+        mock_settings.pair_api_key = "test-key"
+        mock_settings.pair_api_url = "https://search.pair.gov.sg/api/v1/search"
         result = await check_pair_health()
 
     assert result["status"] == "unhealthy"
@@ -79,9 +98,12 @@ async def test_timeout_records_failure():
     mock_breaker = AsyncMock()
 
     with (
+        patch("src.tools.pair_health.settings") as mock_settings,
         patch("src.tools.pair_health.httpx.AsyncClient", return_value=mock_http_client),
         patch("src.tools.pair_health.get_pair_search_breaker", return_value=mock_breaker),
     ):
+        mock_settings.pair_api_key = "test-key"
+        mock_settings.pair_api_url = "https://search.pair.gov.sg/api/v1/search"
         result = await check_pair_health()
 
     assert result["status"] == "unhealthy"
