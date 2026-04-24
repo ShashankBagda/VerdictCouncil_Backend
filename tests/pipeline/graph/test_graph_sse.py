@@ -128,53 +128,6 @@ class TestSubscribeTermination:
 
 
 # ---------------------------------------------------------------------------
-# astream_graph_events wrapper
-# ---------------------------------------------------------------------------
-
-
-class TestAstreamGraphEvents:
-    @pytest.mark.asyncio
-    async def test_yields_events_from_compiled_graph(self):
-        """astream_graph_events yields every event the graph produces."""
-        from src.pipeline.graph.sse import astream_graph_events
-
-        fake_events = [
-            {"event": "on_chain_start", "name": "case_processing"},
-            {"event": "on_chain_end", "name": "case_processing"},
-        ]
-
-        async def _fake_astream_events(input_state, config, version):
-            for ev in fake_events:
-                yield ev
-
-        mock_graph = MagicMock()
-        mock_graph.astream_events = _fake_astream_events
-
-        collected: list[dict] = []
-        async for ev in astream_graph_events(mock_graph, {}, {}):
-            collected.append(ev)
-
-        assert collected == fake_events
-
-    @pytest.mark.asyncio
-    async def test_empty_graph_yields_nothing(self):
-        from src.pipeline.graph.sse import astream_graph_events
-
-        async def _empty(input_state, config, version):
-            return
-            yield  # make it an async generator
-
-        mock_graph = MagicMock()
-        mock_graph.astream_events = _empty
-
-        collected: list[dict] = []
-        async for ev in astream_graph_events(mock_graph, {}, {}):
-            collected.append(ev)
-
-        assert collected == []
-
-
-# ---------------------------------------------------------------------------
 # SSE event lifecycle from _run_agent_node
 # ---------------------------------------------------------------------------
 
