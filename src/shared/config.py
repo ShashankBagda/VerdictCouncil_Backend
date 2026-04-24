@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     classifier_sanitizer_enabled: bool = True
 
     def model_post_init(self, __context: object) -> None:
+        import logging
         import warnings
 
         if self.jwt_secret == "change-me-in-production":
@@ -55,6 +56,10 @@ class Settings(BaseSettings):
                 "insecure HTTP. This must ONLY be used in local development.",
                 stacklevel=2,
             )
+        if self.pair_api_key is None:
+            logging.getLogger(__name__).info(
+                "PAIR disabled — no PAIR_API_KEY configured; vector store is the primary precedent source."
+            )
 
     # Application
     namespace: str = "verdictcouncil"
@@ -63,6 +68,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     precedent_cache_ttl_seconds: int = 86400
     pair_api_url: str = "https://search.pair.gov.sg/api/v1/search"
+    pair_api_key: str | None = None  # when None, PAIR HTTP calls are skipped; vector store is primary
     pair_circuit_breaker_threshold: int = 3
     pair_circuit_breaker_timeout: int = 60
 

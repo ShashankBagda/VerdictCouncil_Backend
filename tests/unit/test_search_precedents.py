@@ -16,6 +16,16 @@ from src.tools.search_precedents import (
 from src.tools.vector_store_fallback import VectorStoreError
 
 
+@pytest.fixture(autouse=True)
+def pair_api_key_configured():
+    """Most tests assume PAIR is configured. Patch the key so tests exercise the real PAIR paths."""
+    with patch("src.tools.search_precedents.settings") as mock_settings:
+        mock_settings.pair_api_url = "https://search.pair.gov.sg/api/v1/search"
+        mock_settings.pair_api_key = "test-key"
+        mock_settings.precedent_cache_ttl_seconds = 86400
+        yield mock_settings
+
+
 def _pair_api_response(results: list[dict] | None = None):
     """Build a fake PAIR API JSON response."""
     if results is None:
@@ -543,3 +553,31 @@ async def test_source_failure_not_cached(mock_redis, mock_breaker_open):
     assert result.metadata["source_failed"] is True
     # Verify setex was NOT called — failures should not be cached
     mock_redis.setex.assert_not_called()
+
+
+# ================================================================== #
+# PAIR disabled (no API key)
+# ================================================================== #
+
+
+@pytest.mark.asyncio
+async def test_disabled_uses_vector_store_directly(mock_redis, pair_api_configured=None):
+    """When pair_api_key is None, skip PAIR entirely and use vector store as primary."""
+    with (
+        patch("src.tools.search_precedents.settings") as mock_settings,
+        patch(
+            "src.tools.search_precedents.vector_store_search",
+            AsyncMock(return_value=list(_FALLBACK_RESULTS)),
+        ),
+        patch("src.tools.search_precedents._get_redis_client", return_value=mock_redis),
+        patch("src.tools.search_precedents._call_pair_api") as mock_pair_call,
+    ):
+        mock_settings.pair_api_key = None
+        mock_settings.pair_api_url = "https://search.pair.gov.sg/api/v1/search"
+        mock_settings.precedent_cache_ttl_seconds = 86400
+        result = await search_precedents_with_meta("disabled test query")
+
+    assert result.metadata["pair_status"] == "disabled"
+    assert result.metadata["fallback_used"] is True
+    assert len(result.precedents) == 1
+    mock_pair_call.assert_not_called()

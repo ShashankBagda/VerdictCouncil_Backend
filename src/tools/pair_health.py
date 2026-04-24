@@ -16,6 +16,9 @@ async def check_pair_health() -> dict:
     Updates circuit breaker state based on probe result.
     Returns health status dict.
     """
+    if settings.pair_api_key is None:
+        return {"status": "disabled", "reason": "no PAIR_API_KEY configured"}
+
     pair_breaker = get_pair_search_breaker()
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
