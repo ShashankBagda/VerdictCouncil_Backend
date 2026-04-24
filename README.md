@@ -100,7 +100,6 @@ Copy `.env.example` and fill in the required values. The table below covers requ
 | `SOLACE_BROKER_USERNAME` | Agent credentials user, e.g. `vc-agent` |
 | `SOLACE_BROKER_PASSWORD` | Agent credentials password |
 | `DATABASE_URL` | PostgreSQL DSN, e.g. `postgresql://vc_dev:pwd@localhost:5432/verdictcouncil` |
-| `ADK_DATABASE_URL` | PostgreSQL DSN for the Google ADK session database (separate DB), e.g. `postgresql://vc_dev:pwd@localhost:5432/verdictcouncil_adk` |
 | `REDIS_URL` | Redis DSN, e.g. `redis://localhost:6379/0` |
 | `JWT_SECRET` | Secret for signing `vc_token` cookies — use a long random string in production |
 | `COOKIE_SECURE` | `true` in production (HTTPS); `false` for local HTTP |

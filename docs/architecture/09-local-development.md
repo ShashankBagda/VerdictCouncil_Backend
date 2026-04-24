@@ -73,12 +73,6 @@ REDIS_URL=redis://localhost:6379/0
 OPENAI_API_KEY=sk-proj-your-key-here
 OPENAI_VECTOR_STORE_ID=vs_your-store-id
 
-# ──────────────────────────────────────────────
-# ADK Session Database (Google Agent Development Kit)
-# Separate DB from the main app to avoid schema conflicts.
-# Created automatically by docker/postgres-init/01_create_adk_db.sql
-# ──────────────────────────────────────────────
-ADK_DATABASE_URL=postgresql://vc_dev:vc_dev_password@localhost:5432/verdictcouncil_adk
 OPENAI_MODEL_LIGHTWEIGHT=gpt-5.4-nano
 OPENAI_MODEL_EFFICIENT_REASONING=gpt-5-mini
 OPENAI_MODEL_STRONG_REASONING=gpt-5
