@@ -1306,6 +1306,10 @@ async def _run_case_pipeline(case_id: UUID) -> None:
             from src.pipeline.graph.runner import GraphPipelineRunner
 
             final_state = await GraphPipelineRunner().run(initial_state)
+        elif settings.runner == "shadow":
+            from src.pipeline.graph.shadow import ShadowRunner
+
+            final_state = await ShadowRunner().run(initial_state)
         else:
             from src.pipeline.runner import PipelineRunner
 
