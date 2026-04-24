@@ -57,9 +57,18 @@ _ALLOWED_MIME_TYPES = {
 async def list_active_domains(
     db: DBSession,
     current_user: CurrentUser,
-) -> list[Domain]:
+) -> list[PublicDomainResponse]:
     result = await db.execute(select(Domain).where(Domain.is_active.is_(True)).order_by(Domain.name))
-    return list(result.scalars().all())
+    return [
+        PublicDomainResponse(
+            id=d.id,
+            code=d.code,
+            name=d.name,
+            description=d.description,
+            has_vector_store=bool(d.vector_store_id),
+        )
+        for d in result.scalars().all()
+    ]
 
 
 # ---------------------------------------------------------------------------

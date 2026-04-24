@@ -14,6 +14,7 @@ class PublicDomainResponse(BaseModel):
     """Minimal domain info for the public intake dropdown.
 
     Explicit allowlist — never expose vector_store_id or is_active to judges.
+    has_vector_store is a safe derived boolean (no raw ID).
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -22,6 +23,7 @@ class PublicDomainResponse(BaseModel):
     code: str
     name: str
     description: str | None = None
+    has_vector_store: bool = False
 
 
 class AdminDomainResponse(PublicDomainResponse):

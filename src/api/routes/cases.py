@@ -375,6 +375,11 @@ def _serialize_case_detail(case: Case) -> dict[str, Any]:
             "arguments": list(case.arguments or []),
             "hearing_analyses": list(case.hearing_analyses or []),
             "audit_logs": list(case.audit_logs or []),
+            "domain_has_vector_store": bool(
+                case.domain_ref
+                and case.domain_ref.is_active
+                and case.domain_ref.vector_store_id
+            ),
         }
     )
     return summary

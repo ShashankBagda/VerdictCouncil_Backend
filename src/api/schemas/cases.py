@@ -354,6 +354,10 @@ class CaseDetailResponse(CaseResponse):
     audit_logs: list[AuditLogSummary] = Field(
         default_factory=list, description="Audit trail entries"
     )
+    domain_has_vector_store: bool = Field(
+        False,
+        description="True when the case's domain has an active vector store (admin-uploaded materials).",
+    )
 
 
 class GateAdvanceRequest(BaseModel):
