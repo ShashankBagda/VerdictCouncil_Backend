@@ -11,11 +11,11 @@ from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
 from src.pipeline._a2a_client import FakeA2AClient
-from src.pipeline.guardrails import check_input_injection
 from src.pipeline.hooks import HookContext, InputGuardrailHook
 from src.pipeline.mesh_runner import MeshPipelineRunner
+
+from src.pipeline.guardrails import check_input_injection
 from src.shared.case_state import CaseState, CaseStatusEnum
 
 

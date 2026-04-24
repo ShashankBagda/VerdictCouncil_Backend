@@ -3,7 +3,6 @@
 from pathlib import Path
 
 import pytest
-
 from src.pipeline.runner import PipelineRunner, _load_yaml_with_includes
 
 CONFIGS_DIR = Path(__file__).resolve().parent.parent.parent / "configs" / "agents"

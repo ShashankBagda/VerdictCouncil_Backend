@@ -13,10 +13,10 @@ from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
 from src.pipeline._a2a_client import FakeA2AClient
-from src.pipeline.guardrails import check_input_injection
 from src.pipeline.mesh_runner import MeshPipelineRunner
+
+from src.pipeline.guardrails import check_input_injection
 from src.shared.sanitization import sanitize_user_input
 
 # ---------------------------------------------------------------------------

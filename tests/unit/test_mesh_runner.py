@@ -15,7 +15,6 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from src.pipeline._a2a_client import FakeA2AClient, build_send_task_request
 from src.pipeline.mesh_runner import (
     AGGREGATOR_NAME,
@@ -24,6 +23,7 @@ from src.pipeline.mesh_runner import (
     MESH_RUNNER_NAME,
     MeshPipelineRunner,
 )
+
 from src.shared.case_state import CaseState, CaseStatusEnum
 
 NAMESPACE = "verdictcouncil"
