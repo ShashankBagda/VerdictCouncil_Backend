@@ -34,12 +34,14 @@ def _is_terminal_event(parsed: dict) -> bool:
     - ``pipeline`` + ``awaiting_review`` is the gate-pause signal emitted
       after each gate completes. The SSE client closes and reconnects when
       the judge advances to the next gate.
+    - ``pipeline`` + ``cancelled`` is emitted when the judge explicitly
+      cancels a running pipeline via POST /cases/{id}/cancel.
     """
     agent = parsed.get("agent")
     phase = parsed.get("phase")
     if agent == "hearing-governance" and phase in _GOVERNANCE_TERMINAL_PHASES:
         return True
-    return agent == "pipeline" and phase in {"terminal", "awaiting_review"}
+    return agent == "pipeline" and phase in {"terminal", "awaiting_review", "cancelled"}
 
 
 async def publish_progress(event: PipelineProgressEvent) -> None:
@@ -74,6 +76,41 @@ async def publish_agent_event(case_id: str | object, event: dict) -> None:
         await r.publish(_channel(case_id), json.dumps(event, default=str))
     except Exception:
         logger.exception("Failed to publish agent event")
+
+
+_CANCEL_KEY_TTL = 86400  # 24 hours
+
+
+def _cancel_key(case_id: str | object) -> str:
+    return f"vc:case:{case_id}:cancel_requested"
+
+
+async def set_cancel_flag(case_id: str | object) -> None:
+    """Signal that the pipeline for this case should stop at the next inter-turn check."""
+    try:
+        r = await _get_redis_client()
+        await r.set(_cancel_key(case_id), "1", ex=_CANCEL_KEY_TTL)
+    except Exception:
+        logger.exception("Failed to set cancel flag for case %s", case_id)
+
+
+async def check_cancel_flag(case_id: str | object) -> bool:
+    """Return True if cancellation has been requested for this case's pipeline."""
+    try:
+        r = await _get_redis_client()
+        return bool(await r.exists(_cancel_key(case_id)))
+    except Exception:
+        logger.exception("Failed to check cancel flag for case %s", case_id)
+        return False
+
+
+async def clear_cancel_flag(case_id: str | object) -> None:
+    """Remove the cancellation flag after the pipeline has handled it."""
+    try:
+        r = await _get_redis_client()
+        await r.delete(_cancel_key(case_id))
+    except Exception:
+        logger.exception("Failed to clear cancel flag for case %s", case_id)
 
 
 async def subscribe(case_id: str | object) -> AsyncGenerator[str, None]:

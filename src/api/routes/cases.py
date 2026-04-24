@@ -1170,8 +1170,16 @@ async def _run_case_pipeline(case_id: UUID) -> None:
     from src.db.persist_case_results import persist_case_results
     from src.models.case import CaseStatus as CaseStatusModel
     from src.services.database import async_session
-    from src.services.pipeline_events import publish_progress
+    from src.services.pipeline_events import (
+        check_cancel_flag,
+        clear_cancel_flag,
+        publish_progress,
+    )
     from src.shared.case_state import CaseState
+
+    # Clear any stale cancel flag left over from a previous run so a
+    # freshly-started pipeline does not immediately self-cancel.
+    await clear_cancel_flag(case_id)
 
     async with async_session() as db:
         from sqlalchemy.orm import joinedload as _joinedload
@@ -1248,6 +1256,19 @@ async def _run_case_pipeline(case_id: UUID) -> None:
                 detail={"reason": "orchestrator_exception"},
             )
         )
+        async with async_session() as db:
+            db_case = (
+                await db.execute(select(Case).where(Case.id == case_id))
+            ).scalar_one_or_none()
+            if db_case:
+                db_case.status = CaseStatusModel.failed
+                await db.commit()
+        return
+
+    # If the run was cancelled mid-flight the cancel flag is still set;
+    # clear it, flip the DB status, and skip normal persistence.
+    if await check_cancel_flag(case_id):
+        await clear_cancel_flag(case_id)
         async with async_session() as db:
             db_case = (
                 await db.execute(select(Case).where(Case.id == case_id))
@@ -1358,6 +1379,43 @@ async def process_case(
     await db.commit()
 
     return MessageResponse(message="Pipeline started")
+
+
+@router.post(
+    "/{case_id}/cancel",
+    response_model=MessageResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    operation_id="cancel_case_pipeline",
+    summary="Request cancellation of a running pipeline",
+    description=(
+        "Signals the pipeline to stop at the next inter-turn window. "
+        "SSE disconnect does NOT cancel the run — use this endpoint instead."
+    ),
+    responses={
+        404: {"model": ErrorResponse, "description": "Case not found"},
+        409: {"model": ErrorResponse, "description": "Case is not currently processing"},
+    },
+)
+async def cancel_case_pipeline(
+    case_id: UUID,
+    db: DBSession,
+    current_user: CurrentUser,
+) -> MessageResponse:
+    result = await db.execute(select(Case).where(Case.id == case_id))
+    case = result.scalar_one_or_none()
+    if not case:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
+
+    if case.status != CaseStatus.processing:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Case is not currently processing",
+        )
+
+    from src.services.pipeline_events import set_cancel_flag
+
+    await set_cancel_flag(case_id)
+    return MessageResponse(message="Cancellation requested")
 
 
 # Statuses from which the pipeline can be restarted by a judge.

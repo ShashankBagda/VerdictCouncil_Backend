@@ -63,12 +63,9 @@ async def pre_run_guardrail(state: GraphState) -> dict[str, Any]:
     description = case.case_metadata.get("description", "") if case.case_metadata else ""
     if description:
         try:
-            from langchain_openai import ChatOpenAI
-
             from src.pipeline.guardrails import check_input_injection
 
-            client = ChatOpenAI().openai_client  # type: ignore[attr-defined]
-            result = await check_input_injection(description, client)
+            result = await check_input_injection(description)
             if result.get("blocked"):
                 logger.warning(
                     "Input injection detected (method=%s, case_id=%s): %s",

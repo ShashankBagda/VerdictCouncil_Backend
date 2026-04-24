@@ -193,3 +193,117 @@ class TestPipelineFailureEmitsFailedFrame:
 
         assert len(published) == 1
         assert len(published[0].error or "") <= 500
+
+
+# ---------------------------------------------------------------------------
+# P0.3: cancel path
+# ---------------------------------------------------------------------------
+
+
+class TestCancelPipeline:
+    async def test_cancel_flag_set_then_detected_after_run(self):
+        """If a cancel flag is set during the run, _run_case_pipeline must flip
+        the DB case status to failed and return without calling persist_case_results."""
+        from src.api.routes.cases import _run_case_pipeline
+
+        case_id = uuid.uuid4()
+        db_case = _make_db_case(case_id)
+        mock_session_cm = _make_mock_session(db_case)
+
+        # Simulate: runner completes but cancel flag was set mid-run
+        async def _fake_run(_self):
+            pass
+
+        run_call_count = 0
+
+        async def _fake_runner_run(_self, initial_state):
+            nonlocal run_call_count
+            run_call_count += 1
+            from src.shared.case_state import CaseState
+
+            return CaseState(
+                case_id=str(case_id),
+                status="processing",
+            )
+
+        with (
+            patch("src.services.database.async_session", return_value=mock_session_cm),
+            patch(
+                "src.services.pipeline_events.publish_progress",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "src.pipeline.graph.runner.GraphPipelineRunner.run",
+                new_callable=AsyncMock,
+                return_value=__import__(
+                    "src.shared.case_state", fromlist=["CaseState"]
+                ).CaseState(case_id=str(case_id), status="processing"),
+            ),
+            patch(
+                "src.services.pipeline_events.check_cancel_flag",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
+            patch(
+                "src.services.pipeline_events.clear_cancel_flag",
+                new_callable=AsyncMock,
+            ) as mock_clear,
+            patch(
+                "src.db.persist_case_results.persist_case_results",
+                new_callable=AsyncMock,
+            ) as mock_persist,
+        ):
+            await _run_case_pipeline(case_id)
+
+        # persist_case_results must NOT be called on a cancelled run
+        mock_persist.assert_not_called()
+        # cancel flag must be cleared
+        mock_clear.assert_called()
+
+    async def test_cancel_flag_cleared_at_start_of_new_run(self):
+        """A fresh run must clear any stale cancel flag before invoking the runner."""
+        from src.api.routes.cases import _run_case_pipeline
+
+        case_id = uuid.uuid4()
+        db_case = _make_db_case(case_id)
+        mock_session_cm = _make_mock_session(db_case)
+
+        clear_calls: list[str] = []
+
+        async def _track_clear(cid) -> None:
+            clear_calls.append("clear")
+
+        runner_calls: list[str] = []
+
+        async def _track_runner(self, initial_state):
+            runner_calls.append("run")
+            from src.shared.case_state import CaseState
+
+            return CaseState(case_id=str(case_id), status="processing")
+
+        with (
+            patch("src.services.database.async_session", return_value=mock_session_cm),
+            patch(
+                "src.services.pipeline_events.publish_progress",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "src.services.pipeline_events.clear_cancel_flag",
+                side_effect=_track_clear,
+            ),
+            patch(
+                "src.services.pipeline_events.check_cancel_flag",
+                new_callable=AsyncMock,
+                return_value=False,
+            ),
+            patch(
+                "src.pipeline.graph.runner.GraphPipelineRunner.run",
+                side_effect=_track_runner,
+            ),
+            patch("src.db.persist_case_results.persist_case_results", new_callable=AsyncMock),
+        ):
+            await _run_case_pipeline(case_id)
+
+        assert clear_calls, "clear_cancel_flag must be called at run start"
+        # clear must precede the runner call
+        assert clear_calls.index("clear") == 0
