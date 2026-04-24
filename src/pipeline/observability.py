@@ -8,6 +8,8 @@ firing during pytest collection.
 from __future__ import annotations
 
 import logging
+import time
+import traceback
 from collections.abc import Generator
 from contextlib import contextmanager, suppress
 from typing import Any
@@ -20,7 +22,7 @@ _CONFIGURED = False
 
 
 def configure_mlflow() -> None:
-    """Idempotent: activate MLflow OpenAI autolog + set experiment. No-op when disabled."""
+    """Idempotent: activate MLflow autolog for LangChain + OpenAI, set experiment."""
     global _CONFIGURED
     if _CONFIGURED or not settings.mlflow_enabled:
         return
@@ -29,17 +31,13 @@ def configure_mlflow() -> None:
 
         mlflow.set_tracking_uri(settings.mlflow_tracking_uri)
         mlflow.set_experiment(settings.mlflow_experiment)
-        # Disable trace autologging. The OpenAI autolog defaults to
-        # `log_traces=True`, which writes trace spans to the experiment's
-        # configured artifact_root. Our MLflow server is containerised
-        # with artifact_root=/mlflow/artifacts (inside the container),
-        # but the client (this worker / API process) tries to write to
-        # that same literal path on the host, which doesn't exist and is
-        # read-only on macOS/Linux. The logged-run metadata still lands
-        # on the tracking server over HTTP, so we keep the core autolog
-        # but skip the trace export path that was spamming
-        # `[Errno 30] Read-only file system: '/mlflow'` warnings.
-        mlflow.openai.autolog(log_traces=False)
+        # LangChain/LangGraph autolog — traces every node, LLM call, and tool call.
+        # run_tracer_inline=True is required for correct span nesting inside async handlers.
+        mlflow.langchain.autolog(log_traces=True, run_tracer_inline=True)
+        # OpenAI autolog — log_traces=True is safe now that the server uses
+        # --serve-artifacts so clients write via mlflow-artifacts:// (HTTP proxy)
+        # rather than the literal /mlflow/artifacts host path.
+        mlflow.openai.autolog(log_traces=True)
         _CONFIGURED = True
         logger.info(
             "MLflow tracing enabled: uri=%s experiment=%s",
@@ -64,9 +62,20 @@ def pipeline_run(*, case_id: str, run_id: str, mode: str) -> Generator[Any, None
 
     run_name = f"case_{case_id[:8]}_{run_id[:8]}"
     nested = mlflow.active_run() is not None
+    start = time.perf_counter()
     with mlflow.start_run(run_name=run_name, nested=nested) as run:
-        mlflow.set_tags({"case_id": case_id, "run_id": run_id, "pipeline_mode": mode})
-        yield run
+        mlflow.log_params({"case_id": case_id, "run_id": run_id, "mode": mode})
+        try:
+            yield run
+            mlflow.set_tag("status", "succeeded")
+        except Exception:
+            mlflow.set_tag("status", "failed")
+            with suppress(Exception):
+                mlflow.log_text(traceback.format_exc(), "error.txt")
+            raise
+        finally:
+            with suppress(Exception):
+                mlflow.log_metric("duration_s", time.perf_counter() - start)
 
 
 @contextmanager
@@ -86,6 +95,7 @@ def agent_run(
     import mlflow
 
     run_name = f"{agent_name}_{run_id[:8]}"
+    start = time.perf_counter()
     with mlflow.start_run(run_name=run_name, nested=True) as run:
         mlflow.set_tags(
             {
@@ -95,7 +105,17 @@ def agent_run(
                 "pipeline_stage": "agent",
             }
         )
-        yield (run.info.run_id, run.info.experiment_id)
+        try:
+            yield (run.info.run_id, run.info.experiment_id)
+            mlflow.set_tag("status", "succeeded")
+        except Exception:
+            mlflow.set_tag("status", "failed")
+            with suppress(Exception):
+                mlflow.log_text(traceback.format_exc(), "error.txt")
+            raise
+        finally:
+            with suppress(Exception):
+                mlflow.log_metric("duration_s", time.perf_counter() - start)
 
 
 @contextmanager
