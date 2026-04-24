@@ -1,15 +1,9 @@
-from typing import Literal
-
 from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
     # Required
     openai_api_key: str = ""
-    solace_broker_url: str = "tcp://localhost:55555"
-    solace_broker_vpn: str = "verdictcouncil"
-    solace_broker_username: str = "vc-agent"
-    solace_broker_password: str = "vc-agent-password"
     database_url: str = "postgresql://vc_dev:vc_dev_password@localhost:5432/verdictcouncil"
     redis_url: str = "redis://localhost:6379/0"
     jwt_secret: str = "change-me-in-production"  # validated at startup
@@ -68,16 +62,6 @@ class Settings(BaseSettings):
     fastapi_host: str = "0.0.0.0"  # nosec B104 — intentional: container needs all-interface binding
     fastapi_port: int = 8000
     log_level: str = "INFO"
-    # Feature flag — when True, the live POST /process route runs the case
-    # via MeshPipelineRunner instead of the in-process PipelineRunner.
-    # Defaults False so the mesh path lands dark; flip on once the
-    # integration suite is green.
-    use_mesh_runner: bool = False
-    # Runner selection: "mesh" | "graph" | "shadow".
-    # "graph" uses the LangGraph StateGraph runner (default).
-    # "shadow" runs both and diffs outputs via MLflow (mesh result returned).
-    # "mesh" remains available for rollback via RUNNER=mesh env var.
-    runner: Literal["mesh", "graph", "shadow"] = "graph"
     precedent_cache_ttl_seconds: int = 86400
     pair_api_url: str = "https://search.pair.gov.sg/api/v1/search"
     pair_circuit_breaker_threshold: int = 3

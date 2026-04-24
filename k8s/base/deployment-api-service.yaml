@@ -36,6 +36,16 @@ spec:
               cpu: 500m
               memory: 512Mi
           livenessProbe:
-            exec:
-              command: ["python", "-c", "import sys; sys.exit(0)"]
+            httpGet:
+              path: /metrics
+              port: 8001
+            initialDelaySeconds: 15
             periodSeconds: 30
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: 8001
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3

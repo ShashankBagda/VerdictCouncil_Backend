@@ -13,7 +13,7 @@ import logging
 import uuid
 from typing import Any
 
-from src.pipeline.mesh_runner import MeshPipelineRunner
+from src.pipeline.graph.runner import GraphPipelineRunner
 from src.services.whatif_controller.diff_engine import generate_diff
 from src.shared.case_state import CaseState
 
@@ -34,8 +34,8 @@ class WhatIfController:
         "legal_interpretation": "legal-knowledge",  # Agent 6
     }
 
-    def __init__(self, mesh_runner: MeshPipelineRunner) -> None:
-        self._mesh_runner = mesh_runner
+    def __init__(self, runner: GraphPipelineRunner) -> None:
+        self._runner = runner
 
     async def create_scenario(
         self,
@@ -78,13 +78,13 @@ class WhatIfController:
         start_agent = self.CHANGE_IMPACT_MAP[modification_type]
 
         logger.info(
-            "What-if scenario: re-entering mesh pipeline at %s for case_id=%s, run_id=%s",
+            "What-if scenario: re-entering pipeline at %s for case_id=%s, run_id=%s",
             start_agent,
             cloned.case_id,
             cloned.run_id,
         )
 
-        return await self._mesh_runner.run_from(
+        return await self._runner.run_what_if(
             cloned,
             start_agent=start_agent,
             run_id=cloned.run_id,

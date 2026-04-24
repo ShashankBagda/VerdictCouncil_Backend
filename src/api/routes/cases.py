@@ -41,7 +41,6 @@ from src.services.case_report_data import build_case_report_data
 from src.services.hearing_pack import assemble_pack
 from src.services.pdf_export import render_case_report_pdf
 from src.services.pipeline_events import subscribe as subscribe_pipeline_events
-from src.pipeline.sam_status_translator import translate_sam_status
 from src.shared.config import settings
 
 logger = logging.getLogger(__name__)
@@ -1102,18 +1101,7 @@ async def stream_pipeline_status(
         # Producer-consumer pattern: a background task owns the subscribe()
         # generator for its full lifetime and pushes payloads onto a queue.
         # The consumer wakes up every SSE_HEARTBEAT_SECONDS to emit keepalives
-        # and check for client disconnect / watchdog expiry. This avoids the
-        # wait_for-on-__anext__ pitfall where a heartbeat-driven cancellation
-        # would tear down the underlying pubsub mid-iteration.
-        #
-        # Two producers feed the same queue:
-        #   1. Redis pub/sub — coarse-grained pipeline lifecycle events
-        #      (started/completed/failed/terminal), emitted by mesh_runner.
-        #   2. Solace per-case status topic — fine-grained agent telemetry
-        #      (thinking / tool_call / llm_response) published by SAM itself
-        #      because mesh_runner sets `a2aStatusTopic` on each request.
-        # The Solace producer is best-effort: if the broker is unreachable
-        # the Redis-only stream still works, so we never block the SSE on it.
+        # and check for client disconnect / watchdog expiry.
         queue: asyncio.Queue[str] = asyncio.Queue()
         producer_done = asyncio.Event()
 
@@ -1122,52 +1110,9 @@ async def stream_pipeline_status(
                 async for payload in subscribe_pipeline_events(case_id):
                     await queue.put(payload)
             finally:
-                # Redis is the authoritative producer for stream-end (emits
-                # the `terminal` phase). Solace producer runs alongside but
-                # doesn't gate stream termination.
                 producer_done.set()
 
-        solace_subscription = None
-        case_status_pattern = (
-            f"{settings.namespace}/case/{case_id}/status/>"
-        )
-        try:
-            from src.pipeline.mesh_runner_factory import get_a2a_client
-            a2a_client = await get_a2a_client()
-            solace_subscription = a2a_client.subscribe_status(case_status_pattern)
-            await solace_subscription.start()
-        except Exception as exc:
-            logger.warning(
-                "SSE Solace status subscription unavailable for case_id=%s: %s",
-                case_id,
-                exc,
-            )
-            solace_subscription = None
-
-        async def _solace_producer():
-            if solace_subscription is None:
-                return
-            while True:
-                try:
-                    raw = await solace_subscription.next_event()
-                except asyncio.CancelledError:
-                    raise
-                except Exception as exc:
-                    logger.warning("SSE Solace producer error: %s", exc)
-                    return
-                try:
-                    translated = translate_sam_status(raw, case_id=str(case_id))
-                except Exception as exc:
-                    logger.warning("SAM status translate failed: %s", exc)
-                    continue
-                if translated is None:
-                    continue
-                await queue.put(json.dumps(translated))
-
         producer_task = asyncio.create_task(_redis_producer())
-        solace_task: asyncio.Task | None = (
-            asyncio.create_task(_solace_producer()) if solace_subscription else None
-        )
         stream_start = time.monotonic()
 
         try:
@@ -1205,18 +1150,10 @@ async def stream_pipeline_status(
                     return
         finally:
             producer_task.cancel()
-            if solace_task is not None:
-                solace_task.cancel()
             # Cancellation and cleanup errors must not escape — the client
             # already disconnected or the watchdog fired.
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await producer_task
-            if solace_task is not None:
-                with contextlib.suppress(asyncio.CancelledError, Exception):
-                    await solace_task
-            if solace_subscription is not None:
-                with contextlib.suppress(Exception):
-                    await solace_subscription.close()
 
     return StreamingResponse(
         event_generator(),
@@ -1297,23 +1234,9 @@ async def _run_case_pipeline(case_id: UUID) -> None:
         )
 
     try:
-        if settings.use_mesh_runner:
-            from src.pipeline.mesh_runner_factory import get_mesh_runner
+        from src.pipeline.graph.runner import GraphPipelineRunner
 
-            runner = await get_mesh_runner()
-            final_state = await runner.run(initial_state, run_id=initial_state.run_id)
-        elif settings.runner == "graph":
-            from src.pipeline.graph.runner import GraphPipelineRunner
-
-            final_state = await GraphPipelineRunner().run(initial_state)
-        elif settings.runner == "shadow":
-            from src.pipeline.graph.shadow import ShadowRunner
-
-            final_state = await ShadowRunner().run(initial_state)
-        else:
-            from src.pipeline.runner import PipelineRunner
-
-            final_state = await PipelineRunner().run(initial_state)
+        final_state = await GraphPipelineRunner().run(initial_state)
     except Exception:
         logger.exception("Pipeline run failed for case_id=%s", case_id)
         async with async_session() as db:
@@ -1596,7 +1519,7 @@ async def rerun_gate(
     current_user: User = require_role(UserRole.judge),
 ) -> MessageResponse:
     from src.models.pipeline_job import PipelineJobType
-    from src.pipeline.runner import GATE_AGENTS
+    from src.pipeline.graph.prompts import GATE_AGENTS
     from src.workers.outbox import enqueue_outbox_job
 
     if gate_name not in _VALID_GATE_NAMES:
