@@ -422,7 +422,14 @@ DIMENSION 5 — CLAIM/CHARGE LINKAGE:
 ══════════════════════════════════════════════════════════════════
 PHASE 3 — CROSS-EVIDENCE SYNTHESIS
 ══════════════════════════════════════════════════════════════════
-Use cross_reference with check_type='all' on document pairs that address the same facts.
+Use cross_reference to compare documents that address the same facts. Call it as:
+  cross_reference(check_type='all', segments=[
+    {doc_id: <raw_documents[i].file_id>, text: <raw_documents[i].parsed_text[:4000]>, page: 1, paragraph: 1},
+    {doc_id: <raw_documents[j].file_id>, text: <raw_documents[j].parsed_text[:4000]>, page: 1, paragraph: 1},
+    ...
+  ])
+Include at least 2 segments — one per document you want to compare. If fewer than 2 documents
+exist, skip cross_reference and note the omission.
 
 3a. CONTRADICTION MAPPING:
     For each contradiction found:
