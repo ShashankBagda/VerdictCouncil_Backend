@@ -1,4 +1,4 @@
-.PHONY: install prefetch-sanitizer lint typecheck test migrate reset-db infra-up infra-down solace-bootstrap dev clean openapi-snapshot openapi-check smoke-contract
+.PHONY: install prefetch-sanitizer lint typecheck test migrate reset-db infra-up infra-down dev clean openapi-snapshot openapi-check smoke-contract
 
 install: ## Install dependencies
 	python3.12 -m venv .venv
@@ -32,17 +32,13 @@ migrate: ## Run database migrations
 reset-db: ## Wipe and recreate schema from models, then stamp alembic to head
 	.venv/bin/python -m scripts.reset_db
 
-infra-up: ## Start local infrastructure (PostgreSQL, Redis, Solace)
+infra-up: ## Start local infrastructure (PostgreSQL, Redis, MLflow)
 	docker compose -f docker-compose.infra.yml up -d
 
 infra-down: ## Stop local infrastructure
 	docker compose -f docker-compose.infra.yml down
 
-solace-bootstrap: ## Provision the verdictcouncil VPN + vc-agent user on the local broker
-	@set -a; [ -f .env ] && . ./.env; set +a; \
-	./scripts/solace-bootstrap.sh
-
-dev: ## Start all agents via honcho (hybrid mode)
+dev: ## Start the API and arq worker via honcho
 	.venv/bin/honcho -f Procfile.dev start
 
 clean: ## Remove build artifacts

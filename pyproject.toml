@@ -8,7 +8,6 @@ version = "0.1.0"
 description = "Multi-agent AI judicial decision-support system"
 requires-python = ">=3.12"
 dependencies = [
-    "solace-agent-mesh>=0.5.0",
     "langgraph>=0.2.0",
     "langchain-core>=0.3.0",
     "langchain-openai>=0.2.0",
@@ -83,7 +82,7 @@ warn_unused_configs = true
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["solace_agent_mesh.*", "passlib.*"]
+module = ["passlib.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

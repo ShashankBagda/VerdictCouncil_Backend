@@ -118,12 +118,9 @@ async def run_gate_job(ctx: dict[str, Any], job_id: str) -> None:  # noqa: ARG00
         )
         from src.models.case import Case
         from src.pipeline.graph.runner import GraphPipelineRunner
-        from src.pipeline.graph.shadow import ShadowRunner
-        from src.pipeline.runner import PipelineRunner
         from src.services.database import async_session
         from src.services.pipeline_events import publish_progress
         from src.shared.case_state import CaseState, CaseStatusEnum
-        from src.shared.config import settings
 
         payload = job.payload or {}
         gate_name = payload.get("gate_name")
@@ -196,22 +193,13 @@ async def run_gate_job(ctx: dict[str, Any], job_id: str) -> None:  # noqa: ARG00
         # Force status to processing before handing to run_gate
         state = state.model_copy(update={"status": CaseStatusEnum.processing})
 
-        if settings.runner == "graph":
-            runner: Any = GraphPipelineRunner()
-        elif settings.runner == "shadow":
-            runner = ShadowRunner()
-        else:
-            runner = PipelineRunner()
-
-        if isinstance(runner, (GraphPipelineRunner, ShadowRunner)):
-            final_state = await runner.run_gate(
-                state,
-                gate_name,
-                start_agent=start_agent,
-                extra_instructions=instructions,
-            )
-        else:
-            final_state = await runner.run_gate(state, gate_name, start_agent, instructions)
+        runner = GraphPipelineRunner()
+        final_state = await runner.run_gate(
+            state,
+            gate_name,
+            start_agent=start_agent,
+            extra_instructions=instructions,
+        )
 
         gate_state_payload = {
             "current_gate": gate_num,

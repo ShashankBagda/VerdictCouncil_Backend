@@ -2,8 +2,7 @@
 
 Never activated at module scope — call configure_mlflow() explicitly from
 FastAPI startup or the eval runner fixture. This prevents autolog from
-firing during pytest collection or during mesh_runner imports in SAM agent
-subprocesses.
+firing during pytest collection.
 """
 
 from __future__ import annotations
