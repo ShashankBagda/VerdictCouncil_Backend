@@ -329,7 +329,7 @@ class TestSSEStreamHeartbeatAndDisconnect:
 
     async def test_emits_keepalive_comment_on_idle(self, monkeypatch):
         """If no events arrive within SSE_HEARTBEAT_SECONDS, the stream emits
-        an SSE comment line (`: keepalive`) instead of hanging.
+        a named `heartbeat` event with a JSON payload instead of hanging.
         """
         user = _make_user()
         case_id = uuid.uuid4()
@@ -365,7 +365,10 @@ class TestSSEStreamHeartbeatAndDisconnect:
 
         assert resp.status_code == 200
         body = resp.text
-        assert ": keepalive" in body, f"expected heartbeat comment in SSE body, got: {body!r}"
+        assert "event: heartbeat" in body, (
+            f"expected `event: heartbeat` line in SSE body, got: {body!r}"
+        )
+        assert '"kind": "heartbeat"' in body
         assert "data: " in body
 
     async def test_watchdog_emits_synthetic_terminal_event(self, monkeypatch):
