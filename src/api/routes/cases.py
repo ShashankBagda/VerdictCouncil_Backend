@@ -1240,10 +1240,7 @@ async def stream_pipeline_status(
                                 "schema_version": 1,
                                 "expires_at": token_expires_at.isoformat(),
                             }
-                            yield (
-                                f"event: auth_expiring\n"
-                                f"data: {json.dumps(auth_expiring)}\n\n"
-                            )
+                            yield (f"event: auth_expiring\ndata: {json.dumps(auth_expiring)}\n\n")
                     continue
                 # Extract the `kind` field to emit the named SSE event type so
                 # EventSource.addEventListener('progress'/'agent', ...) fires natively.
@@ -1356,10 +1353,15 @@ async def _run_case_pipeline(case_id: UUID) -> None:
         from src.pipeline.graph.nodes.common import AgentOutputParseError
 
         logger.exception("Pipeline run failed for case_id=%s", case_id)
-        reason = "llm_output_unparseable" if isinstance(exc, AgentOutputParseError) else "orchestrator_exception"
+        reason = (
+            "llm_output_unparseable"
+            if isinstance(exc, AgentOutputParseError)
+            else "orchestrator_exception"
+        )
         mlflow_run_id: str | None = None
         try:
             import mlflow as _mlflow
+
             active = _mlflow.active_run()
             if active:
                 mlflow_run_id = active.info.run_id
@@ -1373,7 +1375,10 @@ async def _run_case_pipeline(case_id: UUID) -> None:
                 step=None,
                 ts=datetime.now(UTC),
                 error=str(exc)[:500],
-                detail={"reason": reason, **({"mlflow_run_id": mlflow_run_id} if mlflow_run_id else {})},
+                detail={
+                    "reason": reason,
+                    **({"mlflow_run_id": mlflow_run_id} if mlflow_run_id else {}),
+                },
             )
         )
         async with async_session() as db:

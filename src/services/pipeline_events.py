@@ -51,6 +51,7 @@ async def _tee_write(case_id: str | object, payload: dict) -> None:
     except Exception:
         logger.exception("pipeline_events tee-write failed for case %s", case_id)
 
+
 _GOVERNANCE_TERMINAL_PHASES = {"completed", "failed"}
 
 

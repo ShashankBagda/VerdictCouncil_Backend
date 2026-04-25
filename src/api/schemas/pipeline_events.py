@@ -88,9 +88,7 @@ class AgentEvent(BaseModel):
     schema_version: Literal[1] = 1
     case_id: str
     agent: str
-    event: Literal[
-        "thinking", "tool_call", "tool_result", "llm_response", "agent_completed"
-    ]
+    event: Literal["thinking", "tool_call", "tool_result", "llm_response", "agent_completed"]
     content: str | None = None
     tool_name: str | None = None
     args: dict[str, Any] | None = None

@@ -103,9 +103,7 @@ class TestCapEnforcement:
         cmd_first = _gate2_retry_router(_state(case=case, retry_counts={}))
         assert cmd_first.goto == node_name, "first call should retry"
 
-        cmd_second = _gate2_retry_router(
-            _state(case=case, retry_counts={agent_key: _MAX_RETRIES})
-        )
+        cmd_second = _gate2_retry_router(_state(case=case, retry_counts={agent_key: _MAX_RETRIES}))
         assert cmd_second.goto == "argument_construction", "second call should advance"
         assert not cmd_second.update
 
