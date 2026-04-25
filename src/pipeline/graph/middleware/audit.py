@@ -59,6 +59,26 @@ async def append_audit_entry(
         logger.exception("audit write failed for case_id=%s agent=%s", case_id, agent_name)
 
 
+def _extract_source_ids(result: Any) -> list[str]:
+    """Pull citation source_ids from a ToolMessage artifact, if present.
+
+    Sprint 3 3.B.1/3.B.2 made the search tools emit `list[Document]`
+    artifacts with stable `source_id` metadata. We stash them in the
+    audit row's JSONB output_payload until 4.C4.1 promotes them to a
+    dedicated `retrieved_source_ids` column.
+    """
+    artifact = getattr(result, "artifact", None)
+    if not artifact:
+        return []
+    source_ids: list[str] = []
+    for doc in artifact:
+        meta = getattr(doc, "metadata", None) or {}
+        source_id = meta.get("source_id")
+        if source_id:
+            source_ids.append(str(source_id))
+    return source_ids
+
+
 @wrap_tool_call
 async def audit_tool_call(request, handler):  # noqa: ANN001
     """Record one audit row per tool invocation; never blocks tool execution."""
@@ -69,6 +89,7 @@ async def audit_tool_call(request, handler):  # noqa: ANN001
     result = await handler(request)
 
     tool_result_text = str(getattr(result, "content", result))[:2000]
+    source_ids = _extract_source_ids(result)
     await append_audit_entry(
         case_id=case_id,
         agent_name=agent_name,
@@ -77,6 +98,6 @@ async def audit_tool_call(request, handler):  # noqa: ANN001
             "tool_name": tool_call.get("name", ""),
             "args": tool_call.get("args", {}),
         },
-        output_payload={"tool_result": tool_result_text},
+        output_payload={"tool_result": tool_result_text, "source_ids": source_ids},
     )
     return result
