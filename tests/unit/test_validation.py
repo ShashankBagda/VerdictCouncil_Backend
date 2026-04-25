@@ -1,34 +1,102 @@
+"""Sprint 1 1.A1.SEC3 — Pydantic-based field ownership regression test.
+
+Replaces the legacy `FIELD_OWNERSHIP` allowlist (deleted in this sprint).
+The new contract: every phase output schema declares
+`model_config = ConfigDict(extra="forbid")`, so any agent attempt to
+emit an undeclared field raises `pydantic.ValidationError`. LangChain's
+`ToolStrategy(handle_errors=True)` retries the model call once with the
+validation error injected as corrective feedback (V-11), giving the
+agent one chance to fix its output without burning a full pipeline
+retry.
+
+Sprint 0 §0.4 architecture proposal mandated this swap: a Pydantic
+schema is the single source of truth for what fields a phase owns.
+The runtime allowlist + manual strip-and-log code path is gone.
+"""
+
+from __future__ import annotations
+
 import pytest
+from pydantic import ConfigDict, ValidationError
 
-from src.shared.case_state import CaseState
-from src.shared.validation import FieldOwnershipError, validate_field_ownership
+from src.pipeline.graph.schemas import (
+    AuditOutput,
+    EvidenceResearch,
+    FactsResearch,
+    IntakeOutput,
+    LawResearch,
+    SynthesisOutput,
+    WitnessesResearch,
+)
+
+# Every phase + research subagent output schema declared in 1.A1.4. Listing
+# them by name (rather than iterating module attributes) keeps the test
+# explicit about the contract surface.
+ALL_PHASE_OUTPUT_SCHEMAS = [
+    IntakeOutput,
+    EvidenceResearch,
+    FactsResearch,
+    WitnessesResearch,
+    LawResearch,
+    SynthesisOutput,
+    AuditOutput,
+]
 
 
-class TestFieldOwnership:
-    def test_authorized_write_passes(self):
-        original = CaseState().model_dump()
-        updated = CaseState(domain="small_claims").model_dump()
-        # case-processing is allowed to write domain
-        validate_field_ownership("case-processing", original, updated)
+@pytest.mark.parametrize("schema_cls", ALL_PHASE_OUTPUT_SCHEMAS)
+def test_phase_schema_declares_extra_forbid(schema_cls: type) -> None:
+    """Every phase output schema must reject undeclared fields."""
+    config = getattr(schema_cls, "model_config", None)
+    assert config is not None, f"{schema_cls.__name__} is missing model_config"
 
-    def test_unauthorized_write_raises(self):
-        original = CaseState().model_dump()
-        updated = CaseState(
-            hearing_analysis={"preliminary_conclusion": "test", "confidence_score": 80}
-        ).model_dump()
-        with pytest.raises(FieldOwnershipError, match="case-processing"):
-            validate_field_ownership("case-processing", original, updated)
+    # Pydantic v2 stores it as a dict-like ConfigDict; accept either form.
+    extra_setting = (
+        config.get("extra")
+        if isinstance(config, dict | ConfigDict)
+        else getattr(config, "extra", None)
+    )
+    assert extra_setting == "forbid", (
+        f"{schema_cls.__name__}.model_config must set extra='forbid' "
+        f"(got {extra_setting!r}). The Pydantic schema is the single source "
+        "of truth for field ownership; ToolStrategy retries on the resulting "
+        "ValidationError. See Sprint 0 §0.4 + 1.A1.SEC3."
+    )
 
-    def test_audit_log_always_allowed(self):
-        original = CaseState().model_dump()
-        updated = CaseState()
-        from src.shared.audit import append_audit_entry
 
-        updated = append_audit_entry(updated, agent="case-processing", action="test")
-        validate_field_ownership("case-processing", original, updated.model_dump())
+def test_research_subagent_unknown_field_raises_validation_error() -> None:
+    """An agent attempting to emit an undeclared field must fail validation."""
+    with pytest.raises(ValidationError) as exc_info:
+        EvidenceResearch(
+            evidence_items=[],
+            credibility_scores={},
+            unauthorized_field="this should not be allowed",  # type: ignore[call-arg]
+        )
 
-    def test_unknown_agent_cannot_write(self):
-        original = CaseState().model_dump()
-        updated = CaseState(domain="small_claims").model_dump()
-        with pytest.raises(FieldOwnershipError):
-            validate_field_ownership("unknown-agent", original, updated)
+    err = str(exc_info.value)
+    assert "unauthorized_field" in err and "Extra inputs" in err, (
+        f"ValidationError should call out the extra field; got: {err}"
+    )
+
+
+def test_intake_output_unknown_field_raises_validation_error() -> None:
+    """Same contract on the intake (phase, not research-subagent) schema."""
+    with pytest.raises(ValidationError):
+        IntakeOutput(
+            extracted_metadata={},
+            parsed_documents=[],
+            secret_field=42,  # type: ignore[call-arg]
+        )
+
+
+def test_audit_output_unknown_field_raises_validation_error() -> None:
+    """AuditOutput uses strict mode + extra=forbid (Sprint 0.5 §5 D-4)."""
+    with pytest.raises(ValidationError):
+        AuditOutput(
+            fairness_check={  # type: ignore[arg-type]
+                "critical_issues_found": False,
+                "issues": [],
+                "mitigations": [],
+            },
+            status="passed",
+            unauthorized="rogue",  # type: ignore[call-arg]
+        )

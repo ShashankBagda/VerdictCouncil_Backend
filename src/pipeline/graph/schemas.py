@@ -1,10 +1,9 @@
-"""Phase output Pydantic schemas for the new 6-phase topology.
+"""Phase output Pydantic schemas for the 6-phase topology.
 
 Lifted verbatim from `tasks/schema-target-2026-04-25.md` §2 (the Sprint 0
-canonical target). Sprint 1 1.A1.5 will eventually move these into
-`src/pipeline/agent_schemas.py` once the 9-agent legacy schemas are
-fully retired; until then, the factory imports from here so the legacy
-nodes/common.py path keeps working unchanged.
+canonical target). The legacy 9-agent schemas + `FIELD_OWNERSHIP`
+allowlist were deleted in 1.A1.SEC3; these schemas are now the single
+source of truth for what fields each phase owns.
 
 Every model uses `extra="forbid"` per Sprint 0.5 §5 D-4. AuditOutput
 additionally sets `strict=True` (the only phase using OpenAI strict JSON
@@ -149,8 +148,7 @@ class IntakeOutput(BaseModel):
 
 
 class EvidenceItem(BaseModel):
-    """Wires up the orphan model at the legacy `agent_schemas.py:55-62`
-    (Sprint 0.2 F-2)."""
+    """Item-level evidence record (Sprint 0.2 F-2)."""
 
     model_config = ConfigDict(extra="forbid")
     evidence_id: str
@@ -169,9 +167,8 @@ class EvidenceResearch(BaseModel):
 
 
 class ExtractedFactItem(BaseModel):
-    """Wires up the orphan model at the legacy `agent_schemas.py:68-74`
-    (Sprint 0.2 F-2). Sprint 0.5 §5 D-3: `confidence` is the
-    `ConfidenceLevel` enum.
+    """Item-level fact record (Sprint 0.2 F-2). Sprint 0.5 §5 D-3:
+    `confidence` is the `ConfidenceLevel` enum.
 
     Field renamed from `date` (per schema-target spec) to `event_date`
     so it doesn't shadow the imported `date` type during Pydantic's
