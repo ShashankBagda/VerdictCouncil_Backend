@@ -89,6 +89,13 @@ class Settings(BaseSettings):
     # without splitting the project. Values: "dev" | "staging" | "prod".
     app_env: str = "dev"
 
+    # LangGraph runtime selector (Sprint 1 1.DEP1.3). "in_process" runs
+    # the compiled graph in this Python process (current behaviour);
+    # "cloud" routes through the LangGraph Cloud HTTP API (wired in
+    # Sprint 5 task 5.DEP.6). Default keeps existing local + tests
+    # working unchanged.
+    graph_runtime: str = "in_process"
+
     # OpenAI Models
     openai_vector_store_id: str = ""
     openai_model_lightweight: str = "gpt-5.4-nano"

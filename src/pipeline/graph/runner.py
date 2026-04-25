@@ -34,18 +34,37 @@ _GATE_ENTRY_NODE: dict[str, str] = {
 }
 
 
+_VALID_RUNTIMES = ("in_process", "cloud")
+
+
 class GraphPipelineRunner:
     """LangGraph-backed pipeline runner with PipelineRunner-compatible surface."""
 
-    def __init__(self, checkpointer=None) -> None:
-        """Build the compiled graph.
+    def __init__(self, checkpointer=None, *, mode: str | None = None) -> None:
+        """Build the compiled graph (in-process) or prepare cloud routing.
 
         Args:
             checkpointer: Optional `BaseCheckpointSaver`. None defers to the
                 process-wide singleton set by the FastAPI lifespan / arq
                 startup hooks. Tests pass an `InMemorySaver` here.
+            mode: Override the runtime mode (`"in_process"` | `"cloud"`).
+                Defaults to `settings.graph_runtime`. Sprint 1 1.DEP1.3:
+                in-process is fully wired; cloud raises NotImplementedError
+                until Sprint 5 5.DEP.6 fills in the HTTP-API client.
         """
-        self._graph = build_graph(checkpointer=checkpointer)
+        resolved = mode or settings.graph_runtime
+        if resolved not in _VALID_RUNTIMES:
+            raise ValueError(
+                f"Unknown graph_runtime: {resolved!r}; expected one of {_VALID_RUNTIMES}"
+            )
+        self._mode: str = resolved
+        if resolved == "in_process":
+            self._graph = build_graph(checkpointer=checkpointer)
+        else:
+            # Cloud branch — wired in Sprint 5 5.DEP.6 to call the LangGraph
+            # Cloud HTTP API. Sprint 1 just declares the seam and fails loud
+            # if anyone flips the env var early.
+            self._graph = None
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -88,6 +107,15 @@ class GraphPipelineRunner:
         nodes start writing through `get_stream_writer()` in a later
         sprint, but the runner's invocation surface is already aligned.
         """
+        if self._mode == "cloud":
+            # TODO(5.DEP.6): call the LangGraph Cloud HTTP API instead of
+            # the in-process graph. Pass the same metadata + thread_id so
+            # the cloud trace surface is consistent with local runs.
+            raise NotImplementedError(
+                "graph_runtime='cloud' is reserved for Sprint 5 5.DEP.6; "
+                "set settings.graph_runtime='in_process' (the default) for now."
+            )
+
         case = initial_state["case"]
         case_id = str(case.case_id)
         run_id = initial_state.get("run_id") or ""
