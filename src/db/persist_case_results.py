@@ -333,6 +333,12 @@ def _insert_audit_log(db: AsyncSession, case_id: UUID, state: CaseState) -> None
                 tool_calls=_as_jsonb(entry.tool_calls),
                 model=entry.model,
                 token_usage=_as_jsonb(entry.token_usage),
+                # Sprint 4 4.C4.2 columns
+                trace_id=entry.trace_id,
+                span_id=entry.span_id,
+                retrieved_source_ids=_as_jsonb(entry.retrieved_source_ids),
+                cost_usd=entry.cost_usd,
+                redaction_applied=entry.redaction_applied,
             )
         )
 

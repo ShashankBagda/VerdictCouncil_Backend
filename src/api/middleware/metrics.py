@@ -31,6 +31,8 @@ class MetricsStore:
         self._durations: dict[tuple[str, str], dict] = {}
         # gauge: {status: count}
         self._case_gauges: dict[str, int] = defaultdict(int)
+        # gauge: {case_id: cost_usd} — Sprint 4 4.C4.5
+        self._case_cost_usd: dict[str, float] = {}
 
     def inc_request(self, method: str, path: str, status: int) -> None:
         with self._lock:
@@ -55,6 +57,11 @@ class MetricsStore:
     def set_case_gauge(self, status: str, count: int) -> None:
         with self._lock:
             self._case_gauges[status] = count
+
+    def set_case_cost(self, case_id: str, cost_usd: float) -> None:
+        """Sprint 4 4.C4.5 — `verdict_council_case_cost_usd` gauge per case."""
+        with self._lock:
+            self._case_cost_usd[case_id] = cost_usd
 
     def render(self) -> str:
         """Render all metrics in Prometheus text exposition format."""
@@ -98,6 +105,17 @@ class MetricsStore:
                 lines.append("# TYPE active_cases_total gauge")
                 for status, count in sorted(self._case_gauges.items()):
                     lines.append(f'active_cases_total{{status="{status}"}} {count}')
+
+            # verdict_council_case_cost_usd — Sprint 4 4.C4.5
+            if self._case_cost_usd:
+                lines.append(
+                    "# HELP verdict_council_case_cost_usd Cumulative LLM cost per case (USD)."
+                )
+                lines.append("# TYPE verdict_council_case_cost_usd gauge")
+                for case_id, cost in sorted(self._case_cost_usd.items()):
+                    lines.append(
+                        f'verdict_council_case_cost_usd{{case_id="{case_id}"}} {cost:.6f}'
+                    )
 
         lines.append("")  # trailing newline
         return "\n".join(lines)
