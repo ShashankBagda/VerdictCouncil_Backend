@@ -1,0 +1,62 @@
+{
+  "metadata": {
+    "id": "small-claims-3-rental-deposit",
+    "domain": "small_claims",
+    "author": "douglasswm",
+    "date": "2026-04-25",
+    "notes": "Tenancy deposit dispute: alleged paint damage vs. fair-wear-and-tear. Tests landlord/tenant common-law principles + claim quantification under SCT $20,000 limit."
+  },
+  "inputs": {
+    "case_id": "eval-sc-003",
+    "domain": "small_claims",
+    "parties": [
+      {
+        "name": "Marcus Wong",
+        "role": "claimant"
+      },
+      {
+        "name": "Skyview Properties Pte Ltd",
+        "role": "respondent"
+      }
+    ],
+    "case_metadata": {
+      "jurisdiction": "SG-SCT",
+      "claim_amount": 2400,
+      "dispute_type": "deposit_dispute"
+    },
+    "raw_documents": [
+      {
+        "filename": "Tenant_Demand_Letter.pdf",
+        "content": "I rented Unit #08-12, 45 Tampines Street 21 from 1 January 2024 to 31 December 2025. The agreed deposit was $2,400 (one month's rent). I returned the keys on 30 December 2025 with a clean handover. On 10 February 2026 the landlord deducted the entire deposit citing 'wall damage and excessive cleaning'. The wall scuffs were normal wear after 24 months of tenancy. I have move-in photos dated 1 Jan 2024 showing the same scuffs already present. I demand return of the full $2,400."
+      },
+      {
+        "filename": "Landlord_Itemised_Deduction.pdf",
+        "content": "Skyview Properties' deduction of $2,400 covers: full unit repaint $1,800, professional deep clean $400, replacement of damaged blind $200. Tenant smoked indoors despite the no-smoking lease clause (s.7.3) \u2014 yellowing on ceiling and walls is documented in our 1 Jan 2026 inspection report. Photos enclosed."
+      },
+      {
+        "filename": "Tenancy_Agreement.pdf",
+        "content": "Tenancy Agreement dated 28 December 2023. Term: 24 months from 1 Jan 2024. Monthly rent $2,400. Security deposit $2,400 refundable within 14 days of handover, less reasonable deductions for damage beyond fair wear and tear. Clause 7.3: no smoking inside the unit. Clause 9: tenant returns unit in clean condition."
+      }
+    ]
+  },
+  "expected": {
+    "intake": {
+      "domain": "small_claims",
+      "parties_count": 2,
+      "claim_amount": 2400
+    },
+    "research": {
+      "legal_rules": [
+        "Civil Law Act 1909 s.6 (good faith in tenancy)",
+        "Small Claims Tribunals Act 1984 s.5 (jurisdictional limit $20,000)"
+      ],
+      "precedents": [
+        "Tay v Yu Hua Holdings"
+      ],
+      "supporting_sources": [
+        "placeholder-cla-s6:3cea473e5557",
+        "placeholder-scta-s5:37a31e626a4e"
+      ]
+    }
+  }
+}

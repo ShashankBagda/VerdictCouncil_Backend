@@ -1,0 +1,59 @@
+{
+  "metadata": {
+    "id": "traffic-3-red-light-amber-defence",
+    "domain": "traffic_violation",
+    "author": "douglasswm",
+    "date": "2026-04-25",
+    "notes": "Red-light camera ticket disputed via amber-phase / safe-stopping defence. Tests RTA s.119A + dilemma-zone reasoning."
+  },
+  "inputs": {
+    "case_id": "eval-tr-003",
+    "domain": "traffic_violation",
+    "parties": [
+      {
+        "name": "Marcus Kee",
+        "role": "accused"
+      },
+      {
+        "name": "Land Transport Authority",
+        "role": "prosecution"
+      }
+    ],
+    "case_metadata": {
+      "jurisdiction": "SG-TC",
+      "offence_code": "RTA-S119A",
+      "fine_amount": 400
+    },
+    "raw_documents": [
+      {
+        "filename": "Driver_Appeal.pdf",
+        "content": "On 18 February 2026 at 08:12 I approached the Eu Tong Sen / Pickering junction at 50 km/h (within posted limit). The light turned amber when my vehicle was approximately 10 metres from the stop line. Stopping abruptly would have endangered the truck following me at 6 metres. I proceeded through and the rear axle crossed the stop line 0.4 seconds after the light went red, per the camera timestamps. This was a safe-stopping dilemma."
+      },
+      {
+        "filename": "LTA_Submission.pdf",
+        "content": "Red-light camera RL-J42 captured SDA 8801A entering the junction 0.4s after red onset. Amber phase at this junction is set to 4.0 seconds (RTA Schedule 7), giving 70 metres of clear stopping distance at 50 km/h. The driver had ample time to stop. The following truck (per LTA observation database) maintained safe distance. No dilemma-zone defence applies."
+      }
+    ]
+  },
+  "expected": {
+    "intake": {
+      "domain": "traffic_violation",
+      "parties_count": 2,
+      "offence_code": "RTA-S119A",
+      "fine_amount": 400
+    },
+    "research": {
+      "legal_rules": [
+        "Road Traffic Act 1961 s.119A (failure to stop at red light)",
+        "Road Traffic Act 1961 Schedule 7 (signal phase timings)"
+      ],
+      "precedents": [
+        "Public Prosecutor v Lim Yong Sheng"
+      ],
+      "supporting_sources": [
+        "placeholder-rta-s119a:7e79ef30ee29",
+        "placeholder-rta-sch7:29ae46127b3c"
+      ]
+    }
+  }
+}

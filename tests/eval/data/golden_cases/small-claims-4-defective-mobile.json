@@ -1,0 +1,62 @@
+{
+  "metadata": {
+    "id": "small-claims-4-defective-mobile",
+    "domain": "small_claims",
+    "author": "douglasswm",
+    "date": "2026-04-25",
+    "notes": "Defective consumer goods within statutory warranty period. Tests Sale of Goods Act fitness-for-purpose + Lemon Law (CPFTA Part III)."
+  },
+  "inputs": {
+    "case_id": "eval-sc-004",
+    "domain": "small_claims",
+    "parties": [
+      {
+        "name": "Priya Naidu",
+        "role": "claimant"
+      },
+      {
+        "name": "MegaMobile Retail Pte Ltd",
+        "role": "respondent"
+      }
+    ],
+    "case_metadata": {
+      "jurisdiction": "SG-SCT",
+      "claim_amount": 1299,
+      "dispute_type": "defective_product"
+    },
+    "raw_documents": [
+      {
+        "filename": "Customer_Statement.pdf",
+        "content": "I bought a Galaxy ZenPhone Pro from MegaMobile on 5 February 2026 for $1,299. Within 14 days the screen began flickering and the battery drained from 100% to 0% in under 3 hours despite manufacturer rating of 12 hours. I returned the phone on 22 February for repair. The store performed a software reset and returned it on 1 March, claiming the device was 'within spec'. The same defects recurred within 48 hours. I want a full refund or replacement under the lemon law."
+      },
+      {
+        "filename": "Retailer_Position.pdf",
+        "content": "MegaMobile's diagnostic report (ref: DG-2026-0412) shows no hardware fault. Battery drain is consistent with heavy app usage typical of new-device setup. The device passed all test scripts. We have offered a software recalibration under our 30-day satisfaction policy but the customer declined. We deny the device is defective."
+      },
+      {
+        "filename": "Receipt_2026-02-05.pdf",
+        "content": "Receipt #MM-2026-08712. Date: 5 Feb 2026. Item: Galaxy ZenPhone Pro 256GB. Price: $1,299. Manufacturer warranty: 12 months. Lemon law cover: 6 months from purchase under CPFTA Part III."
+      }
+    ]
+  },
+  "expected": {
+    "intake": {
+      "domain": "small_claims",
+      "parties_count": 2,
+      "claim_amount": 1299
+    },
+    "research": {
+      "legal_rules": [
+        "Consumer Protection (Fair Trading) Act 2003 Part III (Lemon Law)",
+        "Sale of Goods Act 1979 s.14 (satisfactory quality)"
+      ],
+      "precedents": [
+        "Speedo International v World of Sports"
+      ],
+      "supporting_sources": [
+        "placeholder-cpfta-pt3:9e2cdca9a637",
+        "placeholder-sga-s14:354a3e937638"
+      ]
+    }
+  }
+}

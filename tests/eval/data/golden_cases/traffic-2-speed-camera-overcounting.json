@@ -1,0 +1,59 @@
+{
+  "metadata": {
+    "id": "traffic-2-speed-camera-overcounting",
+    "domain": "traffic_violation",
+    "author": "douglasswm",
+    "date": "2026-04-25",
+    "notes": "Speed camera reading disputed on radar interference grounds. Tests rebuttable presumption of accuracy + interference from emergency vehicle."
+  },
+  "inputs": {
+    "case_id": "eval-tr-002",
+    "domain": "traffic_violation",
+    "parties": [
+      {
+        "name": "Kavitha Gopal",
+        "role": "accused"
+      },
+      {
+        "name": "Land Transport Authority",
+        "role": "prosecution"
+      }
+    ],
+    "case_metadata": {
+      "jurisdiction": "SG-TC",
+      "offence_code": "RTA-S63",
+      "fine_amount": 500
+    },
+    "raw_documents": [
+      {
+        "filename": "Driver_Appeal.pdf",
+        "content": "On 12 March 2026 at 19:45 I was driving on the BKE northbound at the posted limit of 80 km/h. The speed camera at km 14.2 recorded my vehicle at 121 km/h, alleging exceeding by 41 km/h. At the time of capture an SCDF ambulance overtook me on the right shoulder. My dashcam timestamp confirms the ambulance was 6 metres ahead. Radar systems are documented to lock onto larger faster targets. The reading must have been the ambulance, not my vehicle."
+      },
+      {
+        "filename": "LTA_Counter_Submission.pdf",
+        "content": "Camera SC-BKE-14.2 captured vehicle SBK 9018C at 121 km/h on 12 Mar 2026 19:45:08. The radar Doppler signature is consistent with the captured vehicle's apparent length and lane position. Calibration certificate dated 1 Feb 2026 attached. Section 63(2) presumes accuracy unless rebutted by primary evidence. SCDF dispatch records show no emergency call in the area between 19:30 and 20:00 on that date."
+      }
+    ]
+  },
+  "expected": {
+    "intake": {
+      "domain": "traffic_violation",
+      "parties_count": 2,
+      "offence_code": "RTA-S63",
+      "fine_amount": 500
+    },
+    "research": {
+      "legal_rules": [
+        "Road Traffic Act 1961 s.63 (exceeding speed limit)",
+        "Road Traffic Act 1961 s.63(2) (rebuttable presumption of camera accuracy)"
+      ],
+      "precedents": [
+        "Public Prosecutor v Tan Boon Hock"
+      ],
+      "supporting_sources": [
+        "placeholder-rta-s63:9fc758b6ca02",
+        "placeholder-rta-s63-2:d6db5e2cde9e"
+      ]
+    }
+  }
+}

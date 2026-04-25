@@ -1,0 +1,62 @@
+{
+  "metadata": {
+    "id": "small-claims-1-late-delivery-refund",
+    "domain": "small_claims",
+    "author": "douglasswm",
+    "date": "2026-04-25",
+    "notes": "Refund dispute: late delivery + missing accessories vs. holiday-period extension clause. Tests Sale of Goods Act application + Consumer Protection Fair Trading Act."
+  },
+  "inputs": {
+    "case_id": "eval-sc-001",
+    "domain": "small_claims",
+    "parties": [
+      {
+        "name": "Amelia Tan",
+        "role": "claimant"
+      },
+      {
+        "name": "Horizon Electronics Pte Ltd",
+        "role": "respondent"
+      }
+    ],
+    "case_metadata": {
+      "jurisdiction": "SG-SCT",
+      "claim_amount": 850,
+      "dispute_type": "refund_dispute"
+    },
+    "raw_documents": [
+      {
+        "filename": "Applicant_Position_Statement.pdf",
+        "content": "I, Amelia Tan, purchased a Horizon ProBook X15 laptop from Horizon Electronics on 15 November 2025 for $850. The listing stated '5-day guaranteed delivery'. The laptop arrived on 7 December 2025, 22 days late, and was missing the charger and carrying case listed in the product description. I contacted support on 8 December and was told accessories were 'out of stock'. I request a full refund as the product was not delivered as described within the guaranteed timeframe."
+      },
+      {
+        "filename": "Merchant_Response.pdf",
+        "content": "Horizon Electronics acknowledges the delayed delivery. Our terms and conditions, updated on 1 November 2025, include a clause extending delivery guarantees during the holiday period (15 Nov - 31 Dec). The customer was notified of this extension via email on 16 November 2025. The missing accessories are being shipped separately and were dispatched on 10 December 2025. We offer a 15% discount on the next purchase as goodwill but deny refund eligibility."
+      },
+      {
+        "filename": "Invoice_2025-11-15.pdf",
+        "content": "Invoice #HE-2025-11823. Date: 15 November 2025. Item: Horizon ProBook X15 Laptop Bundle (Laptop $750, Charger $50, Carrying Case $50). Total $850. Delivery: 5-day guaranteed. Payment: Visa ending 4829."
+      }
+    ]
+  },
+  "expected": {
+    "intake": {
+      "domain": "small_claims",
+      "parties_count": 2,
+      "claim_amount": 850
+    },
+    "research": {
+      "legal_rules": [
+        "Sale of Goods Act 1979 s.13",
+        "Consumer Protection (Fair Trading) Act 2003 s.4"
+      ],
+      "precedents": [
+        "Hong Tong Motor Trading v Hyundai Mobis Parts Distribution"
+      ],
+      "supporting_sources": [
+        "placeholder-sga-s13:9a214945a2b1",
+        "placeholder-cpfta-s4:7becff8a09df"
+      ]
+    }
+  }
+}
