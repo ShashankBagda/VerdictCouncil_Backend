@@ -76,6 +76,7 @@ async def search_domain_guidance(
                             "content": (result.text or "")[:1000],
                             "score": result.score if result.score else 0,
                             "source": "domain_guidance",
+                            "file_id": getattr(result, "file_id", "") or "",
                         }
                     )
 

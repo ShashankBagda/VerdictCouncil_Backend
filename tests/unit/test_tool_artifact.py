@@ -198,3 +198,113 @@ class TestSearchPrecedentsArtifact:
             await _ainvoke_as_tool_call(sp_tool, {"query": "x"})
 
         assert side_ch.metadata == {"source_failed": True, "pair_status": "circuit_open"}
+
+
+class TestSearchDomainGuidanceArtifact:
+    @pytest.mark.asyncio
+    async def test_returns_tool_message_with_document_artifact(self):
+        state = _make_state(vector_store_id="vs-domain-1")
+        tools, _ = make_tools(state, "legal-knowledge")
+        sdg_tool = next(t for t in tools if t.name == "search_domain_guidance")
+
+        guidance = [
+            {
+                "citation": "Small Claims Tribunals Act s.5",
+                "content": "Jurisdictional limit set at S$20,000.",
+                "score": 0.88,
+                "source": "domain_guidance",
+                "file_id": "file-stat-001",
+            }
+        ]
+
+        with patch(
+            "src.tools.search_domain_guidance.search_domain_guidance",
+            new_callable=AsyncMock,
+            return_value=guidance,
+        ):
+            msg = await _ainvoke_as_tool_call(sdg_tool, {"query": "limit"})
+
+        assert isinstance(msg, ToolMessage)
+        assert isinstance(msg.content, str) and msg.content
+        assert isinstance(msg.artifact, list)
+        assert len(msg.artifact) == 1
+        doc = msg.artifact[0]
+        assert isinstance(doc, Document)
+        assert doc.metadata["file_id"] == "file-stat-001"
+        assert doc.metadata["filename"] == "Small Claims Tribunals Act s.5"
+        assert doc.metadata["score"] == pytest.approx(0.88)
+        prefix, content_hash = doc.metadata["source_id"].split(":", 1)
+        assert prefix == "file-stat-001"
+        assert len(content_hash) == 12
+        expected = hashlib.sha256(doc.page_content.encode("utf-8")).hexdigest()[:12]
+        assert content_hash == expected
+
+    @pytest.mark.asyncio
+    async def test_source_id_stable_across_runs(self):
+        state = _make_state(vector_store_id="vs-domain-2")
+        tools, _ = make_tools(state, "legal-knowledge")
+        sdg_tool = next(t for t in tools if t.name == "search_domain_guidance")
+
+        guidance = [
+            {
+                "citation": "Practice Direction 12",
+                "content": "Filing fees apply.",
+                "score": 0.75,
+                "source": "domain_guidance",
+                "file_id": "file-pd-12",
+            }
+        ]
+
+        with patch(
+            "src.tools.search_domain_guidance.search_domain_guidance",
+            new_callable=AsyncMock,
+            return_value=guidance,
+        ):
+            first = await _ainvoke_as_tool_call(sdg_tool, {"query": "fees"}, "call-1")
+            second = await _ainvoke_as_tool_call(sdg_tool, {"query": "fees"}, "call-2")
+
+        assert first.artifact[0].metadata["source_id"] == second.artifact[0].metadata["source_id"]
+
+    @pytest.mark.asyncio
+    async def test_empty_results_yield_empty_artifact(self):
+        state = _make_state(vector_store_id="vs-domain-3")
+        tools, _ = make_tools(state, "legal-knowledge")
+        sdg_tool = next(t for t in tools if t.name == "search_domain_guidance")
+
+        with patch(
+            "src.tools.search_domain_guidance.search_domain_guidance",
+            new_callable=AsyncMock,
+            return_value=[],
+        ):
+            msg = await _ainvoke_as_tool_call(sdg_tool, {"query": "nothing"})
+
+        assert msg.artifact == []
+        assert isinstance(msg.content, str)
+
+    @pytest.mark.asyncio
+    async def test_missing_file_id_synthesises_surrogate(self):
+        """If the underlying impl ever omits file_id, the wrapper must still emit a stable id."""
+        state = _make_state(vector_store_id="vs-domain-4")
+        tools, _ = make_tools(state, "legal-knowledge")
+        sdg_tool = next(t for t in tools if t.name == "search_domain_guidance")
+
+        guidance = [
+            {
+                "citation": "Bench Book Ch.3",
+                "content": "Hearing protocol.",
+                "score": 0.6,
+                "source": "domain_guidance",
+                # no file_id
+            }
+        ]
+
+        with patch(
+            "src.tools.search_domain_guidance.search_domain_guidance",
+            new_callable=AsyncMock,
+            return_value=guidance,
+        ):
+            msg = await _ainvoke_as_tool_call(sdg_tool, {"query": "hearing"})
+
+        doc = msg.artifact[0]
+        assert doc.metadata["file_id"]
+        assert ":" in doc.metadata["source_id"]

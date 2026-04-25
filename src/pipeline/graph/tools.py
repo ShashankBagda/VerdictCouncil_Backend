@@ -68,19 +68,20 @@ def _content_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
 
 
-def _resolve_file_id(precedent: dict[str, Any]) -> str:
-    """Return a stable identifier for the precedent's source document.
+def _resolve_file_id(item: dict[str, Any], surrogate_prefix: str) -> str:
+    """Return a stable identifier for an item's source document.
 
-    Vector-store hits expose a real OpenAI `file_id`; live PAIR results do
-    not, so we synthesise one from the URL (or citation as last resort) so
-    every artifact carries a verifiable provenance key.
+    OpenAI vector-store hits expose a real `file_id`; live PAIR results and
+    any other source without one synthesise a surrogate from the URL (or
+    citation as last resort) so every artifact carries a verifiable
+    provenance key.
     """
-    file_id = precedent.get("file_id")
+    file_id = item.get("file_id")
     if file_id:
         return str(file_id)
-    surrogate = precedent.get("url") or precedent.get("citation") or ""
+    surrogate = item.get("url") or item.get("citation") or ""
     digest = hashlib.sha256(surrogate.encode("utf-8")).hexdigest()[:12]
-    return f"pair:{digest}"
+    return f"{surrogate_prefix}:{digest}"
 
 
 def _precedent_to_document(precedent: dict[str, Any]) -> Document:
@@ -92,7 +93,7 @@ def _precedent_to_document(precedent: dict[str, Any]) -> Document:
     citation = precedent.get("citation", "")
     summary = precedent.get("reasoning_summary", "")
     page_content = f"{citation}\n{summary}".strip()
-    file_id = _resolve_file_id(precedent)
+    file_id = _resolve_file_id(precedent, surrogate_prefix="pair")
     source_id = f"{file_id}:{_content_hash(page_content)}"
     score = precedent.get("similarity_score", 0)
     return Document(
@@ -108,12 +109,37 @@ def _precedent_to_document(precedent: dict[str, Any]) -> Document:
     )
 
 
-def _format_precedents_for_llm(precedents: list[dict[str, Any]]) -> str:
-    """Render the precedent list back to the agent — the same JSON shape it
-    saw before content_and_artifact wrapping, so prompts stay backward-
-    compatible while artifacts carry typed Documents to the audit layer.
+def _guidance_to_document(guidance: dict[str, Any]) -> Document:
+    """Project a domain-guidance dict into a Document with citation provenance.
+
+    Domain guidance always hits an OpenAI vector store, so the `file_id`
+    is normally present; we still call `_resolve_file_id` defensively in
+    case the impl returns a result without one.
     """
-    return json.dumps(precedents)
+    citation = guidance.get("citation", "")
+    content = guidance.get("content", "")
+    page_content = f"{citation}\n{content}".strip()
+    file_id = _resolve_file_id(guidance, surrogate_prefix="guidance")
+    source_id = f"{file_id}:{_content_hash(page_content)}"
+    return Document(
+        page_content=page_content,
+        metadata={
+            "source_id": source_id,
+            "file_id": file_id,
+            "filename": citation,
+            "score": guidance.get("score", 0),
+            "source": guidance.get("source", "domain_guidance"),
+        },
+    )
+
+
+def _format_results_for_llm(results: list[dict[str, Any]]) -> str:
+    """Render search results back to the agent as JSON.
+
+    Keeps prompts backward-compatible while artifacts carry typed Documents
+    to the audit layer.
+    """
+    return json.dumps(results)
 
 
 # ---------------------------------------------------------------------------
@@ -346,18 +372,22 @@ def make_tools(
         )
         precedent_meta.record(result.metadata)
         artifact = [_precedent_to_document(p) for p in result.precedents]
-        return _format_precedents_for_llm(result.precedents), artifact
+        return _format_results_for_llm(result.precedents), artifact
 
     all_tools["search_precedents"] = search_precedents_tool
 
     # ------------------------------------------------------------------
     # search_domain_guidance  (vector_store_id injected via closure)
     # ------------------------------------------------------------------
-    @tool("search_domain_guidance", args_schema=_SearchDomainGuidanceInput)
+    @tool(
+        "search_domain_guidance",
+        args_schema=_SearchDomainGuidanceInput,
+        response_format="content_and_artifact",
+    )
     async def search_domain_guidance_tool(
         query: str,
         max_results: int = 5,
-    ) -> list[dict]:
+    ) -> tuple[str, list[Document]]:
         """Query the domain knowledge base for statutes and practice directions.
 
         Use this to retrieve applicable statutes, bench books, and procedural
@@ -369,11 +399,13 @@ def make_tools(
 
         if not vector_store_id:
             raise DomainGuidanceUnavailable("No domain_vector_store_id configured for this case")
-        return await search_domain_guidance(
+        results = await search_domain_guidance(
             query=query,
             vector_store_id=vector_store_id,
             max_results=max_results,
         )
+        artifact = [_guidance_to_document(g) for g in results]
+        return _format_results_for_llm(results), artifact
 
     all_tools["search_domain_guidance"] = search_domain_guidance_tool
 
