@@ -1,0 +1,27 @@
+{
+  "case_id": "66666666-6666-6666-6666-666666666666",
+  "domain": "small_claims",
+  "case_metadata": {
+    "judge_note_multiline": "Line 1\nLine 2 — with em-dash\nLine 3 with tab\there",
+    "unicode_party_name": "李 明",
+    "japanese_label": "事件の記録",
+    "arabic_label": "ملف القضية",
+    "emoji_status": "🟢 active",
+    "control_chars": "tab:\t backslash:\\ quote:\" apostrophe:'",
+    "mixed_rtl_ltr": "Order N°123 — رقم"
+  },
+  "parties": [
+    {"name": "Müller GmbH", "role": "claimant"},
+    {"name": "山田太郎", "role": "respondent"}
+  ],
+  "audit_log": [
+    {
+      "agent": "intake",
+      "timestamp": "2026-04-25T12:00:00+00:00",
+      "action": "extracted_extra_instructions",
+      "input_payload": {
+        "extra_instructions": "Please verify\n\t• item A\n\t• item B\nNote: contains \\backslash and \"quotes\"."
+      }
+    }
+  ]
+}

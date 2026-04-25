@@ -1,0 +1,40 @@
+{
+  "case_id": "55555555-5555-5555-5555-555555555555",
+  "domain": "small_claims",
+  "case_metadata": {
+    "level1": {
+      "level2": {
+        "level3": {
+          "level4": {
+            "level5": {
+              "leaf": [1, 2, 3],
+              "details": {"depth": 5, "kind": "stress_test"}
+            }
+          },
+          "siblings": [
+            {"alt_branch": {"deeper": {"deeper_still": "ok"}}}
+          ]
+        }
+      }
+    }
+  },
+  "arguments": {
+    "prosecution": {
+      "openings": {
+        "scope": ["liability", "damages"],
+        "evidence_refs": [{"id": "ev1", "weight": 0.5}]
+      }
+    },
+    "defense": {
+      "rebuttal": {
+        "scope": ["affirmative"],
+        "evidence_refs": []
+      }
+    }
+  },
+  "precedent_source_metadata": {
+    "by_jurisdiction": {
+      "SG": {"by_year": {"2018": {"top_score": 0.91}}}
+    }
+  }
+}

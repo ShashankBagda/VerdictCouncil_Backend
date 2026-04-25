@@ -1,0 +1,39 @@
+{
+  "case_id": "33333333-3333-3333-3333-333333333333",
+  "domain": "traffic_violation",
+  "evidence_analysis": {
+    "evidence_items": [
+      {"id": "ev1", "kind": "doc", "weight": 0.78},
+      {"id": "ev2", "kind": "photo", "weight": 0.42}
+    ],
+    "exhibits": [{"label": "A1", "ref": "exhibit-A"}],
+    "credibility_scores": {"ev1": 0.85, "ev2": 0.6}
+  },
+  "extracted_facts": {
+    "facts": [
+      {"id": "f1", "text": "Vehicle entered intersection on red", "confidence": 0.91}
+    ],
+    "timeline": [
+      {"ts": "2026-04-20T08:15:00+08:00", "event": "incident_reported"}
+    ]
+  },
+  "witnesses": {
+    "witnesses": [
+      {"name": "A. Tan", "credibility": 0.7}
+    ],
+    "statements": [],
+    "credibility": {"A. Tan": 0.7}
+  },
+  "fairness_check": {
+    "critical_issues_found": false,
+    "audit_passed": true,
+    "issues": [],
+    "recommendations": ["double-check witness credibility scoring"]
+  },
+  "hearing_analysis": {
+    "preliminary_conclusion": "Plaintiff is likely to prevail",
+    "confidence_score": 78,
+    "reasoning_chain": [{"step": 1, "claim": "intersection rules apply"}],
+    "uncertainty_flags": []
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "case_id": "44444444-4444-4444-4444-444444444444",
+  "domain": "small_claims",
+  "status": "awaiting_review_gate2",
+  "case_metadata": {
+    "complexity_label": "med",
+    "priority_int_like": 7,
+    "tags": ["urgent", "remote-hearing"]
+  }
+}
