@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from dataclasses import dataclass
+from typing import Annotated, Any, Generic, TypeVar
 
 from typing_extensions import TypedDict
 
@@ -14,6 +15,27 @@ from src.pipeline.graph.schemas import (
     SynthesisOutput,
 )
 from src.shared.case_state import AuditEntry, CaseState
+
+_T = TypeVar("_T")
+
+
+@dataclass(frozen=True)
+class Overwrite(Generic[_T]):
+    """Sentinel that bypasses the parallel-safe ``_merge_case`` semantics.
+
+    The default ``_merge_case`` rule "if update is empty, keep base" is
+    correct for parallel Gate-2 branches that only own a slice of the
+    case — but it actively masks deliberate clears (e.g. the What-If
+    fork seeding a stripped CaseState). Wrapping the update in
+    :class:`Overwrite` instructs the reducer to take the new value
+    verbatim, mirroring LangGraph's documented escape hatch for
+    accumulator-style channels.
+
+    Used by ``services/whatif/fork.create_whatif_fork`` when calling
+    ``aupdate_state(fork_config, {"case": Overwrite(modified)}, …)``.
+    """
+
+    value: _T
 
 
 def _merge_retry_counts(base: dict[str, int], update: dict[str, int]) -> dict[str, int]:
@@ -61,7 +83,7 @@ def _merge_source_ids(base: list[str], update: list[str]) -> list[str]:
     return merged
 
 
-def _merge_case(base: CaseState, update: CaseState) -> CaseState:
+def _merge_case(base: CaseState, update: CaseState | Overwrite[CaseState]) -> CaseState:
     """Reducer for the 'case' field in GraphState.
 
     Sequential nodes: update contains the full new state; changed fields are applied.
@@ -74,7 +96,16 @@ def _merge_case(base: CaseState, update: CaseState) -> CaseState:
     4. Both differ and both non-empty → apply update (sequential override, last-writer-wins).
 
     audit_log is always extended with entries not already present in base (dedup by equality).
+
+    The :class:`Overwrite` sentinel short-circuits the merge — the
+    wrapped value replaces base entirely. Used by What-If fork seeding
+    where the judge's modifications must land verbatim, including
+    deliberate field clears that the parallel-safe rules would otherwise
+    discard.
     """
+    if isinstance(update, Overwrite):
+        return update.value
+
     base_data = base.model_dump()
     update_data = update.model_dump()
     merged: dict[str, Any] = dict(base_data)
