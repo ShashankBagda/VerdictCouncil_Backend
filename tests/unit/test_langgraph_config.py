@@ -41,10 +41,17 @@ def test_config_declares_a_single_graph_named_verdictcouncil(config: dict) -> No
     )
 
 
-def test_graph_entrypoint_resolves_to_build_graph(config: dict) -> None:
-    """Acceptance criterion: graph entry resolvable to `build_graph`."""
+def test_graph_entrypoint_resolves_to_callable_factory(config: dict) -> None:
+    """Acceptance criterion: graph entry resolvable to a callable factory.
+
+    Sprint 1 1.DEP1.2: `langgraph.json` points at `make_graph` (one-arg
+    CLI factory), not `build_graph` (two-arg runner factory). The CLI
+    rejects multi-arg factories with "must take exactly one argument,
+    a RunnableConfig".
+    """
+    import inspect
+
     entry = config["graphs"]["verdictcouncil"]
-    # Format: "./relative/path/to/file.py:symbol"
     rel_path, _, symbol = entry.partition(":")
     assert rel_path.endswith(".py") and symbol, (
         f"Graph entry must be 'path/to/file.py:symbol'; got {entry!r}"
@@ -53,16 +60,22 @@ def test_graph_entrypoint_resolves_to_build_graph(config: dict) -> None:
     target = (REPO_ROOT / rel_path).resolve()
     assert target.exists(), f"langgraph.json points at {target} which does not exist"
 
-    # Convert path → dotted module name relative to the backend repo
-    # root (which the CLI treats as the project root via dependencies=[".]").
+    # Convert path → dotted module name relative to the backend repo root.
     rel = target.relative_to(REPO_ROOT)
     module_name = ".".join(rel.with_suffix("").parts)
     module = importlib.import_module(module_name)
 
     fn = getattr(module, symbol, None)
     assert callable(fn), (
-        f"langgraph.json's graph entry {entry!r} resolves to {fn!r}, "
-        "which is not callable; expected build_graph(...)."
+        f"langgraph.json's graph entry {entry!r} resolves to {fn!r}, not a callable."
+    )
+
+    # CLI strict-check parity: factory must take exactly one positional arg.
+    sig = inspect.signature(fn)
+    assert len(sig.parameters) == 1, (
+        f"langgraph.json factory {symbol!r} must take exactly one positional arg "
+        f"(a RunnableConfig); got {len(sig.parameters)} params. The LangGraph CLI "
+        "fails with 'must take exactly one argument' otherwise."
     )
 
 

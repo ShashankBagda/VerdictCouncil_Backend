@@ -102,19 +102,38 @@ def test_research_dispatch_uses_conditional_edge_send_factory() -> None:
     )
 
 
-def test_build_graph_accepts_runnable_config_positional_arg() -> None:
-    """LangGraph CLI calls `build_graph(config)` positionally.
+def test_make_graph_is_the_langgraph_cli_factory() -> None:
+    """LangGraph CLI factories must take exactly one `config` arg.
 
-    `langgraph dev` detects factories that "accept a config" via
-    `factory_accepts_config` and passes the `RunnableConfig` dict as the
-    first positional argument. Before 1.DEP1.2 the dict landed in the
-    `checkpointer` parameter and `graph.compile(...)` rightly rejected
-    it ("Invalid checkpointer provided ... Received dict"). Lock that
-    in: a positional dict must be tolerated and the result must still
-    be a compiled graph.
+    `langgraph.json` points at `make_graph`. The CLI strictly enforces a
+    one-positional-arg signature on factories — a two-arg shape (e.g.
+    `build_graph(config, *, checkpointer=None)`) fails with:
+
+        ValueError: Graph factory function ... must take exactly one
+        argument, a RunnableConfig
+
+    Lock the contract in. `make_graph` accepts `config` (which it
+    ignores) and returns a compiled graph; the CLI runtime injects its
+    own checkpointer at run time.
     """
+    import inspect
+
+    from src.pipeline.graph.builder import make_graph
+
+    sig = inspect.signature(make_graph)
+    params = list(sig.parameters.values())
+    assert len(params) == 1, (
+        f"`make_graph` must take exactly one positional arg for the LangGraph "
+        f"CLI's strict factory check; got {len(params)} params: {params!r}"
+    )
+    # The positional arg must accept None (CLI calls it with a dict, but the
+    # default-None lets unit tests call `make_graph()` directly).
+    assert params[0].default is None, (
+        f"`make_graph`'s sole arg must default to None; got {params[0].default!r}"
+    )
+
     runnable_config = {"configurable": {"thread_id": "smoke"}, "metadata": {}}
-    compiled = build_graph(runnable_config)
+    compiled = make_graph(runnable_config)
     assert compiled is not None
     nodes = _node_names(compiled)
-    assert "intake" in nodes, "CLI-path build must produce the same topology"
+    assert "intake" in nodes, "CLI factory must produce the same topology as build_graph"

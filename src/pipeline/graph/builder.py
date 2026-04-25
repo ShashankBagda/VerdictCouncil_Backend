@@ -73,35 +73,13 @@ logger = logging.getLogger(__name__)
 _FRONTIER_RETRY = RetryPolicy(max_attempts=2, initial_interval=1.0)
 
 
-def build_graph(config: dict | None = None, *, checkpointer=None):
-    """Build and compile the VerdictCouncil StateGraph.
+def _build_topology() -> StateGraph:
+    """Build the StateGraph topology (nodes + edges) without compiling.
 
-    Three call patterns:
-
-    - **Production / runner**: `build_graph(checkpointer=<saver>)` — the
-      `GraphPipelineRunner` passes a saver directly; `config` is unused.
-    - **Production / lifespan singleton**: `build_graph()` — both args
-      omitted; falls back to `checkpointer.get_checkpointer()` (the
-      FastAPI lifespan / arq startup hook installs the AsyncPostgresSaver).
-    - **LangGraph CLI (`langgraph dev`)**: `build_graph(config_dict)` —
-      the CLI invokes factories detected as accepting a `config: RunnableConfig`
-      positionally. We accept the dict, ignore its contents, and compile
-      without a checkpointer. The CLI injects its own InMemorySaver at
-      runtime, which is what enables `interrupt()` to work in Studio.
-
-    Args:
-        config: LangGraph `RunnableConfig` (CLI path only); ignored.
-        checkpointer: Optional `BaseCheckpointSaver`. Keyword-only.
+    Shared by `build_graph` (runner factory) and `make_graph` (LangGraph CLI
+    factory) so the topology assembly lives in one place. Compilation is
+    deferred so each factory can choose its own checkpointer policy.
     """
-    from src.pipeline.graph.checkpointer import get_checkpointer
-
-    # CLI path: `config` is set, `checkpointer` is None. Compile WITHOUT a
-    # checkpointer so the CLI runtime can inject its own. Don't fall back
-    # to the module singleton — that would clash with the CLI's saver and
-    # was the cause of the 1.DEP1.2 TypeError ("dict is not a saver").
-    if checkpointer is None and config is None:
-        checkpointer = get_checkpointer()
-
     graph = StateGraph(GraphState)
 
     # ------------------------------------------------------------------
@@ -177,4 +155,40 @@ def build_graph(config: dict | None = None, *, checkpointer=None):
     # Terminal sink
     graph.add_edge("terminal", END)
 
-    return graph.compile(checkpointer=checkpointer)
+    return graph
+
+
+def build_graph(checkpointer=None):
+    """Production runner factory — compile with the given checkpointer.
+
+    Used by `GraphPipelineRunner._invoke` (in_process mode) and by tests
+    that need to control the saver directly. When omitted, falls back to
+    the module-level singleton `checkpointer.get_checkpointer()` set by
+    the FastAPI lifespan / arq startup hook (AsyncPostgresSaver in prod).
+
+    NOT the LangGraph CLI factory — see `make_graph` for that. The CLI
+    enforces a strict one-positional-arg signature on factories declared
+    in `langgraph.json`, which this signature deliberately does not
+    satisfy.
+    """
+    from src.pipeline.graph.checkpointer import get_checkpointer
+
+    if checkpointer is None:
+        checkpointer = get_checkpointer()
+    return _build_topology().compile(checkpointer=checkpointer)
+
+
+def make_graph(config: dict | None = None):
+    """LangGraph CLI factory — `langgraph.json` graph entrypoint.
+
+    The CLI (`langgraph dev` / `langgraph build`) requires factories to
+    take exactly one positional `config: RunnableConfig` argument. We
+    accept the dict, ignore its contents, and compile WITHOUT a
+    checkpointer. The CLI's runtime injects its own (InMemorySaver for
+    `langgraph dev`; configurable persistence for cloud), which is what
+    makes `interrupt()` work in Studio.
+
+    Critically, this path must NOT fall back to the module singleton —
+    a Postgres saver would conflict with the CLI's runtime injection.
+    """
+    return _build_topology().compile()
