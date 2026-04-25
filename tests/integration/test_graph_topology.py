@@ -100,3 +100,21 @@ def test_research_dispatch_uses_conditional_edge_send_factory() -> None:
         "research_dispatch must use add_conditional_edges with a Send-returning "
         "router (V-4); no conditional edges registered for that source node."
     )
+
+
+def test_build_graph_accepts_runnable_config_positional_arg() -> None:
+    """LangGraph CLI calls `build_graph(config)` positionally.
+
+    `langgraph dev` detects factories that "accept a config" via
+    `factory_accepts_config` and passes the `RunnableConfig` dict as the
+    first positional argument. Before 1.DEP1.2 the dict landed in the
+    `checkpointer` parameter and `graph.compile(...)` rightly rejected
+    it ("Invalid checkpointer provided ... Received dict"). Lock that
+    in: a positional dict must be tolerated and the result must still
+    be a compiled graph.
+    """
+    runnable_config = {"configurable": {"thread_id": "smoke"}, "metadata": {}}
+    compiled = build_graph(runnable_config)
+    assert compiled is not None
+    nodes = _node_names(compiled)
+    assert "intake" in nodes, "CLI-path build must produce the same topology"
