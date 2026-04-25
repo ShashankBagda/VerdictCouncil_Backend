@@ -1,0 +1,8 @@
+{
+  "event_type": "agent",
+  "scenario": "llm_response",
+  "pydantic_class": "AgentEvent",
+  "publisher": "publish_agent_event (services/pipeline_events.py)",
+  "wire_payload": "{\"kind\": \"agent\", \"schema_version\": 1, \"case_id\": \"11111111-1111-1111-1111-111111111111\", \"ts\": \"2026-04-25T12:00:00+00:00\", \"agent\": \"evidence-analysis\", \"event\": \"llm_response\", \"content\": \"Identified 3 supporting exhibits and 1 contradiction.\"}",
+  "sse_frame": "event: agent\ndata: {\"kind\": \"agent\", \"schema_version\": 1, \"case_id\": \"11111111-1111-1111-1111-111111111111\", \"ts\": \"2026-04-25T12:00:00+00:00\", \"agent\": \"evidence-analysis\", \"event\": \"llm_response\", \"content\": \"Identified 3 supporting exhibits and 1 contradiction.\"}\n\n"
+}

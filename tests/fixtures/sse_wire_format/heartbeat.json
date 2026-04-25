@@ -1,0 +1,9 @@
+{
+  "event_type": "heartbeat",
+  "scenario": "idle_keepalive",
+  "pydantic_class": "HeartbeatEvent",
+  "publisher": "inline in cases.py SSE generator (no Redis hop)",
+  "wire_payload": "{\"kind\": \"heartbeat\", \"schema_version\": 1, \"ts\": \"2026-04-25T12:00:00+00:00\"}",
+  "wire_payload_via_pydantic": "{\"kind\":\"heartbeat\",\"schema_version\":1,\"ts\":\"2026-04-25T12:00:00Z\"}",
+  "sse_frame": "event: heartbeat\ndata: {\"kind\": \"heartbeat\", \"schema_version\": 1, \"ts\": \"2026-04-25T12:00:00+00:00\"}\n\n"
+}

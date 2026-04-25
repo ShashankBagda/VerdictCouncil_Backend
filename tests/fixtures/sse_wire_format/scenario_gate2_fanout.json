@@ -1,0 +1,65 @@
+{
+  "event_type": "progress",
+  "scenario": "gate2_fanout",
+  "pydantic_class": "PipelineProgressEvent",
+  "publisher": "publish_progress (services/pipeline_events.py)",
+  "sequence": [
+    {
+      "kind": "progress",
+      "schema_version": 1,
+      "case_id": "11111111-1111-1111-1111-111111111111",
+      "agent": "evidence-analysis",
+      "phase": "started",
+      "step": 3,
+      "total": 9,
+      "ts": "2026-04-25T12:00:00Z",
+      "error": null,
+      "detail": null,
+      "mlflow_run_id": null,
+      "mlflow_experiment_id": null
+    },
+    {
+      "kind": "progress",
+      "schema_version": 1,
+      "case_id": "11111111-1111-1111-1111-111111111111",
+      "agent": "fact-reconstruction",
+      "phase": "started",
+      "step": 4,
+      "total": 9,
+      "ts": "2026-04-25T12:00:00Z",
+      "error": null,
+      "detail": null,
+      "mlflow_run_id": null,
+      "mlflow_experiment_id": null
+    },
+    {
+      "kind": "progress",
+      "schema_version": 1,
+      "case_id": "11111111-1111-1111-1111-111111111111",
+      "agent": "witness-analysis",
+      "phase": "started",
+      "step": 5,
+      "total": 9,
+      "ts": "2026-04-25T12:00:00Z",
+      "error": null,
+      "detail": null,
+      "mlflow_run_id": null,
+      "mlflow_experiment_id": null
+    },
+    {
+      "kind": "progress",
+      "schema_version": 1,
+      "case_id": "11111111-1111-1111-1111-111111111111",
+      "agent": "legal-knowledge",
+      "phase": "started",
+      "step": 6,
+      "total": 9,
+      "ts": "2026-04-25T12:00:00Z",
+      "error": null,
+      "detail": null,
+      "mlflow_run_id": null,
+      "mlflow_experiment_id": null
+    }
+  ],
+  "sse_frame_concatenated": "event: progress\ndata: {\"kind\": \"progress\", \"schema_version\": 1, \"case_id\": \"11111111-1111-1111-1111-111111111111\", \"agent\": \"evidence-analysis\", \"phase\": \"started\", \"step\": 3, \"total\": 9, \"ts\": \"2026-04-25T12:00:00Z\", \"error\": null, \"detail\": null, \"mlflow_run_id\": null, \"mlflow_experiment_id\": null}\n\nevent: progress\ndata: {\"kind\": \"progress\", \"schema_version\": 1, \"case_id\": \"11111111-1111-1111-1111-111111111111\", \"agent\": \"fact-reconstruction\", \"phase\": \"started\", \"step\": 4, \"total\": 9, \"ts\": \"2026-04-25T12:00:00Z\", \"error\": null, \"detail\": null, \"mlflow_run_id\": null, \"mlflow_experiment_id\": null}\n\nevent: progress\ndata: {\"kind\": \"progress\", \"schema_version\": 1, \"case_id\": \"11111111-1111-1111-1111-111111111111\", \"agent\": \"witness-analysis\", \"phase\": \"started\", \"step\": 5, \"total\": 9, \"ts\": \"2026-04-25T12:00:00Z\", \"error\": null, \"detail\": null, \"mlflow_run_id\": null, \"mlflow_experiment_id\": null}\n\nevent: progress\ndata: {\"kind\": \"progress\", \"schema_version\": 1, \"case_id\": \"11111111-1111-1111-1111-111111111111\", \"agent\": \"legal-knowledge\", \"phase\": \"started\", \"step\": 6, \"total\": 9, \"ts\": \"2026-04-25T12:00:00Z\", \"error\": null, \"detail\": null, \"mlflow_run_id\": null, \"mlflow_experiment_id\": null}\n\n"
+}

@@ -1,0 +1,8 @@
+{
+  "event_type": "progress",
+  "scenario": "pipeline_terminal",
+  "pydantic_class": "PipelineProgressEvent",
+  "publisher": "publish_progress (services/pipeline_events.py)",
+  "wire_payload": "{\"kind\":\"progress\",\"schema_version\":1,\"case_id\":\"11111111-1111-1111-1111-111111111111\",\"agent\":\"pipeline\",\"phase\":\"terminal\",\"step\":null,\"total\":9,\"ts\":\"2026-04-25T12:00:00Z\",\"error\":null,\"detail\":{\"reason\":\"completed\",\"stopped_at\":\"hearing-governance\"},\"mlflow_run_id\":null,\"mlflow_experiment_id\":null}",
+  "sse_frame": "event: progress\ndata: {\"kind\":\"progress\",\"schema_version\":1,\"case_id\":\"11111111-1111-1111-1111-111111111111\",\"agent\":\"pipeline\",\"phase\":\"terminal\",\"step\":null,\"total\":9,\"ts\":\"2026-04-25T12:00:00Z\",\"error\":null,\"detail\":{\"reason\":\"completed\",\"stopped_at\":\"hearing-governance\"},\"mlflow_run_id\":null,\"mlflow_experiment_id\":null}\n\n"
+}
