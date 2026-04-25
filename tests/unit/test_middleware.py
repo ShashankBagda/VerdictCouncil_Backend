@@ -129,43 +129,63 @@ async def test_token_usage_emitter_silent_when_metadata_absent(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# cancellation — cancel_check
+# cancellation — cancel_check (Sprint 4 4.A3.9 — saver-halt path)
 # ---------------------------------------------------------------------------
 
 
-async def test_cancel_check_passes_through_when_not_cancelled(monkeypatch):
+async def test_cancel_check_passes_through_when_halt_unset():
+    """No halt slot → middleware lets the agent loop continue."""
     from src.pipeline.graph.middleware import cancellation
 
-    async def _not_cancelled(_case_id):
-        return False
-
-    monkeypatch.setattr(cancellation, "check_cancel_flag", _not_cancelled)
-
-    state = _fake_state()
+    state = {"case_id": "case-1", "halt": None, "messages": []}
     runtime = SimpleNamespace()
 
     result = await cancellation.cancel_check.abefore_model(state, runtime)
 
-    assert result is None, "no Command should be returned when not cancelled"
+    assert result is None, "no Command should be returned when halt is unset"
 
 
-async def test_cancel_check_jumps_to_end_when_cancelled(monkeypatch):
+async def test_cancel_check_jumps_to_end_when_halt_set():
+    """Halt slot populated → middleware short-circuits to end."""
     from langgraph.types import Command
 
     from src.pipeline.graph.middleware import cancellation
 
-    async def _cancelled(_case_id):
-        return True
-
-    monkeypatch.setattr(cancellation, "check_cancel_flag", _cancelled)
-
-    state = _fake_state()
+    state = {
+        "case_id": "case-1",
+        "halt": {"reason": "cancelled", "by": "judge-1"},
+        "messages": [],
+    }
     runtime = SimpleNamespace()
 
     result = await cancellation.cancel_check.abefore_model(state, runtime)
 
     assert isinstance(result, Command), f"expected Command, got {type(result).__name__}"
     assert result.goto == "end"
+
+
+async def test_cancel_check_ignores_redis_after_cutover(monkeypatch):
+    """Saver-halt is the only signal — middleware no longer reads Redis.
+
+    Locks 4.A3.9 acceptance criterion ("Redis cancel-flag code path
+    retired or neutralized"): even if a stale Redis flag is set, the
+    middleware must not consult it. Reading from Redis in the agent
+    loop is what we are removing.
+    """
+    from src.pipeline.graph.middleware import cancellation
+
+    # If the middleware module still imports check_cancel_flag we'd be
+    # back to the legacy path — fail loudly instead of silently passing.
+    assert not hasattr(cancellation, "check_cancel_flag"), (
+        "cancel_check must no longer depend on Redis check_cancel_flag; "
+        "halt comes from saver state under 4.A3.9"
+    )
+
+    state = {"case_id": "case-1", "halt": None, "messages": []}
+    runtime = SimpleNamespace()
+
+    result = await cancellation.cancel_check.abefore_model(state, runtime)
+    assert result is None
 
 
 # ---------------------------------------------------------------------------

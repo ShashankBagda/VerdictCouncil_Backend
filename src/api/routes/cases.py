@@ -1566,7 +1566,23 @@ async def cancel_case_pipeline(
             detail="Case is not currently processing",
         )
 
+    # Sprint 4 4.A3.9 — saver-halt is the primary cancel signal. The Redis
+    # cancel-flag is still written below so the legacy `_run_case_pipeline`
+    # run-end status detection (cases.py:~1394) keeps working until that
+    # path migrates fully.
+    from src.pipeline.graph.resume import cancel_via_halt
+    from src.pipeline.graph.runner import GraphPipelineRunner
     from src.services.pipeline_events import set_cancel_flag
+
+    runner = GraphPipelineRunner()
+    if runner._graph is not None:
+        config = {"configurable": {"thread_id": str(case_id)}}
+        await cancel_via_halt(
+            runner._graph,
+            config,
+            reason="cancelled by user",
+            by=str(current_user.id),
+        )
 
     await set_cancel_flag(case_id)
     return MessageResponse(message="Cancellation requested")

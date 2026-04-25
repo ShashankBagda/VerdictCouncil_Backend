@@ -126,6 +126,60 @@ async def find_pending_interrupt(
 ResumeOutcome = Literal["interrupt", "terminal"]
 
 
+async def cancel_via_halt(
+    graph: CompiledStateGraph[Any],
+    config: dict[str, Any],
+    *,
+    reason: str | None = None,
+    by: str | None = None,
+) -> None:
+    """Cancel a run via the saver-halt path (Sprint 4 4.A3.9).
+
+    Two cases the helper covers:
+
+    - **Paused at a gate** — drives ``Command(resume={"action": "halt"})``
+      so the gate-apply node populates the `halt` slot and routes to
+      `terminal` in one super-step.
+    - **Mid-execution in a worker** — no pending interrupt is available,
+      so the helper writes the `halt` slot directly via
+      :meth:`aupdate_state`. The cancellation middleware reads `state.halt`
+      on the next super-step boundary and short-circuits the agent loop
+      with `Command(goto="end")`.
+
+    Either way the durable signal lives in the saver, not in Redis. The
+    legacy Redis cancel-flag (`set_cancel_flag` / `check_cancel_flag`)
+    remains in `services/pipeline_events.py` for the legacy
+    `_run_case_pipeline` run-end status detection only — the agent loop
+    no longer consults it (4.A3.9 acceptance: "Redis cancel-flag code
+    path retired or neutralized").
+
+    The halt payload always uses ``reason="cancelled"`` so downstream
+    consumers can distinguish a judge cancellation from a judge halt
+    (which uses ``reason="judge_halt"`` in the gate-apply node).
+    """
+    halt_payload: dict[str, Any] = {"reason": "cancelled"}
+    if by:
+        halt_payload["by"] = by
+    if reason:
+        halt_payload["notes"] = reason
+
+    if await has_pending_interrupt(graph, config):
+        resume_payload: dict[str, Any] = {"action": "halt"}
+        if reason:
+            resume_payload["notes"] = reason
+        await graph.ainvoke(
+            Command(resume=resume_payload), cast(RunnableConfig, config)
+        )
+        # The gate-apply node sets halt.reason="judge_halt"; overwrite to
+        # "cancelled" + carry the `by` field, which judge_halt does not.
+        await graph.aupdate_state(
+            cast(RunnableConfig, config), {"halt": halt_payload}
+        )
+        return
+
+    await graph.aupdate_state(cast(RunnableConfig, config), {"halt": halt_payload})
+
+
 async def drive_resume(
     graph: CompiledStateGraph[Any],
     config: dict[str, Any],

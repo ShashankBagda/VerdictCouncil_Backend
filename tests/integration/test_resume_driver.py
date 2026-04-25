@@ -21,6 +21,7 @@ from langgraph.types import Command
 
 from src.pipeline.graph.resume import (
     build_resume_payload,
+    cancel_via_halt,
     drive_resume,
     find_pending_interrupt,
     gate_from_pause_node,
@@ -212,6 +213,68 @@ async def test_drive_resume_halt_terminates(monkeypatch) -> None:
     assert payload is None
     state = await compiled.aget_state(config)
     assert state.values.get("halt", {}).get("notes") == "withdrawn"
+
+
+# ---------------------------------------------------------------------------
+# cancel_via_halt — Sprint 4 4.A3.9 (saver-halt cancel)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_cancel_via_halt_paused_drives_to_terminal(monkeypatch) -> None:
+    """Cancelling a paused thread routes through the halt resume → terminal."""
+    _patch_factories(monkeypatch)
+    from src.pipeline.graph.builder import build_graph
+
+    compiled = build_graph(checkpointer=InMemorySaver())
+    config = {"configurable": {"thread_id": "thread-cancel-paused"}}
+
+    await _drive_to_gate(compiled, config, "cancel-paused", 1)
+    assert await has_pending_interrupt(compiled, config)
+
+    await cancel_via_halt(
+        compiled, config, reason="judge cancelled mid-flight", by="judge-7"
+    )
+
+    state = await compiled.aget_state(config)
+    assert state.next == (), f"Cancel must reach END; got next={state.next!r}"
+    halt = state.values.get("halt") or {}
+    assert halt.get("reason") == "cancelled"
+    assert halt.get("by") == "judge-7"
+    assert halt.get("notes") == "judge cancelled mid-flight"
+
+
+@pytest.mark.asyncio
+async def test_cancel_via_halt_no_pending_interrupt_writes_state(monkeypatch) -> None:
+    """No pending interrupt → write halt to saver; middleware picks it up.
+
+    When the graph is mid-execution in the worker (not paused at a gate),
+    `cancel_via_halt` cannot drive a resume. It writes the halt slot to
+    the saver instead — the cancellation middleware reads `state.halt`
+    on the next supersep boundary and short-circuits.
+    """
+    _patch_factories(monkeypatch)
+    from src.pipeline.graph.builder import build_graph
+
+    compiled = build_graph(checkpointer=InMemorySaver())
+    config = {"configurable": {"thread_id": "thread-cancel-running"}}
+
+    await _drive_to_gate(compiled, config, "cancel-running", 2)
+    # Resolve gate2 advance to reach a no-pending state mid-graph would
+    # require a real worker; the contract we lock here is the saver
+    # write, which is what the middleware reads.
+    await compiled.ainvoke(Command(resume={"action": "halt", "notes": "first"}), config)
+    assert not await has_pending_interrupt(compiled, config)
+
+    # Re-invoke cancel — the helper must not fail when no interrupt is
+    # pending; it overwrites the halt slot atomically.
+    await cancel_via_halt(compiled, config, reason="second cancel", by="judge-9")
+
+    state = await compiled.aget_state(config)
+    halt = state.values.get("halt") or {}
+    assert halt.get("reason") == "cancelled"
+    assert halt.get("by") == "judge-9"
+    assert halt.get("notes") == "second cancel"
 
 
 @pytest.mark.asyncio
