@@ -192,10 +192,32 @@ Solace HA runbook: [`docs/operations/solace-ha-runbook.md`](docs/operations/sola
 
 ---
 
+## Pending operator setup
+
+The Sprint 4 backend cutover landed several features that require human
+configuration before they are live:
+
+- **Eval gate (`.github/workflows/eval.yml`)** — needs repo secrets
+  (`LANGSMITH_API_KEY`, `OPENAI_API_KEY`), repo variable
+  (`EVAL_BASELINE_EXPERIMENT`), and branch-protection rules. The
+  workflow file is committed but inert until the secrets/variable land.
+- **Worker-side `Command(resume=...)` cutover** — the contract layer
+  for the `interrupt()`-driven HITL flow is shipped, but the worker
+  (`run_gate_job`) still routes through the legacy `runner.run_gate(...)`
+  path. `publish_interrupt()` is defined but unwired in production.
+- **Frontend Sentry → LangSmith tagging** — needs a `VITE_SENTRY_DSN`
+  in the frontend `.env` once Sprint 4 4.C5.1 lands.
+
+Full checklist: [`docs/operations/sprint4-manual-ops.md`](docs/operations/sprint4-manual-ops.md).
+Eval-gate specifics: [`docs/setup-2026-04-25.md`](docs/setup-2026-04-25.md).
+
+---
+
 ## Further Reading
 
 - [`docs/architecture/README.md`](docs/architecture/README.md) — index of all 9 architecture docs (user stories, system architecture, agent configs, tech stack, diagrams, CI/CD, contestable judgment mode, infra setup, local dev)
 - [`docs/operations/uat-runbook.md`](docs/operations/uat-runbook.md) — manual UAT procedure
+- [`docs/operations/sprint4-manual-ops.md`](docs/operations/sprint4-manual-ops.md) — Sprint 4 pending manual operations
 - [`CLAUDE.md`](CLAUDE.md) — gitflow, branching rules, PR template, versioning, and commit conventions
 
 ---
