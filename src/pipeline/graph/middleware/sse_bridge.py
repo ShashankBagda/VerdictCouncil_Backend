@@ -73,8 +73,8 @@ async def sse_tool_emitter(request, handler):  # noqa: ANN001
 def _extract_token_usage(messages: list[Any]) -> dict[str, int] | None:
     """Pull `usage_metadata` off the last AIMessage in the response.
 
-    Mirrors `nodes/common.py:_token_usage` — we only emit when usage is
-    actually populated (avoids spurious zero-counts during tests).
+    Only emits when usage is actually populated (avoids spurious zero-counts
+    during tests).
     """
     for msg in reversed(messages):
         if isinstance(msg, AIMessage):

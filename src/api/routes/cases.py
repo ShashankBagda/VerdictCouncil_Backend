@@ -1350,14 +1350,11 @@ async def _run_case_pipeline(case_id: UUID) -> None:
 
         final_state = await GraphPipelineRunner().run(initial_state)
     except Exception as exc:
-        from src.pipeline.graph.nodes.common import AgentOutputParseError
-
         logger.exception("Pipeline run failed for case_id=%s", case_id)
-        reason = (
-            "llm_output_unparseable"
-            if isinstance(exc, AgentOutputParseError)
-            else "orchestrator_exception"
-        )
+        # Sprint 1 1.A1.6: legacy AgentOutputParseError is gone — `create_agent`
+        # with `ToolStrategy(handle_errors=True)` retries on validation errors
+        # internally, so a leaked exception here is uniformly orchestrator-level.
+        reason = "orchestrator_exception"
         mlflow_run_id: str | None = None
         try:
             import mlflow as _mlflow

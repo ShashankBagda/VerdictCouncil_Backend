@@ -2,9 +2,7 @@
 
 `cancel_check` is a `@before_model` hook. It consults the Redis cancel flag
 that `POST /cases/{id}/cancel` sets, and if the flag is up it returns
-`Command(goto="end")` to skip the model call. Mirrors the in-loop check in
-`nodes/common.py:_run_agent_node` (the line that calls
-`check_cancel_flag(case_id)` before each turn).
+`Command(goto="end")` to skip the model call.
 """
 
 from __future__ import annotations
