@@ -121,6 +121,15 @@ def test_runner_invocations_thread_thread_id() -> None:
     assert astream_configs[0].get("configurable", {}).get("thread_id") == expected, (
         f"astream thread_id should be the case_id; got {astream_configs[0]!r}"
     )
+    # Sprint 1 1.C3a.1 — every run must carry env metadata so LangSmith
+    # traces are filterable per environment.
+    metadata = astream_configs[0].get("metadata") or {}
+    assert metadata.get("env"), (
+        f"astream config must include metadata.env (1.C3a.1); got {metadata!r}"
+    )
+    assert metadata.get("case_id") == expected, (
+        f"astream config metadata must include case_id; got {metadata!r}"
+    )
     assert aget_state_configs and aget_state_configs[0] is not None, (
         "runner must pass config to aget_state for terminal state read"
     )

@@ -16,6 +16,7 @@ from src.pipeline.graph.runner_stream_adapter import stream_to_sse
 from src.pipeline.graph.state import GraphState
 from src.pipeline.observability import pipeline_run
 from src.shared.case_state import CaseState, CaseStatusEnum
+from src.shared.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +90,18 @@ class GraphPipelineRunner:
         """
         case = initial_state["case"]
         case_id = str(case.case_id)
-        config = {"configurable": {"thread_id": case_id}}
+        run_id = initial_state.get("run_id") or ""
+        # `metadata` (1.C3a.1) tags every LangSmith trace with env / case_id
+        # / run_id so a single `verdictcouncil` project can be filtered per
+        # environment without splitting the project namespace.
+        config = {
+            "configurable": {"thread_id": case_id},
+            "metadata": {
+                "env": settings.app_env,
+                "case_id": case_id,
+                "run_id": run_id,
+            },
+        }
 
         await stream_to_sse(
             graph=self._graph,

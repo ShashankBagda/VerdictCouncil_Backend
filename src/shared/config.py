@@ -84,6 +84,11 @@ class Settings(BaseSettings):
     mlflow_tracking_uri: str = "http://localhost:5001"
     mlflow_experiment: str = "verdictcouncil-pipeline"
 
+    # Environment tag (Sprint 1 1.C3a.1). Injected into every graph run's
+    # `metadata={"env": ...}` so LangSmith traces can be filtered by env
+    # without splitting the project. Values: "dev" | "staging" | "prod".
+    app_env: str = "dev"
+
     # OpenAI Models
     openai_vector_store_id: str = ""
     openai_model_lightweight: str = "gpt-5.4-nano"
