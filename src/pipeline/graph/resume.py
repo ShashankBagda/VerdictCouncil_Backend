@@ -11,10 +11,10 @@ function:
 
 1. Verifies the saver has a pending interrupt at this thread_id — that
    is the only legitimate state in which a resume can land.
-2. Optionally side-loads ``extra_instructions`` for a research subagent
-   rerun, since the gate apply node only knows how to scope notes to
-   the gate's own key. (The dispatcher fans out to all four subagents
-   either way; the corrective note rides with the targeted scope only.)
+2. Translates the job payload into the gate-apply resume dict via
+   :func:`build_resume_payload`. Subagent-targeted notes ride as a
+   ``{subagent: note}`` dict so ``make_gate_apply`` writes them
+   straight into ``extra_instructions`` scoped to the targeted scope.
 3. Invokes the graph with the ``Command(resume=...)`` payload the
    :func:`make_gate_apply` node consumes.
 4. Inspects the post-invoke state and returns one of two outcomes —
@@ -29,8 +29,9 @@ session, which the worker provides.
 from __future__ import annotations
 
 import logging
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
+from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command
 
@@ -91,22 +92,22 @@ def build_resume_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 async def has_pending_interrupt(
-    graph: CompiledStateGraph, config: dict[str, Any]
+    graph: CompiledStateGraph[Any], config: dict[str, Any]
 ) -> bool:
     """True when the saver has a checkpointed task awaiting `Command(resume=...)`."""
-    state = await graph.aget_state(config)
+    state = await graph.aget_state(cast(RunnableConfig, config))
     return any(t.interrupts for t in state.tasks)
 
 
 async def find_pending_interrupt(
-    graph: CompiledStateGraph, config: dict[str, Any]
+    graph: CompiledStateGraph[Any], config: dict[str, Any]
 ) -> tuple[str, dict[str, Any]] | None:
     """Return ``(gate, interrupt_payload)`` for the first pending pause task.
 
     None when the saver has no pending interrupt — the caller treats
     that as the run-reached-END case.
     """
-    state = await graph.aget_state(config)
+    state = await graph.aget_state(cast(RunnableConfig, config))
     for task in state.tasks:
         if not task.interrupts:
             continue
@@ -132,7 +133,7 @@ ResumeOutcome = Literal["interrupt", "terminal"]
 
 
 async def drive_resume(
-    graph: CompiledStateGraph,
+    graph: CompiledStateGraph[Any],
     config: dict[str, Any],
     payload: dict[str, Any],
 ) -> tuple[ResumeOutcome, str | None, dict[str, Any] | None]:
@@ -160,7 +161,7 @@ async def drive_resume(
         )
 
     resume = build_resume_payload(payload)
-    await graph.ainvoke(Command(resume=resume), config)
+    await graph.ainvoke(Command(resume=resume), cast(RunnableConfig, config))
 
     pending = await find_pending_interrupt(graph, config)
     if pending is None:
