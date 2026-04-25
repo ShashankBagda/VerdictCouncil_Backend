@@ -20,6 +20,7 @@ from typing import Any
 from langchain.agents.middleware import wrap_tool_call
 
 from src.models.audit import AuditLog
+from src.pipeline.graph.citation_provenance import source_ids_from_artifact
 from src.services.database import async_session
 
 logger = logging.getLogger(__name__)
@@ -59,26 +60,6 @@ async def append_audit_entry(
         logger.exception("audit write failed for case_id=%s agent=%s", case_id, agent_name)
 
 
-def _extract_source_ids(result: Any) -> list[str]:
-    """Pull citation source_ids from a ToolMessage artifact, if present.
-
-    Sprint 3 3.B.1/3.B.2 made the search tools emit `list[Document]`
-    artifacts with stable `source_id` metadata. We stash them in the
-    audit row's JSONB output_payload until 4.C4.1 promotes them to a
-    dedicated `retrieved_source_ids` column.
-    """
-    artifact = getattr(result, "artifact", None)
-    if not artifact:
-        return []
-    source_ids: list[str] = []
-    for doc in artifact:
-        meta = getattr(doc, "metadata", None) or {}
-        source_id = meta.get("source_id")
-        if source_id:
-            source_ids.append(str(source_id))
-    return source_ids
-
-
 @wrap_tool_call
 async def audit_tool_call(request, handler):  # noqa: ANN001
     """Record one audit row per tool invocation; never blocks tool execution."""
@@ -89,7 +70,9 @@ async def audit_tool_call(request, handler):  # noqa: ANN001
     result = await handler(request)
 
     tool_result_text = str(getattr(result, "content", result))[:2000]
-    source_ids = _extract_source_ids(result)
+    # 3.B.3 stash: source_ids from the ToolMessage artifact land in JSONB
+    # until 4.C4.1 promotes them to a dedicated retrieved_source_ids column.
+    source_ids = source_ids_from_artifact(getattr(result, "artifact", None))
     await append_audit_entry(
         case_id=case_id,
         agent_name=agent_name,

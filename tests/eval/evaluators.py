@@ -106,22 +106,32 @@ def citation_accuracy(run: Any, example: Any | None = None) -> dict[str, Any]:
     return {"key": "citation_accuracy", "score": score, "comment": comment}
 
 
-_SECTION_RE = re.compile(r"(?:s|section|sch|schedule|part|pt)\s*\.?\s*([0-9a-z]+)", re.IGNORECASE)
+# Match section/schedule/part references with explicit word-boundary
+# anchoring. The longer alternatives MUST come first because Python's
+# regex engine takes the leftmost alternative that matches — without
+# this, `s` would shadow `section`/`schedule` and `s.65` would never
+# resolve to `s65`.
+_SECTION_RE = re.compile(
+    r"\b(section|schedule|sch|part|pt|s)\b\.?\s*([0-9ivxlcdm]+)",
+    re.IGNORECASE,
+)
 
 
 def _statute_section_keys(text: str) -> set[str]:
     """Extract section/schedule identifiers from a citation string.
 
     'Road Traffic Act 1961 s.65 (improper lane change)' → {'s65'}
+    'Section 65'                                        → {'s65'}
     'CPFTA Part III'                                    → {'partiii'}
-    'Schedule 9'                                        → {'schedule9'}
+    'Schedule 9' / 'Sch. 9'                             → {'schedule9'}
 
-    These are the load-bearing tokens for matching: the act's name is
-    expressive but the section is what determines whether the agent
-    actually addressed the right rule.
+    These are the load-bearing tokens for cross-form matching: the
+    agent may write 'Section 65' while the expected says 's.65', and
+    the gate must still see them as the same provision.
     """
     canonical = {
         "section": "s",
+        "s": "s",
         "schedule": "schedule",
         "sch": "schedule",
         "part": "part",
@@ -129,9 +139,8 @@ def _statute_section_keys(text: str) -> set[str]:
     }
     keys: set[str] = set()
     for match in _SECTION_RE.finditer(text):
-        prefix = match.group(0).lower().split()[0].rstrip(".")
-        prefix = canonical.get(prefix, prefix)
-        keys.add(f"{prefix}{match.group(1).lower()}")
+        prefix = canonical[match.group(1).lower()]
+        keys.add(f"{prefix}{match.group(2).lower()}")
     return keys
 
 

@@ -155,7 +155,12 @@ class TestSearchPrecedentsArtifact:
             msg = await _ainvoke_as_tool_call(sp_tool, {"query": "live"})
 
         doc = msg.artifact[0]
-        assert doc.metadata["file_id"].startswith("pair:")
+        assert doc.metadata["file_id"].startswith("pair-")
+        # source_id keeps the documented one-colon shape:
+        # `<file_id>:<sha256[:12]>` even when file_id is a surrogate.
+        prefix, content_hash = doc.metadata["source_id"].split(":", 1)
+        assert prefix == doc.metadata["file_id"]
+        assert ":" not in content_hash
         assert ":" in doc.metadata["source_id"]
         assert doc.metadata["filename"] == "Test v Test [2020] SGCA 5"
 

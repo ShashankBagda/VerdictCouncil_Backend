@@ -71,17 +71,24 @@ def _content_hash(text: str) -> str:
 def _resolve_file_id(item: dict[str, Any], surrogate_prefix: str) -> str:
     """Return a stable identifier for an item's source document.
 
-    OpenAI vector-store hits expose a real `file_id`; live PAIR results and
-    any other source without one synthesise a surrogate from the URL (or
-    citation as last resort) so every artifact carries a verifiable
+    OpenAI vector-store hits expose a real ``file_id``; live PAIR results
+    and any other source without one synthesise a surrogate from the URL
+    (or citation as last resort) so every artifact carries a verifiable
     provenance key.
+
+    The surrogate uses a hyphen (``pair-<hash>``) rather than a colon
+    so the final ``source_id`` keeps the documented one-colon shape:
+    ``<file_id>:<content_hash>``. With ``pair:<hash>`` the surrogate
+    forced a three-token id and broke the ``source_id.split(":", 1)``
+    contract that downstream consumers (golden-case validation, audit
+    parsing) rely on.
     """
     file_id = item.get("file_id")
     if file_id:
         return str(file_id)
     surrogate = item.get("url") or item.get("citation") or ""
     digest = hashlib.sha256(surrogate.encode("utf-8")).hexdigest()[:12]
-    return f"{surrogate_prefix}:{digest}"
+    return f"{surrogate_prefix}-{digest}"
 
 
 def _precedent_to_document(precedent: dict[str, Any]) -> Document:

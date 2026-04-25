@@ -3,28 +3,42 @@
 Wires :mod:`tests.eval.evaluators` into ``langsmith.evaluate`` and
 records the experiment in the LangSmith UI.
 
-Two pipeline modes:
+Three pipeline modes:
 
 - ``--mode stub`` (default): the adapter returns a synthesised output
   derived from the example's expected payload. Verifies the
   dataset + evaluator + LangSmith plumbing without spending OpenAI
-  tokens. Useful for first-touch smoke and CI dry-runs.
+  tokens. **The stub is engineered to score 1.0/1.0** — useful for
+  proving the gate is wired, not for catching regressions.
+
+- ``--mode failing-stub``: deliberately mis-aligns the synthesised
+  output (no source_ids, no rules) so the evaluators score 0. Used to
+  prove the 4.D3.1 CI gate can actually fail. Run this once during
+  gate setup; do not tag as baseline.
 
 - ``--mode graph`` (real): the adapter compiles the in-process graph
-  with :class:`InMemorySaver`, builds an initial ``CaseState`` from the
-  example's inputs, invokes ``graph.ainvoke``, and returns the
+  with :class:`InMemorySaver`, marshals the full example payload into
+  ``CaseState``, invokes ``graph.ainvoke``, and returns the
   ``research_output`` + ``retrieved_source_ids`` slots. Requires
   ``OPENAI_API_KEY`` and incurs token cost per example. ``--limit N``
-  caps how many examples run.
+  caps how many examples run. Errors are raised — not logged — so a
+  flaky LLM call cannot publish a green experiment with missing rows.
 
 Run::
 
     LANGSMITH_API_KEY=... uv run python tests/eval/run_eval.py
+    LANGSMITH_API_KEY=... uv run python tests/eval/run_eval.py --mode failing-stub
     LANGSMITH_API_KEY=... OPENAI_API_KEY=... \\
         uv run python tests/eval/run_eval.py --mode graph --limit 1
 
-The experiment is named ``verdict-council-eval-<git-sha>`` so 3.D1.4
-can tag the baseline + 4.D3.1 can compare against it in CI.
+The experiment is named ``<prefix>-<git-sha>-<mode>`` so 3.D1.4 can
+tag the baseline + 4.D3.1 can compare against it in CI.
+
+**Limitations of the stub baseline:** ``baseline-<sha>-stub`` proves
+the gate is wired, not that quality stayed flat. Until the goldens'
+``placeholder-*`` source_ids are reconciled against real OpenAI file
+ids and ``--mode graph`` is promoted to the gate, a regression in the
+real pipeline cannot trip the stub baseline.
 """
 
 from __future__ import annotations
@@ -53,10 +67,10 @@ DATASET_NAME = "verdict-council-golden"
 def stub_adapter(inputs: dict[str, Any]) -> dict[str, Any]:
     """Synthesised output for plumbing-only runs.
 
-    Returns enough structure that the evaluators score above zero:
+    Returns enough structure that the evaluators score 1.0/1.0:
     each input echoes back the expected research with one synthetic
     source_id so ``citation_accuracy`` can be exercised without
-    spending tokens.
+    spending tokens. **No discrimination power** — engineered to pass.
     """
     expected_law = (inputs.get("expected") or {}).get("research") or {}
     rules = [
@@ -69,8 +83,26 @@ def stub_adapter(inputs: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def failing_stub_adapter(_inputs: dict[str, Any]) -> dict[str, Any]:
+    """Deliberately mis-aligned output that scores 0 on both evaluators.
+
+    Used once during 4.D3.1 gate setup to prove the gate can trip.
+    Do NOT tag the resulting experiment as the baseline.
+    """
+    return {
+        "research": {"law": {"legal_rules": [], "precedents": []}},
+        "retrieved_source_ids": [],
+    }
+
+
 async def graph_adapter(inputs: dict[str, Any]) -> dict[str, Any]:
-    """Real adapter: compile in-process graph, run one case, extract outputs."""
+    """Real adapter: compile in-process graph, run one case, extract outputs.
+
+    Marshals the full example payload (parties / case_metadata /
+    raw_documents) into the initial CaseState so intake actually has
+    something to chew on. Earlier versions only seeded `case_id` +
+    `domain`, which made `--mode graph` a no-op for evaluator scoring.
+    """
     import uuid
 
     from langgraph.checkpoint.memory import InMemorySaver
@@ -81,8 +113,14 @@ async def graph_adapter(inputs: dict[str, Any]) -> dict[str, Any]:
     saver = InMemorySaver()
     graph = build_graph(checkpointer=saver)
 
-    case_id = uuid.UUID(inputs.get("case_id", str(uuid.uuid4())))
-    case = CaseState(case_id=case_id, domain=inputs.get("domain", "small_claims"))
+    case_id = inputs.get("case_id") or str(uuid.uuid4())
+    case = CaseState(
+        case_id=case_id,
+        domain=inputs.get("domain", "small_claims"),
+        parties=list(inputs.get("parties") or []),
+        case_metadata=dict(inputs.get("case_metadata") or {}),
+        raw_documents=list(inputs.get("raw_documents") or []),
+    )
 
     initial = {
         "case": case,
@@ -100,7 +138,7 @@ async def graph_adapter(inputs: dict[str, Any]) -> dict[str, Any]:
         "is_resume": False,
         "start_agent": None,
     }
-    config = {"configurable": {"thread_id": str(case_id)}}
+    config = {"configurable": {"thread_id": case_id}}
     result = await graph.ainvoke(initial, config=config)
 
     research = result.get("research_output")
@@ -126,12 +164,19 @@ def _git_sha() -> str:
         return "unknown"
 
 
-def _resolve_target(mode: str, limit: int | None):
+def _resolve_target(mode: str):
     """Return a sync callable LangSmith can invoke per example."""
     if mode == "stub":
 
         def _target(inputs: dict[str, Any]) -> dict[str, Any]:
             return stub_adapter(inputs)
+
+        return _target
+
+    if mode == "failing-stub":
+
+        def _target(inputs: dict[str, Any]) -> dict[str, Any]:
+            return failing_stub_adapter(inputs)
 
         return _target
 
@@ -145,7 +190,11 @@ def _resolve_target(mode: str, limit: int | None):
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--mode", choices=("stub", "graph"), default="stub")
+    parser.add_argument(
+        "--mode",
+        choices=("stub", "failing-stub", "graph"),
+        default="stub",
+    )
     parser.add_argument("--limit", type=int, default=None, help="Max examples to score")
     parser.add_argument(
         "--experiment-prefix",
@@ -172,7 +221,7 @@ def main() -> int:
 
     from tests.eval.evaluators import citation_accuracy, legal_element_coverage
 
-    target = _resolve_target(args.mode, args.limit)
+    target = _resolve_target(args.mode)
     experiment_name = f"{args.experiment_prefix}-{_git_sha()}-{args.mode}"
 
     client = Client()
@@ -191,6 +240,12 @@ def main() -> int:
     else:
         data = DATASET_NAME
 
+    # Graph mode hits live LLMs; surface errors loudly so a flaky run
+    # cannot ship a green experiment with missing rows. Stub mode keeps
+    # the default `log` so a malformed fixture doesn't break the gate's
+    # plumbing smoke.
+    error_handling = "raise" if args.mode == "graph" else "log"
+
     results = evaluate(
         target,
         data=data,
@@ -198,6 +253,7 @@ def main() -> int:
         experiment_prefix=experiment_name,
         max_concurrency=2 if args.mode == "graph" else 5,
         client=client,
+        error_handling=error_handling,
     )
 
     summary_url = getattr(results, "experiment_url", None) or getattr(results, "url", None)

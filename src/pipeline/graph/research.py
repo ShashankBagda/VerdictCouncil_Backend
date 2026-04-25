@@ -85,6 +85,12 @@ def research_join_node(state: dict[str, Any]) -> dict[str, Any]:
         retrieved = state.get("retrieved_source_ids") or []
         validated_law = validate_law_citations(merged.law, retrieved)
         merged = merged.model_copy(update={"law": validated_law})
+    elif "law" in parts:
+        # Law subagent ran but produced no LawResearch payload — surface
+        # this as `partial` so the gate2 UI can flag the gap. `from_parts`
+        # only flips `partial` when a scope key is missing from the dict;
+        # a present-but-empty payload would otherwise slip through.
+        merged = merged.model_copy(update={"partial": True})
     return {"research_output": merged}
 
 

@@ -160,3 +160,52 @@ class TestLegalElementCoverage:
         example = _example({"research": {"legal_rules": ["RTA s.65"]}})
         result = legal_element_coverage(_run({}), example)
         assert result["score"] == 0.0
+
+
+class TestStatuteSectionKeys:
+    """Cross-form matching is the load-bearing contract — paraphrase tolerance.
+
+    The reviewer caught that the original regex was symmetrically broken
+    (both sides mangled the same way), so tests passed coincidentally
+    while real cross-form pairs failed. These tests pin down the
+    section-token contract directly.
+    """
+
+    def test_short_form_section(self):
+        from tests.eval.evaluators import _statute_section_keys
+
+        assert _statute_section_keys("Road Traffic Act 1961 s.65") == {"s65"}
+
+    def test_long_form_section(self):
+        from tests.eval.evaluators import _statute_section_keys
+
+        assert _statute_section_keys("Section 65 RTA") == {"s65"}
+
+    def test_long_and_short_match_each_other(self):
+        from tests.eval.evaluators import _statute_section_keys
+
+        assert _statute_section_keys("s.65") == _statute_section_keys("Section 65")
+
+    def test_schedule_short_and_long(self):
+        from tests.eval.evaluators import _statute_section_keys
+
+        assert _statute_section_keys("Schedule 9") == {"schedule9"}
+        assert _statute_section_keys("Sch. 9") == {"schedule9"}
+
+    def test_part_short_and_long(self):
+        from tests.eval.evaluators import _statute_section_keys
+
+        assert _statute_section_keys("Part III") == _statute_section_keys("Pt III")
+
+    def test_no_section_in_act_name(self):
+        """The regex must not match the 's' in 'Sale' or the 'p' in 'Practice'."""
+        from tests.eval.evaluators import _statute_section_keys
+
+        keys = _statute_section_keys("Sale of Goods Act 1979 s.13")
+        assert keys == {"s13"}, f"Act name leaked into keys: {keys!r}"
+
+    def test_paraphrased_match_drives_coverage(self):
+        """End-to-end: agent says 's.65', expected says 'Section 65'. Must match."""
+        run = _run({"research": {"law": {"legal_rules": [{"citation": "s.65"}]}}})
+        example = _example({"research": {"legal_rules": ["Road Traffic Act Section 65"]}})
+        assert legal_element_coverage(run, example)["score"] == 1.0

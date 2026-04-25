@@ -163,25 +163,13 @@ def _filter_tools(state: dict[str, Any], phase_or_scope: str, allowed: list[str]
     return selected
 
 
-def _extract_source_ids_from_messages(messages: list[Any]) -> list[str]:
-    """Pull `source_id`s from every tool-message artifact in `messages`.
-
-    Order-preserving + deduped. Sprint 3 3.B.5 — research_join uses the
-    accumulated set to validate self-reported `supporting_sources`.
-    """
-    seen: set[str] = set()
-    out: list[str] = []
-    for msg in messages:
-        artifact = getattr(msg, "artifact", None)
-        if not artifact:
-            continue
-        for doc in artifact:
-            meta = getattr(doc, "metadata", None) or {}
-            sid = meta.get("source_id")
-            if sid and sid not in seen:
-                seen.add(sid)
-                out.append(str(sid))
-    return out
+# Re-export the shared extractor so the existing import path keeps working.
+# Sprint 3 3.B.5 — research_join consumes the accumulated set to validate
+# self-reported `supporting_sources`. The single canonical implementation
+# lives in `src.pipeline.graph.citation_provenance`.
+from src.pipeline.graph.citation_provenance import (  # noqa: E402
+    source_ids_from_messages as _extract_source_ids_from_messages,
+)
 
 
 def _make_node(

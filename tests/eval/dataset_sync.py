@@ -56,6 +56,22 @@ def load_fixtures(directory: Path = GOLDEN_DIR) -> list[dict[str, Any]]:
     return fixtures
 
 
+def _placeholder_source_ids(fixture: dict[str, Any]) -> list[str]:
+    """Return any ``placeholder-*`` source_ids in the fixture's expected outputs.
+
+    Goldens are authored with placeholder file ids because real OpenAI
+    vector-store ids are deployment-specific. This helper surfaces the
+    gap so callers can warn loudly until the goldens are reconciled
+    against a seeded vector store (Sprint 4 follow-up).
+    """
+    research = (fixture.get("expected") or {}).get("research") or {}
+    return [
+        sid
+        for sid in (research.get("supporting_sources") or [])
+        if isinstance(sid, str) and sid.startswith("placeholder-")
+    ]
+
+
 def fixture_to_example(fixture: dict[str, Any]) -> dict[str, Any]:
     """Project a fixture into a LangSmith ``ExampleCreate`` dict.
 
@@ -162,6 +178,16 @@ def main() -> int:
     if not fixtures:
         print(f"No fixtures found under {GOLDEN_DIR}", file=sys.stderr)
         return 1
+
+    placeholder_count = sum(1 for fx in fixtures if _placeholder_source_ids(fx))
+    if placeholder_count:
+        print(
+            f"WARN: {placeholder_count}/{len(fixtures)} fixtures still use "
+            f"placeholder source_ids. citation_accuracy will floor at 0 in "
+            f"--mode graph until they're reconciled against the live "
+            f"OpenAI vector store.",
+            file=sys.stderr,
+        )
 
     report = sync(client, fixtures, dry_run=args.dry_run)
     print(f"Dataset: {DATASET_NAME} ({report['dataset_id']})")
