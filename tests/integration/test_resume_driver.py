@@ -36,8 +36,6 @@ from src.pipeline.graph.schemas import (
 )
 from src.shared.case_state import CaseState
 
-pytestmark = pytest.mark.asyncio
-
 
 # ---------------------------------------------------------------------------
 # Stubs (avoid OpenAI; same shape as test_interrupt_resume.py)
@@ -181,6 +179,7 @@ async def _drive_to_gate(compiled, config, thread_id: str, target: int) -> None:
         await compiled.ainvoke(Command(resume={"action": "advance"}), config)
 
 
+@pytest.mark.asyncio
 async def test_drive_resume_advance_pauses_at_next_gate(monkeypatch) -> None:
     _patch_factories(monkeypatch)
     from src.pipeline.graph.builder import build_graph
@@ -199,6 +198,7 @@ async def test_drive_resume_advance_pauses_at_next_gate(monkeypatch) -> None:
     assert payload.get("actions") == ["advance", "rerun", "halt"]
 
 
+@pytest.mark.asyncio
 async def test_drive_resume_halt_terminates(monkeypatch) -> None:
     _patch_factories(monkeypatch)
     from src.pipeline.graph.builder import build_graph
@@ -219,6 +219,7 @@ async def test_drive_resume_halt_terminates(monkeypatch) -> None:
     assert state.values.get("halt", {}).get("notes") == "withdrawn"
 
 
+@pytest.mark.asyncio
 async def test_drive_resume_rerun_repauses_at_same_gate(monkeypatch) -> None:
     _patch_factories(monkeypatch)
     from src.pipeline.graph.builder import build_graph
@@ -243,6 +244,7 @@ async def test_drive_resume_rerun_repauses_at_same_gate(monkeypatch) -> None:
     assert state.values.get("extra_instructions", {}).get("gate3") == "rewrite Q3"
 
 
+@pytest.mark.asyncio
 async def test_drive_resume_subagent_note_lands_under_subagent_key(
     monkeypatch,
 ) -> None:
@@ -304,6 +306,7 @@ def test_build_resume_payload_subagent_without_notes_omits_notes() -> None:
     assert out == {"action": "rerun"}
 
 
+@pytest.mark.asyncio
 async def test_drive_resume_field_corrections_apply_to_state(monkeypatch) -> None:
     _patch_factories(monkeypatch)
     from src.pipeline.graph.builder import build_graph
@@ -328,6 +331,7 @@ async def test_drive_resume_field_corrections_apply_to_state(monkeypatch) -> Non
     assert state.values.get("synthesis_output") == corrections["synthesis_output"]
 
 
+@pytest.mark.asyncio
 async def test_drive_resume_raises_when_no_pending_interrupt(monkeypatch) -> None:
     _patch_factories(monkeypatch)
     from src.pipeline.graph.builder import build_graph
@@ -345,6 +349,7 @@ async def test_drive_resume_raises_when_no_pending_interrupt(monkeypatch) -> Non
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 async def test_has_pending_interrupt_after_initial_invoke(monkeypatch) -> None:
     _patch_factories(monkeypatch)
     from src.pipeline.graph.builder import build_graph
@@ -357,6 +362,7 @@ async def test_has_pending_interrupt_after_initial_invoke(monkeypatch) -> None:
     assert await has_pending_interrupt(compiled, config) is True
 
 
+@pytest.mark.asyncio
 async def test_find_pending_interrupt_returns_gate_and_payload(monkeypatch) -> None:
     _patch_factories(monkeypatch)
     from src.pipeline.graph.builder import build_graph

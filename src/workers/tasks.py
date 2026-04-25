@@ -137,133 +137,263 @@ async def run_stability_computation_job(ctx: dict[str, Any], job_id: str) -> Non
 
 async def run_gate_job(ctx: dict[str, Any], job_id: str) -> None:  # noqa: ARG001
     async def _runner(job: PipelineJob, *, trace_id: str | None = None) -> None:
-        from datetime import UTC, datetime
-
-        from src.api.schemas.pipeline_events import PipelineProgressEvent
-        from src.db.persist_case_results import persist_case_results
-        from src.models.case import Case
-        from src.pipeline.graph.runner import GraphPipelineRunner
-        from src.services.database import async_session
-        from src.services.pipeline_events import publish_progress
-        from src.shared.case_state import CaseState, CaseStatusEnum
-
         payload = job.payload or {}
-        gate_name = payload.get("gate_name")
-        start_agent = payload.get("start_agent")
-        instructions = payload.get("instructions")
+        if payload.get("resume_action"):
+            # Sprint 4 4.A3.5/6 cutover path: drive Command(resume=...) against
+            # the saver-checkpointed thread.
+            await _run_gate_via_resume(job, trace_id=trace_id)
+        else:
+            # Pre-cutover queued jobs (no resume_action) — legacy run_gate path.
+            await _run_gate_via_legacy(job, trace_id=trace_id)
 
-        if not gate_name:
-            raise ValueError(f"gate_run job {job.id} missing gate_name in payload")
+    await _run_with_outbox(job_id, PipelineJobType.gate_run, _runner)
 
-        case_id = job.case_id
-        gate_num = int(gate_name[-1])
 
-        # Sprint 2 2.A2.6: read prior state via the AsyncPostgresSaver bound at
-        # graph compile time. The saver checkpoints under `thread_id = case_id`
-        # at every node boundary, so the latest snapshot is "end of the previous
-        # gate" by construction. The legacy `pipeline_checkpoints` reader is gone.
-        runner = GraphPipelineRunner()
-        config: dict[str, Any] = {"configurable": {"thread_id": str(case_id)}}
-        state: CaseState | None = None
-        if gate_num > 1:
-            snapshot = await runner._graph.aget_state(config)
-            snap_values = getattr(snapshot, "values", None) or {}
-            state = snap_values.get("case")
+async def _run_gate_via_resume(job: PipelineJob, *, trace_id: str | None) -> None:
+    """Sprint 4 cutover gate runner.
 
-        if state is None:
-            async with async_session() as db:
-                from sqlalchemy import select as _select
-                from sqlalchemy.orm import joinedload as _joinedload
+    Translates the /respond job payload into ``Command(resume=...)``,
+    invokes the saver-checkpointed graph, persists the resulting case
+    state, and publishes either an InterruptEvent (next gate paused)
+    or the legacy terminal SSE close event (run reached END or halt).
+    """
+    from datetime import UTC, datetime
 
-                case_result = await db.execute(
-                    _select(Case).where(Case.id == case_id).options(_joinedload(Case.domain_ref))
-                )
-                case = case_result.scalar_one_or_none()
-                if case is None:
-                    raise ValueError(f"Case {case_id} not found for gate_run job {job.id}")
-                state = CaseState(
-                    case_id=str(case_id),
-                    domain=case.domain.value if case.domain else None,
-                    status=CaseStatusEnum.processing,
-                )
+    from src.api.schemas.pipeline_events import PipelineProgressEvent
+    from src.db.persist_case_results import persist_case_results
+    from src.models.case import Case
+    from src.pipeline.graph.resume import drive_resume
+    from src.pipeline.graph.runner import GraphPipelineRunner
+    from src.services.database import async_session
+    from src.services.pipeline_events import publish_interrupt, publish_progress
+    from src.shared.case_state import CaseStatusEnum
+    from src.tools.exceptions import RetiredDomainError
 
-        # D2: Always re-read domain from live DB to catch retirements after gate 1
-        async with async_session() as db:
-            from sqlalchemy import select as _select
-            from sqlalchemy.orm import joinedload as _joinedload
+    payload = job.payload or {}
+    case_id = job.case_id
+    config: dict[str, Any] = {"configurable": {"thread_id": str(case_id)}}
 
-            from src.tools.exceptions import RetiredDomainError
+    # D2 invariant: re-read domain from live DB to catch retirements between
+    # gate pause and resume. The saver-side domain_vector_store_id is stale
+    # the moment an admin retires the domain, so we refuse the resume and
+    # mark the case retryable rather than running with a dead vector store.
+    async with async_session() as db:
+        from sqlalchemy import select as _select
+        from sqlalchemy.orm import joinedload as _joinedload
 
-            case_result = await db.execute(
-                _select(Case).where(Case.id == case_id).options(_joinedload(Case.domain_ref))
-            )
-            live_case = case_result.scalar_one_or_none()
-            if live_case is None:
-                raise ValueError(f"Case {case_id} disappeared before gate resume")
-
-            if live_case.domain_id is None or live_case.domain_ref is None:
-                raise RetiredDomainError("Case has no linked domain; cannot resume")
-
-            if not live_case.domain_ref.is_active or not live_case.domain_ref.vector_store_id:
-                live_case.status_value = "failed_retryable"
-                await db.commit()
-                raise RetiredDomainError(
-                    f"Domain {live_case.domain_ref.code} retired mid-case; aborting gate resume"
-                )
-
-            # Always overwrite from live DB — never use stale checkpoint value
-            state = state.model_copy(
-                update={"domain_vector_store_id": live_case.domain_ref.vector_store_id}
-            )
-
-        # Force status to processing before handing to run_gate
-        state = state.model_copy(update={"status": CaseStatusEnum.processing})
-
-        final_state = await runner.run_gate(
-            state,
-            gate_name,
-            start_agent=start_agent,
-            extra_instructions=instructions,
-            trace_id=trace_id,
+        case_result = await db.execute(
+            _select(Case).where(Case.id == case_id).options(_joinedload(Case.domain_ref))
         )
+        live_case = case_result.scalar_one_or_none()
+        if live_case is None:
+            raise ValueError(f"Case {case_id} disappeared before gate resume")
+        if live_case.domain_id is None or live_case.domain_ref is None:
+            raise RetiredDomainError("Case has no linked domain; cannot resume")
+        if not live_case.domain_ref.is_active or not live_case.domain_ref.vector_store_id:
+            live_case.status_value = "failed_retryable"
+            await db.commit()
+            raise RetiredDomainError(
+                f"Domain {live_case.domain_ref.code} retired mid-case; aborting gate resume"
+            )
 
+    runner = GraphPipelineRunner()
+
+    # Stamp metadata for LangSmith trace continuity (matches runner._invoke).
+    from src.shared.config import settings
+
+    metadata: dict[str, str] = {
+        "env": settings.app_env,
+        "case_id": str(case_id),
+    }
+    if trace_id:
+        metadata["trace_id"] = trace_id
+    invoke_config = {**config, "metadata": metadata}
+
+    outcome, gate, ipayload = await drive_resume(runner._graph, invoke_config, payload)
+
+    # Pull the post-resume CaseState from the saver and reflect the run's
+    # logical status. The graph nodes write status="processing" everywhere;
+    # only the worker knows whether the run has paused or terminated.
+    snapshot = await runner._graph.aget_state(config)
+    final_state = snapshot.values["case"]
+
+    if outcome == "interrupt":
+        gate_num = int(gate[-1])  # type: ignore[index]
         gate_state_payload = {
             "current_gate": gate_num,
             "awaiting_review": True,
             "rerun_agent": None,
         }
-
         async with async_session() as db:
-            # Flush parsed document pages if any parse_document tool calls ran (US-008)
-            if hasattr(runner, "_document_pages_buffer") and runner._document_pages_buffer:
-                from sqlalchemy import update as sa_update
-
-                from src.models.case import Document
-
-                for file_id, pages in runner._document_pages_buffer.items():
-                    await db.execute(
-                        sa_update(Document)
-                        .where(Document.openai_file_id == file_id)
-                        .values(pages=pages)
-                    )
-
             await persist_case_results(
                 db, case_id, final_state, gate_state_payload=gate_state_payload
             )
+        # publish_interrupt UPSERTs case.status = awaiting_review_gateN
+        # and writes case.gate_state. Order matters: it runs after
+        # persist_case_results so the legacy compat status is the final write.
+        if ipayload is not None and gate is not None:
+            await publish_interrupt(case_id, gate, ipayload)
+        # Legacy SSE close event for clients still keying off
+        # `agent=pipeline + phase=awaiting_review`.
+        await publish_progress(
+            PipelineProgressEvent(
+                case_id=case_id,
+                agent="pipeline",
+                phase="awaiting_review",
+                ts=datetime.now(UTC),
+                detail={"gate": gate, "stopped_at": f"awaiting_review_{gate}"},
+            )
+        )
+        return
 
-        # Sprint 2 2.A2.6: the AsyncPostgresSaver wrote the gate-end checkpoint
-        # implicitly during run_gate; no separate `pipeline_checkpoints` write.
+    # outcome == "terminal" — graph reached END or halted. Reflect that in
+    # the persisted CaseState before persistence so the legacy `closed` /
+    # `failed` filters in the case-list UI work without a follow-up update.
+    halt = snapshot.values.get("halt") or {}
+    if halt:
+        final_state = final_state.model_copy(update={"status": CaseStatusEnum.failed})
+    else:
+        final_state = final_state.model_copy(update={"status": CaseStatusEnum.closed})
 
-        event = PipelineProgressEvent(
+    async with async_session() as db:
+        await persist_case_results(db, case_id, final_state)
+
+    await publish_progress(
+        PipelineProgressEvent(
+            case_id=case_id,
+            agent="pipeline",
+            phase="terminal",
+            ts=datetime.now(UTC),
+            detail={
+                "reason": halt.get("reason", "completed") if halt else "completed",
+                "stopped_at": halt.get("gate") if halt else "end",
+            },
+        )
+    )
+
+
+async def _run_gate_via_legacy(job: PipelineJob, *, trace_id: str | None) -> None:
+    """Pre-cutover gate runner kept for in-flight queued jobs.
+
+    Any job enqueued before the 4.A3.5 cutover lacks ``resume_action``
+    in its payload. Those jobs continue to drive the legacy
+    ``runner.run_gate(state, gate_name, start_agent=..., extra_instructions=...)``
+    path so the pipeline does not regress mid-rollout. New jobs from
+    ``/respond`` always carry ``resume_action`` and route through
+    ``_run_gate_via_resume``.
+    """
+    from datetime import UTC, datetime
+
+    from src.api.schemas.pipeline_events import PipelineProgressEvent
+    from src.db.persist_case_results import persist_case_results
+    from src.models.case import Case
+    from src.pipeline.graph.runner import GraphPipelineRunner
+    from src.services.database import async_session
+    from src.services.pipeline_events import publish_progress
+    from src.shared.case_state import CaseState, CaseStatusEnum
+
+    payload = job.payload or {}
+    gate_name = payload.get("gate_name")
+    start_agent = payload.get("start_agent")
+    instructions = payload.get("instructions")
+
+    if not gate_name:
+        raise ValueError(f"gate_run job {job.id} missing gate_name in payload")
+
+    case_id = job.case_id
+    gate_num = int(gate_name[-1])
+
+    runner = GraphPipelineRunner()
+    config: dict[str, Any] = {"configurable": {"thread_id": str(case_id)}}
+    state: CaseState | None = None
+    if gate_num > 1:
+        snapshot = await runner._graph.aget_state(config)
+        snap_values = getattr(snapshot, "values", None) or {}
+        state = snap_values.get("case")
+
+    if state is None:
+        async with async_session() as db:
+            from sqlalchemy import select as _select
+            from sqlalchemy.orm import joinedload as _joinedload
+
+            case_result = await db.execute(
+                _select(Case).where(Case.id == case_id).options(_joinedload(Case.domain_ref))
+            )
+            case = case_result.scalar_one_or_none()
+            if case is None:
+                raise ValueError(f"Case {case_id} not found for gate_run job {job.id}")
+            state = CaseState(
+                case_id=str(case_id),
+                domain=case.domain.value if case.domain else None,
+                status=CaseStatusEnum.processing,
+            )
+
+    async with async_session() as db:
+        from sqlalchemy import select as _select
+        from sqlalchemy.orm import joinedload as _joinedload
+
+        from src.tools.exceptions import RetiredDomainError
+
+        case_result = await db.execute(
+            _select(Case).where(Case.id == case_id).options(_joinedload(Case.domain_ref))
+        )
+        live_case = case_result.scalar_one_or_none()
+        if live_case is None:
+            raise ValueError(f"Case {case_id} disappeared before gate resume")
+        if live_case.domain_id is None or live_case.domain_ref is None:
+            raise RetiredDomainError("Case has no linked domain; cannot resume")
+        if not live_case.domain_ref.is_active or not live_case.domain_ref.vector_store_id:
+            live_case.status_value = "failed_retryable"
+            await db.commit()
+            raise RetiredDomainError(
+                f"Domain {live_case.domain_ref.code} retired mid-case; aborting gate resume"
+            )
+        state = state.model_copy(
+            update={"domain_vector_store_id": live_case.domain_ref.vector_store_id}
+        )
+
+    state = state.model_copy(update={"status": CaseStatusEnum.processing})
+
+    final_state = await runner.run_gate(
+        state,
+        gate_name,
+        start_agent=start_agent,
+        extra_instructions=instructions,
+        trace_id=trace_id,
+    )
+
+    gate_state_payload = {
+        "current_gate": gate_num,
+        "awaiting_review": True,
+        "rerun_agent": None,
+    }
+
+    async with async_session() as db:
+        if hasattr(runner, "_document_pages_buffer") and runner._document_pages_buffer:
+            from sqlalchemy import update as sa_update
+
+            from src.models.case import Document
+
+            for file_id, pages in runner._document_pages_buffer.items():
+                await db.execute(
+                    sa_update(Document)
+                    .where(Document.openai_file_id == file_id)
+                    .values(pages=pages)
+                )
+
+        await persist_case_results(
+            db, case_id, final_state, gate_state_payload=gate_state_payload
+        )
+
+    await publish_progress(
+        PipelineProgressEvent(
             case_id=case_id,
             agent="pipeline",
             phase="awaiting_review",
             ts=datetime.now(UTC),
             detail={"gate": gate_name},
         )
-        await publish_progress(event)
-
-    await _run_with_outbox(job_id, PipelineJobType.gate_run, _runner)
+    )
 
 
 async def run_intake_extraction_job(ctx: dict[str, Any], job_id: str) -> None:  # noqa: ARG001

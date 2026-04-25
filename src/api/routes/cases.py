@@ -1402,10 +1402,34 @@ async def _run_case_pipeline(case_id: UUID, *, trace_id: str | None = None) -> N
                 await db.commit()
         return
 
+    # Sprint 4 4.A3.7 — detect the saver's pending interrupt and emit
+    # InterruptEvent for the FE GateReviewPanel. The legacy
+    # `awaiting_review` PipelineProgressEvent below stays as a
+    # backwards-compat SSE close signal.
+    from src.pipeline.graph.resume import find_pending_interrupt
+    from src.services.pipeline_events import publish_interrupt
+
+    pending = await find_pending_interrupt(
+        GraphPipelineRunner()._graph,
+        {"configurable": {"thread_id": str(case_id)}},
+    )
+    paused_gate: str | None = pending[0] if pending else None
+    interrupt_payload: dict | None = pending[1] if pending else None
+
     gate_state_payload: dict | None = None
     gate_run_id: str | None = None
     status_val = final_state.status.value if final_state.status else ""
-    if status_val.startswith("awaiting_review_gate"):
+    if paused_gate is not None:
+        gate_num = int(paused_gate[-1])
+        gate_state_payload = {
+            "current_gate": gate_num,
+            "awaiting_review": True,
+            "rerun_agent": None,
+        }
+        gate_run_id = f"{case_id}-{paused_gate}"
+    elif status_val.startswith("awaiting_review_gate"):
+        # Legacy fallback for any code path that still writes the
+        # awaiting_review_gateN status into the CaseState directly.
         gate_num = int(status_val[-1])
         gate_state_payload = {
             "current_gate": gate_num,
@@ -1416,6 +1440,12 @@ async def _run_case_pipeline(case_id: UUID, *, trace_id: str | None = None) -> N
 
     async with async_session() as db:
         await persist_case_results(db, case_id, final_state, gate_state_payload=gate_state_payload)
+
+    if paused_gate is not None and interrupt_payload is not None:
+        # publish_interrupt UPSERTs case.status = awaiting_review_gateN
+        # and writes case.gate_state, so it must run after persist_case_results
+        # which writes case.status from final_state (still "processing").
+        await publish_interrupt(case_id, paused_gate, interrupt_payload)
 
     if gate_run_id and final_state.run_id:
         from src.db.pipeline_state import persist_case_state
@@ -1431,11 +1461,13 @@ async def _run_case_pipeline(case_id: UUID, *, trace_id: str | None = None) -> N
 
     # Close the SSE stream from the backend side: the frontend treats
     # `agent=pipeline` + `phase=awaiting_review|terminal` as the
-    # authoritative shutdown signal, but the sequential runner never
-    # emits it on its own. Without this, the browser holds an open
-    # EventSource well past the gate pause and never shows the gate
-    # review UI until the next poll tick catches up.
-    if status_val.startswith("awaiting_review_gate"):
+    # authoritative shutdown signal. The InterruptEvent above carries
+    # the gate-review payload; this event is the legacy compat signal
+    # for clients still keying off agent/phase only.
+    if paused_gate is not None or status_val.startswith("awaiting_review_gate"):
+        stopped_at = (
+            f"awaiting_review_{paused_gate}" if paused_gate else status_val
+        )
         close_event = PipelineProgressEvent(
             case_id=case_id,
             agent="pipeline",
@@ -1443,7 +1475,7 @@ async def _run_case_pipeline(case_id: UUID, *, trace_id: str | None = None) -> N
             step=None,
             total=9,
             ts=datetime.now(UTC),
-            detail={"reason": "gate_pause", "stopped_at": status_val},
+            detail={"reason": "gate_pause", "stopped_at": stopped_at},
         )
         await publish_progress(close_event)
 
