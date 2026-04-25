@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from starlette.routing import Route
 
 from src.api.middleware.metrics import MetricsMiddleware, metrics_endpoint
@@ -158,6 +159,11 @@ def create_app() -> FastAPI:
 
     # Override OpenAPI schema generation
     app.openapi = lambda: _custom_openapi(app)  # type: ignore[method-assign]
+
+    # OTEL instrumentation must run before middleware so spans wrap the full
+    # request lifecycle. The instrumentor honors inbound `traceparent` headers
+    # so trace context propagates from upstream callers.
+    FastAPIInstrumentor.instrument_app(app)
 
     # Middleware is applied in reverse order (last added runs first).
     # Order of execution: RateLimit -> Metrics -> CORS -> handler
