@@ -79,6 +79,10 @@ class GraphPipelineRunner:
         extra_instructions: dict[str, str] | None = None,
         is_resume: bool = False,
     ) -> GraphState:
+        # Initialize every TypedDict slot — the 1.A1.5 research accumulator
+        # and 1.A1.7 phase-output / pending_action slots otherwise read as
+        # missing keys, which the reducers handle defensively but mypy
+        # rightly flags as an incomplete construction.
         return GraphState(
             case=case,
             run_id=run_id,
@@ -86,6 +90,12 @@ class GraphPipelineRunner:
             retry_counts={},
             halt=None,
             mlflow_run_ids={},
+            research_parts={},
+            research_output=None,
+            intake_output=None,
+            synthesis_output=None,
+            audit_output=None,
+            pending_action=None,
             is_resume=is_resume,
             start_agent=start_agent,
         )

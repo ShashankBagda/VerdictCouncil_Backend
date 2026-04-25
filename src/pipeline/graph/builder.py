@@ -44,8 +44,10 @@ GraphState slot; consumption into `case` is Sprint 2.
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from langgraph.graph import END, START, StateGraph
+from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import RetryPolicy
 
 from src.pipeline.graph.agents.factory import make_phase_node
@@ -169,7 +171,7 @@ def _build_topology() -> StateGraph:
     return graph
 
 
-def build_graph(checkpointer=None):
+def build_graph(checkpointer: Any = None) -> CompiledStateGraph:
     """Production runner factory — compile with the given checkpointer.
 
     Used by `GraphPipelineRunner._invoke` (in_process mode) and by tests
@@ -189,7 +191,7 @@ def build_graph(checkpointer=None):
     return _build_topology().compile(checkpointer=checkpointer)
 
 
-def make_graph(config: dict | None = None):
+def make_graph(config: dict | None = None) -> CompiledStateGraph:
     """LangGraph CLI factory — `langgraph.json` graph entrypoint.
 
     The CLI (`langgraph dev` / `langgraph build`) requires factories to
