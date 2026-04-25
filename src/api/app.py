@@ -7,6 +7,7 @@ from starlette.routing import Route
 
 from src.api.middleware.metrics import MetricsMiddleware, metrics_endpoint
 from src.api.middleware.rate_limit import RateLimitMiddleware
+from src.pipeline.graph.checkpointer import lifespan_checkpointer
 from src.pipeline.observability import configure_mlflow
 from src.shared.config import settings
 
@@ -124,7 +125,15 @@ def _custom_openapi(app: FastAPI) -> dict:
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     configure_mlflow()
-    yield
+    # Hold the LangGraph AsyncPostgresSaver context manager open over the
+    # FastAPI app lifetime so checkpointer connections survive across
+    # requests (per source-driven audit F-1/F-1b). Setting `LANGGRAPH_CHECKPOINTER=disabled`
+    # in tests / dev lets us run without a Postgres-backed saver.
+    if settings.langgraph_checkpointer == "disabled":
+        yield
+    else:
+        async with lifespan_checkpointer(settings.database_url):
+            yield
 
 
 def create_app() -> FastAPI:

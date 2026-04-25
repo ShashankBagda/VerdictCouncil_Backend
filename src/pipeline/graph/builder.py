@@ -148,8 +148,20 @@ def _route_after_case_processing(state: GraphState) -> str:
 _FRONTIER_RETRY = RetryPolicy(max_attempts=2, initial_interval=1.0)
 
 
-def build_graph():
-    """Build and compile the VerdictCouncil StateGraph."""
+def build_graph(checkpointer=None):
+    """Build and compile the VerdictCouncil StateGraph.
+
+    Args:
+        checkpointer: Optional `BaseCheckpointSaver`. When omitted, the
+            module-level singleton from `checkpointer.get_checkpointer()`
+            is used (set by FastAPI lifespan / arq startup hooks).
+            Tests pass an `InMemorySaver` directly.
+    """
+    from src.pipeline.graph.checkpointer import get_checkpointer
+
+    if checkpointer is None:
+        checkpointer = get_checkpointer()
+
     graph = StateGraph(GraphState)
 
     # --- Nodes (15 total) ---
@@ -241,4 +253,4 @@ def build_graph():
     # Terminal is a sink
     graph.add_edge("terminal", END)
 
-    return graph.compile()
+    return graph.compile(checkpointer=checkpointer)
