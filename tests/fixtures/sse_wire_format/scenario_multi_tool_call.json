@@ -1,0 +1,72 @@
+{
+  "event_type": "agent",
+  "scenario": "multi_tool_call",
+  "pydantic_class": "AgentEvent",
+  "publisher": "publish_agent_event (services/pipeline_events.py)",
+  "sequence": [
+    {
+      "kind": "agent",
+      "schema_version": 1,
+      "case_id": "11111111-1111-1111-1111-111111111111",
+      "ts": "2026-04-25T12:00:00+00:00",
+      "agent": "legal-knowledge",
+      "event": "thinking",
+      "content": "\u2192 gpt-5 \u00b7 tools=2"
+    },
+    {
+      "kind": "agent",
+      "schema_version": 1,
+      "case_id": "11111111-1111-1111-1111-111111111111",
+      "ts": "2026-04-25T12:00:00+00:00",
+      "agent": "legal-knowledge",
+      "event": "tool_call",
+      "tool_name": "search_precedents",
+      "args": {
+        "query": "negligence threshold",
+        "top_k": 5
+      }
+    },
+    {
+      "kind": "agent",
+      "schema_version": 1,
+      "case_id": "11111111-1111-1111-1111-111111111111",
+      "ts": "2026-04-25T12:00:00+00:00",
+      "agent": "legal-knowledge",
+      "event": "tool_result",
+      "tool_name": "search_precedents",
+      "result": "[3 results]"
+    },
+    {
+      "kind": "agent",
+      "schema_version": 1,
+      "case_id": "11111111-1111-1111-1111-111111111111",
+      "ts": "2026-04-25T12:00:00+00:00",
+      "agent": "legal-knowledge",
+      "event": "tool_call",
+      "tool_name": "search_domain_guidance",
+      "args": {
+        "query": "small claims threshold limits"
+      }
+    },
+    {
+      "kind": "agent",
+      "schema_version": 1,
+      "case_id": "11111111-1111-1111-1111-111111111111",
+      "ts": "2026-04-25T12:00:00+00:00",
+      "agent": "legal-knowledge",
+      "event": "tool_result",
+      "tool_name": "search_domain_guidance",
+      "result": "[1 result]"
+    },
+    {
+      "kind": "agent",
+      "schema_version": 1,
+      "case_id": "11111111-1111-1111-1111-111111111111",
+      "ts": "2026-04-25T12:00:00+00:00",
+      "agent": "legal-knowledge",
+      "event": "llm_response",
+      "content": "Two relevant precedents and the SCT threshold both apply."
+    }
+  ],
+  "sse_frame_concatenated": "event: agent\ndata: {\"kind\": \"agent\", \"schema_version\": 1, \"case_id\": \"11111111-1111-1111-1111-111111111111\", \"ts\": \"2026-04-25T12:00:00+00:00\", \"agent\": \"legal-knowledge\", \"event\": \"thinking\", \"content\": \"\\u2192 gpt-5 \\u00b7 tools=2\"}\n\nevent: agent\ndata: {\"kind\": \"agent\", \"schema_version\": 1, \"case_id\": \"11111111-1111-1111-1111-111111111111\", \"ts\": \"2026-04-25T12:00:00+00:00\", \"agent\": \"legal-knowledge\", \"event\": \"tool_call\", \"tool_name\": \"search_precedents\", \"args\": {\"query\": \"negligence threshold\", \"top_k\": 5}}\n\nevent: agent\ndata: {\"kind\": \"agent\", \"schema_version\": 1, \"case_id\": \"11111111-1111-1111-1111-111111111111\", \"ts\": \"2026-04-25T12:00:00+00:00\", \"agent\": \"legal-knowledge\", \"event\": \"tool_result\", \"tool_name\": \"search_precedents\", \"result\": \"[3 results]\"}\n\nevent: agent\ndata: {\"kind\": \"agent\", \"schema_version\": 1, \"case_id\": \"11111111-1111-1111-1111-111111111111\", \"ts\": \"2026-04-25T12:00:00+00:00\", \"agent\": \"legal-knowledge\", \"event\": \"tool_call\", \"tool_name\": \"search_domain_guidance\", \"args\": {\"query\": \"small claims threshold limits\"}}\n\nevent: agent\ndata: {\"kind\": \"agent\", \"schema_version\": 1, \"case_id\": \"11111111-1111-1111-1111-111111111111\", \"ts\": \"2026-04-25T12:00:00+00:00\", \"agent\": \"legal-knowledge\", \"event\": \"tool_result\", \"tool_name\": \"search_domain_guidance\", \"result\": \"[1 result]\"}\n\nevent: agent\ndata: {\"kind\": \"agent\", \"schema_version\": 1, \"case_id\": \"11111111-1111-1111-1111-111111111111\", \"ts\": \"2026-04-25T12:00:00+00:00\", \"agent\": \"legal-knowledge\", \"event\": \"llm_response\", \"content\": \"Two relevant precedents and the SCT threshold both apply.\"}\n\n"
+}
