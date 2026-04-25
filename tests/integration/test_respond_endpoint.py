@@ -225,18 +225,87 @@ async def test_respond_halt_terminates() -> None:
 
 
 @pytest.mark.asyncio
-async def test_respond_send_back_returns_501() -> None:
-    """send_back schema is final but worker support lands in 4.A3.14."""
+async def test_respond_send_back_drives_rewind_and_repauses() -> None:
+    """4.A3.14 — send_back routes through send_back_to_phase and bumps status.
+
+    The endpoint:
+    - Calls send_back_to_phase with the helper to fork the thread.
+    - Updates case.status to the gate the rewind re-paused at.
+    - Audit-logs the action with from_gate/to_phase/new_pause_gate.
+    """
     db_case = _make_db_case(CaseStatus.awaiting_review_gate4)
     app.dependency_overrides[get_current_user] = _make_auth_override()
     app.dependency_overrides[get_db] = _override_db(db_case)
 
-    async with _client() as c:
-        r = await c.post(
-            f"/api/v1/cases/{CASE_ID}/respond",
-            json={"action": "send_back", "to_phase": "synthesis", "notes": "rewrite"},
-        )
-    assert r.status_code == 501
+    send_back_mock = AsyncMock(return_value="gate3")
+    fake_runner = MagicMock()
+    fake_runner._graph = MagicMock()
+
+    with (
+        patch(
+            "src.pipeline.graph.resume.send_back_to_phase",
+            new=send_back_mock,
+        ),
+        patch(
+            "src.pipeline.graph.runner.GraphPipelineRunner",
+            return_value=fake_runner,
+        ),
+    ):
+        async with _client() as c:
+            r = await c.post(
+                f"/api/v1/cases/{CASE_ID}/respond",
+                json={
+                    "action": "send_back",
+                    "to_phase": "synthesis",
+                    "notes": "rewrite",
+                },
+            )
+
+    assert r.status_code == 202
+    assert "gate3" in r.json()["message"]
+    assert db_case.status == CaseStatus.awaiting_review_gate3
+    send_back_mock.assert_awaited_once()
+    kwargs = send_back_mock.await_args.kwargs
+    assert kwargs["to_phase"] == "synthesis"
+    assert kwargs["notes"] == "rewrite"
+
+
+@pytest.mark.asyncio
+async def test_respond_send_back_409_when_no_history() -> None:
+    """If the helper raises RuntimeError (no matching history), the
+    endpoint surfaces a 409 rather than a 500 — same-status return on
+    a programming-or-state error is more useful than a stack trace."""
+    db_case = _make_db_case(CaseStatus.awaiting_review_gate4)
+    app.dependency_overrides[get_current_user] = _make_auth_override()
+    app.dependency_overrides[get_db] = _override_db(db_case)
+
+    send_back_mock = AsyncMock(
+        side_effect=RuntimeError("send_back: no interrupted checkpoint at 'gate3_pause'")
+    )
+    fake_runner = MagicMock()
+    fake_runner._graph = MagicMock()
+
+    with (
+        patch(
+            "src.pipeline.graph.resume.send_back_to_phase",
+            new=send_back_mock,
+        ),
+        patch(
+            "src.pipeline.graph.runner.GraphPipelineRunner",
+            return_value=fake_runner,
+        ),
+    ):
+        async with _client() as c:
+            r = await c.post(
+                f"/api/v1/cases/{CASE_ID}/respond",
+                json={
+                    "action": "send_back",
+                    "to_phase": "synthesis",
+                    "notes": "rewrite",
+                },
+            )
+
+    assert r.status_code == 409
 
 
 # ---------------------------------------------------------------------------

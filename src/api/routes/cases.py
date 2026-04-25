@@ -1879,11 +1879,60 @@ async def respond_to_gate(
             detail="Gate 4 is the final gate; record a decision instead",
         )
 
-    # send_back — wired in 4.A3.14 worker support. Schema is final.
+    # send_back (Sprint 4 4.A3.14) — rewind the LangGraph thread to the
+    # gate pause that follows the target phase, fork via update_state,
+    # then resume with action=rerun so the apply node re-runs the
+    # target phase. The current head moves to the rewound point; later
+    # checkpoints stay reachable via get_state_history for audit.
     if payload.action == "send_back":
-        raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail="send_back routing requires worker checkpoint rewind (4.A3.14)",
+        from src.pipeline.graph.resume import send_back_to_phase
+        from src.pipeline.graph.runner import GraphPipelineRunner
+
+        assert payload.to_phase is not None  # ResumePayload validator guarantees
+        runner = GraphPipelineRunner()
+        if runner._graph is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Graph runtime is in cloud mode; send_back not yet wired",
+            )
+        graph_config = {"configurable": {"thread_id": str(case_id)}}
+        try:
+            new_pause_gate = await send_back_to_phase(
+                runner._graph,
+                graph_config,
+                to_phase=payload.to_phase,
+                notes=payload.notes,
+            )
+        except RuntimeError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=str(exc),
+            ) from exc
+
+        db.add(
+            AuditLog(
+                case_id=case_id,
+                agent_name="judge",
+                action="gate_send_back",
+                input_payload={
+                    "from_gate": current_gate,
+                    "to_phase": payload.to_phase,
+                    "notes": payload.notes,
+                    "new_pause_gate": new_pause_gate,
+                },
+            )
+        )
+        if new_pause_gate is not None and new_pause_gate.startswith("gate"):
+            new_status = f"awaiting_review_{new_pause_gate}"
+            try:
+                case.status = CaseStatus(new_status)
+            except ValueError:
+                case.status = CaseStatus.processing
+        else:
+            case.status = CaseStatus.processing
+        await db.commit()
+        return MessageResponse(
+            message=f"Sent back to {payload.to_phase}; paused at {new_pause_gate or 'end'}"
         )
 
     # halt — short-circuit; cancel rather than enqueue.
