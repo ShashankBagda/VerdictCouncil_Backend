@@ -223,7 +223,11 @@ class TestSearchDomainGuidanceTool:
             vector_store_id="vs-abc",
             max_results=5,
         )
-        assert result == [{"citation": "Act s.1"}]
+        # content_and_artifact: ainvoke({args}) surfaces only the content string.
+        # Full artifact path is exercised in test_tool_artifact.
+        import json as _json
+
+        assert _json.loads(result) == [{"citation": "Act s.1"}]
 
     @pytest.mark.asyncio
     async def test_raises_when_no_vector_store(self):
