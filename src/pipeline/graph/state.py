@@ -101,7 +101,7 @@ class GraphState(TypedDict):
 
     case: Annotated[CaseState, _merge_case]
 
-    # Passed through from the dispatch call — used by nodes for MLflow and SSE
+    # Passed through from the dispatch call — used by nodes for tracing and SSE
     run_id: str
 
     # Per-agent extra instructions injected at retry time

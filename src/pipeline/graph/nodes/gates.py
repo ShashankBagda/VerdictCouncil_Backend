@@ -40,7 +40,7 @@ def make_gate_pause(gate: str) -> Callable[[dict[str, Any]], dict[str, Any]]:
 
     The interrupt payload is intentionally minimal in Sprint 1: gate name,
     case id, available actions. Sprint 4 (4.A3) extends this with the
-    full review surface (phase outputs, narration, MLflow links).
+    full review surface (phase outputs, narration, LangSmith trace links).
     """
     if gate not in GATE_NAMES:
         raise ValueError(f"Unknown gate: {gate!r}; expected one of {GATE_NAMES}")
