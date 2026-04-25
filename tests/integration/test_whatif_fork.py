@@ -25,7 +25,6 @@ Acceptance covered here:
 
 from __future__ import annotations
 
-import uuid
 from datetime import datetime
 from typing import Any
 
@@ -52,7 +51,6 @@ from src.shared.case_state import (
     EvidenceAnalysis,
     ExtractedFacts,
 )
-
 
 # ---------------------------------------------------------------------------
 # Stubs (no OpenAI; same shape as test_resume_driver.py)
@@ -121,9 +119,7 @@ def _initial_state(case_id: str) -> dict[str, Any]:
                     {"id": "e2", "weight": "medium"},
                 ]
             ),
-            extracted_facts=ExtractedFacts(
-                facts=[{"id": "f1", "status": "agreed"}]
-            ),
+            extracted_facts=ExtractedFacts(facts=[{"id": "f1", "status": "agreed"}]),
         ),
         "run_id": f"orig-run-{case_id[-12:]}",
         "extra_instructions": {},
@@ -162,9 +158,7 @@ def test_overwrite_sentinel_replaces_case_in_reducer() -> None:
     """
     base = CaseState(
         case_id="11111111-1111-1111-1111-111111111111",
-        evidence_analysis=EvidenceAnalysis(
-            evidence_items=[{"id": "e1", "weight": "high"}]
-        ),
+        evidence_analysis=EvidenceAnalysis(evidence_items=[{"id": "e1", "weight": "high"}]),
     )
     # Update has empty evidence_analysis — under default merge rules
     # (base non-empty, update empty) the base wins. Overwrite flips it.
@@ -184,9 +178,7 @@ def test_overwrite_sentinel_unwrapped_falls_back_to_default_merge() -> None:
     """Plain CaseState updates retain the parallel-safe merge semantics."""
     base = CaseState(
         case_id="11111111-1111-1111-1111-111111111111",
-        evidence_analysis=EvidenceAnalysis(
-            evidence_items=[{"id": "e1"}]
-        ),
+        evidence_analysis=EvidenceAnalysis(evidence_items=[{"id": "e1"}]),
     )
     update = CaseState(
         case_id="11111111-1111-1111-1111-111111111111",
@@ -295,9 +287,7 @@ async def test_create_whatif_fork_seeds_modified_state_in_fork_thread(monkeypatc
     fork_case = snap.values["case"]
     items = fork_case.evidence_analysis.evidence_items if fork_case.evidence_analysis else []
     excluded = [it for it in items if it.get("id") == "e1" and it.get("excluded")]
-    assert excluded, (
-        "fork seed must carry the judge's evidence-exclusion modification"
-    )
+    assert excluded, "fork seed must carry the judge's evidence-exclusion modification"
 
 
 @pytest.mark.asyncio
@@ -383,9 +373,7 @@ async def test_create_whatif_fork_pauses_at_gate2_for_modifier_to_advance(
     next_nodes = set(snap.next or ())
     assert "gate2_pause" in next_nodes or any(
         t.name == "gate2_pause" for t in (snap.tasks or [])
-    ), (
-        f"fork must be paused at gate2_pause after seeding; got next={snap.next!r}"
-    )
+    ), f"fork must be paused at gate2_pause after seeding; got next={snap.next!r}"
 
 
 # ---------------------------------------------------------------------------

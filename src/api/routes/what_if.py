@@ -148,9 +148,7 @@ async def _run_whatif_scenario(
             )
             await drive_whatif_to_terminal(graph=graph, fork_thread_id=fork_thread_id)
 
-            fork_snap = await graph.aget_state(
-                {"configurable": {"thread_id": fork_thread_id}}
-            )
+            fork_snap = await graph.aget_state({"configurable": {"thread_id": fork_thread_id}})
             modified_state = fork_snap.values["case"]
 
             diff = generate_diff(case_state, modified_state)

@@ -20,7 +20,7 @@ _T = TypeVar("_T")
 
 
 @dataclass(frozen=True)
-class Overwrite(Generic[_T]):
+class Overwrite(Generic[_T]):  # noqa: UP046 — PEP 695 + frozen dataclass interplay is unsettled on 3.12; keep classic Generic syntax
     """Sentinel that bypasses the parallel-safe ``_merge_case`` semantics.
 
     The default ``_merge_case`` rule "if update is empty, keep base" is

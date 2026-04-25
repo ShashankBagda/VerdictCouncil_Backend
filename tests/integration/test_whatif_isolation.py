@@ -36,7 +36,6 @@ from src.models.what_if import (
     WhatIfScenario,
 )
 
-
 # ---------------------------------------------------------------------------
 # FastAPI fixtures (mirror tests/unit/test_cases.py shape)
 # ---------------------------------------------------------------------------
@@ -136,8 +135,8 @@ async def test_judge_b_cannot_read_judge_a_whatif_scenario(
     case_id = uuid.uuid4()
     scenario_id = uuid.uuid4()
 
-    # Judge A owns both the case and the scenario.
-    case = _make_case(case_id, owner_id=judge_alpha.id)
+    # Judge A owns the scenario; the case lookup is exercised by other
+    # routes (POST /what-if), but GET only consults the scenario row.
     scenario = _make_scenario(scenario_id, case_id, created_by=judge_alpha.id)
 
     # Judge B authenticates and tries to read it. The route does:
@@ -146,12 +145,8 @@ async def test_judge_b_cannot_read_judge_a_whatif_scenario(
     # check, the lookup must fail at the auth layer and return 404.
     app, _db = app_factory(current_user=judge_beta, db_lookups=[scenario])
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
-        resp = await client.get(
-            f"/api/v1/cases/{case_id}/what-if/{scenario_id}"
-        )
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/v1/cases/{case_id}/what-if/{scenario_id}")
 
     assert resp.status_code == 404, (
         f"Judge B reading Judge A's scenario must 404; got {resp.status_code} "
@@ -160,9 +155,7 @@ async def test_judge_b_cannot_read_judge_a_whatif_scenario(
 
 
 @pytest.mark.asyncio
-async def test_judge_a_can_read_own_whatif_scenario(
-    app_factory, judge_alpha
-) -> None:
+async def test_judge_a_can_read_own_whatif_scenario(app_factory, judge_alpha) -> None:
     """Judge A fetching their own scenario succeeds — the auth check
     is precise, not a blanket lockdown."""
     case_id = uuid.uuid4()
@@ -171,9 +164,7 @@ async def test_judge_a_can_read_own_whatif_scenario(
 
     app, _db = app_factory(current_user=judge_alpha, db_lookups=[scenario])
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/api/v1/cases/{case_id}/what-if/{scenario_id}")
 
     assert resp.status_code == 200, (
@@ -199,13 +190,14 @@ async def test_fork_metadata_links_back_to_parent_run(monkeypatch) -> None:
     """
     from langgraph.checkpoint.memory import InMemorySaver
 
+    from src.services.whatif.fork import WhatIfModification, create_whatif_fork
+
     # Stub the phase/research factories so build_graph compiles without
     # OpenAI calls.
     from tests.integration.test_whatif_fork import (
         _drive_original_to_terminal,
         _patch_factories,
     )
-    from src.services.whatif.fork import WhatIfModification, create_whatif_fork
 
     _patch_factories(monkeypatch)
     from src.pipeline.graph.builder import build_graph

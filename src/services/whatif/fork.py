@@ -93,9 +93,7 @@ def _apply_evidence_exclusion(case: CaseState, payload: dict[str, Any]) -> CaseS
             items[i] = {**item, "excluded": True, "exclusion_reason": reason}
     return case.model_copy(
         update={
-            "evidence_analysis": case.evidence_analysis.model_copy(
-                update={"evidence_items": items}
-            )
+            "evidence_analysis": case.evidence_analysis.model_copy(update={"evidence_items": items})
         }
     )
 
@@ -110,9 +108,7 @@ def _apply_fact_toggle(case: CaseState, payload: dict[str, Any]) -> CaseState:
         if isinstance(fact, dict) and fact.get("id") == fact_id:
             facts[i] = {**fact, "status": new_status}
     return case.model_copy(
-        update={
-            "extracted_facts": case.extracted_facts.model_copy(update={"facts": facts})
-        }
+        update={"extracted_facts": case.extracted_facts.model_copy(update={"facts": facts})}
     )
 
 
@@ -154,9 +150,7 @@ _DISPATCH = {
 }
 
 
-def apply_modifications(
-    case: CaseState, modifications: list[WhatIfModification]
-) -> CaseState:
+def apply_modifications(case: CaseState, modifications: list[WhatIfModification]) -> CaseState:
     """Apply a list of judge modifications to a CaseState in order."""
     for mod in modifications:
         case = _DISPATCH[mod.modification_type](case, mod.payload)
@@ -292,9 +286,7 @@ async def create_whatif_fork(
         "retrieved_source_ids": orig_values.get("retrieved_source_ids") or [],
     }
 
-    await graph.aupdate_state(
-        fork_config, seed_payload, as_node=_seed_node(modifications)
-    )
+    await graph.aupdate_state(fork_config, seed_payload, as_node=_seed_node(modifications))
 
     logger.info(
         "what-if fork created: thread_id=%s parent_thread_id=%s parent_run_id=%s "
@@ -323,17 +315,13 @@ async def drive_whatif_to_terminal(
     gate3 → gate4) before reaching END; the bound exists so a
     pathological loop fails loudly instead of spinning forever.
     """
-    fork_config = cast(
-        RunnableConfig, {"configurable": {"thread_id": fork_thread_id}}
-    )
-    for step in range(max_steps):
+    fork_config = cast(RunnableConfig, {"configurable": {"thread_id": fork_thread_id}})
+    for _step in range(max_steps):
         snap = await graph.aget_state(fork_config)
         if not snap.next:
             return
         if any(t.interrupts for t in (snap.tasks or [])):
-            await graph.ainvoke(
-                Command(resume={"action": "advance"}), fork_config
-            )
+            await graph.ainvoke(Command(resume={"action": "advance"}), fork_config)
             continue
         # No interrupt pending but still has next nodes — drive a plain
         # invoke. Happens immediately after the seed when next is
