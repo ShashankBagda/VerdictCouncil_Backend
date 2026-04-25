@@ -34,6 +34,7 @@ from src.pipeline.graph.middleware import (
     sse_tool_emitter,
     token_usage_emitter,
 )
+from src.pipeline.graph.prompt_registry import get_prompt
 from src.pipeline.graph.prompts import AGENT_TOOLS
 from src.pipeline.graph.schemas import (
     AuditOutput,
@@ -114,17 +115,14 @@ def _resolve_model(phase_or_scope: str) -> str:
     return "gpt-5"
 
 
-def _resolve_prompt(name: str) -> str:
-    """Sprint 1 placeholder system prompt.
+def _resolve_prompt(phase: str, corrections: str | None = None) -> str:
+    """Resolve the system prompt for the active phase.
 
-    1.C3a.3 will swap this for `client.pull_prompt(name)` returning
-    `(template, commit_hash)`. Until then we return a stub that lets
-    `create_agent(...)` build without contacting LangSmith.
+    Sprint 1 1.C3a.3: delegates to `prompt_registry.get_prompt(phase)`,
+    which pulls from LangSmith with a local-file fallback. The static
+    stub the factory used in 1.A1.4 is gone.
     """
-    return (
-        f"You are the {name} agent in the VerdictCouncil pipeline. "
-        "Sprint 1 placeholder prompt — to be replaced by LangSmith pull_prompt() in 1.C3a.3."
-    )
+    return get_prompt(phase, corrections=corrections)
 
 
 def _build_all_tools(state: dict[str, Any]) -> dict[str, Any]:
@@ -182,10 +180,14 @@ def _make_node(
         # schema already declares `strict=True` so we still wrap it the same
         # way for retry semantics.
         response_format = schema if use_strict_response_format else ToolStrategy(schema)
+        # Pull per-phase corrective instructions (judge rerun) if any. The
+        # gate-apply node writes these into `state["extra_instructions"]`
+        # keyed by phase name when the judge selects "rerun" with notes.
+        extra = (state.get("extra_instructions") or {}).get(phase_or_scope)
         agent = create_agent(
             model=_resolve_model(phase_or_scope),
             tools=tools,
-            system_prompt=_resolve_prompt(f"verdict-council/{phase_or_scope}"),
+            system_prompt=_resolve_prompt(phase_or_scope, corrections=extra),
             response_format=response_format,
             middleware=PHASE_MIDDLEWARE,
             state_schema=CaseAwareState,
