@@ -1,21 +1,44 @@
-"""Build and compile the VerdictCouncil LangGraph StateGraph.
+"""Build and compile the VerdictCouncil LangGraph StateGraph (1.A1.7 topology).
 
-`build_graph()` is the single entry-point. It assembles the fixed-topology
-DAG and returns a compiled graph ready for invocation.
+The 6-phase topology with 4 HITL gates:
 
-Topology (15 nodes):
-    START → pre_run_guardrail → case_processing → complexity_routing
-         → gate2_dispatch → [evidence_analysis, fact_reconstruction,
-                              witness_analysis, legal_knowledge] (parallel)
-         → gate2_join → gate2_retry_router → argument_construction
-         → hearing_analysis → hearing_analysis_retry_router
-         → hearing_governance → END
-Retry-router nodes (gate2_retry_router, hearing_analysis_retry_router) are
-Command-returning nodes that atomically increment retry_counts and route.
+    START → intake → gate1{pause,apply}
+        gate1.advance → research_dispatch
+        gate1.rerun   → intake
+        gate1.halt    → terminal
 
-LangGraph RetryPolicy (max_attempts=2, initial_interval=1s) is applied to
-the four L2 agents plus argument_construction, hearing_analysis, and
-hearing_governance so transient LLM / network errors auto-recover.
+    research_dispatch ─(Send fan-out)→ research_{evidence,facts,witnesses,law}
+        → research_join → gate2{pause,apply}
+        gate2.advance → synthesis
+        gate2.rerun   → research_dispatch
+        gate2.halt    → terminal
+
+    synthesis → gate3{pause,apply}
+        gate3.advance → auditor
+        gate3.rerun   → synthesis
+        gate3.halt    → terminal
+
+    auditor → gate4{pause,apply}
+        gate4.advance → END
+        gate4.rerun   → auditor
+        gate4.halt    → terminal
+
+    terminal → END
+
+The research fan-out follows the V-4 contract: `add_conditional_edges`
+from `research_dispatch` via `route_to_research_subagents` (which returns
+`list[Send]`). Reducer-backed `research_parts` accumulates the four
+parallel branches; `research_join` reads the dict-keyed accumulator and
+writes a merged `ResearchOutput` (1.A1.5).
+
+Gate pause nodes call `interrupt(...)`; gate apply nodes return
+`Command(goto=...)`. Sprint 1 covers the contract (advance / rerun /
+halt). Full review-surface payloads, idempotent status upserts, and the
+frontend wiring are 4.A3 (Sprint 4) work.
+
+Sprint 1 phase-output → CaseState integration is deliberately out of
+scope here. `make_phase_node(phase)` writes `{phase}_output` to its own
+GraphState slot; consumption into `case` is Sprint 2.
 """
 
 from __future__ import annotations
@@ -23,127 +46,29 @@ from __future__ import annotations
 import logging
 
 from langgraph.graph import END, START, StateGraph
-from langgraph.types import Command, RetryPolicy
+from langgraph.types import RetryPolicy
 
-from src.pipeline.graph.nodes.argument_construction import argument_construction
-from src.pipeline.graph.nodes.case_processing import case_processing
-from src.pipeline.graph.nodes.complexity_routing import complexity_routing
-from src.pipeline.graph.nodes.evidence_analysis import evidence_analysis
-from src.pipeline.graph.nodes.fact_reconstruction import fact_reconstruction
-from src.pipeline.graph.nodes.gate2_dispatch import gate2_dispatch
-from src.pipeline.graph.nodes.gate2_join import gate2_join
-from src.pipeline.graph.nodes.hearing_analysis import hearing_analysis
-from src.pipeline.graph.nodes.hearing_governance import hearing_governance
-from src.pipeline.graph.nodes.hooks import pre_run_guardrail
-from src.pipeline.graph.nodes.legal_knowledge import legal_knowledge
+from src.pipeline.graph.agents.factory import make_phase_node
+from src.pipeline.graph.nodes.gates import make_gate_apply, make_gate_pause
 from src.pipeline.graph.nodes.terminal import terminal
-from src.pipeline.graph.nodes.witness_analysis import witness_analysis
+from src.pipeline.graph.research import (
+    RESEARCH_SCOPES,
+    RESEARCH_SUBAGENT_NODES,
+    make_research_node,
+    research_dispatch_node,
+    research_join_node,
+    route_to_research_subagents,
+)
 from src.pipeline.graph.state import GraphState
-from src.shared.case_state import CaseStatusEnum
 
 logger = logging.getLogger(__name__)
 
-_MAX_RETRIES = 1
-
 
 # ---------------------------------------------------------------------------
-# Routing / conditional edge functions
+# Retry policy — applied to every LLM-calling node so transient OpenAI /
+# network errors auto-recover without leaking up to the runner. Preserved
+# from the legacy builder (:148) as required by 1.A1.7 acceptance.
 # ---------------------------------------------------------------------------
-
-
-def _route_after_complexity_routing(state: GraphState) -> str:
-    """Route after complexity-routing: halt | gate-pause | advance."""
-    if state.get("halt"):
-        return "terminal"
-    status = state["case"].status
-    if status in (CaseStatusEnum.awaiting_review_gate1, CaseStatusEnum.escalated):
-        return END
-    return "gate2_dispatch"
-
-
-def _gate2_retry_router(state: GraphState) -> Command:
-    """Node: inspect Gate-2 outputs, increment retry counter, route atomically.
-
-    Replaces the old conditional-edge function so that the retry_counts update
-    and the routing decision happen in the same state transition. The partial
-    dict update is merged by the _merge_retry_counts reducer in GraphState.
-    """
-    if state.get("halt"):
-        return Command(goto="terminal")
-
-    case = state["case"]
-    retry_counts = state.get("retry_counts", {})
-
-    _checks = [
-        ("evidence-analysis", "evidence_analysis", case.evidence_analysis is None),
-        ("fact-reconstruction", "fact_reconstruction", case.extracted_facts is None),
-        ("witness-analysis", "witness_analysis", case.witnesses is None),
-        ("legal-knowledge", "legal_knowledge", not case.legal_rules),
-    ]
-
-    for agent_key, node_name, failed in _checks:
-        if failed and retry_counts.get(agent_key, 0) < _MAX_RETRIES:
-            return Command(
-                update={"retry_counts": {agent_key: retry_counts.get(agent_key, 0) + 1}},
-                goto=node_name,
-            )
-
-    return Command(goto="argument_construction")
-
-
-def _hearing_analysis_retry_router(state: GraphState) -> Command:
-    """Node: check hearing-analysis output, increment retry counter, route atomically."""
-    if state.get("halt"):
-        return Command(goto="terminal")
-
-    case = state["case"]
-    ha = case.hearing_analysis
-    retry_counts = state.get("retry_counts", {})
-
-    if (
-        ha is not None
-        and ha.preliminary_conclusion is not None
-        and retry_counts.get("hearing-analysis", 0) < _MAX_RETRIES
-    ):
-        return Command(
-            update={
-                "retry_counts": {
-                    "hearing-analysis": retry_counts.get("hearing-analysis", 0) + 1,
-                },
-            },
-            goto="hearing_analysis",
-        )
-
-    return Command(goto="hearing_governance")
-
-
-def _route_after_hearing_governance(state: GraphState) -> str:
-    """Route after hearing-governance: halt on critical fairness issues | END."""
-    if state.get("halt"):
-        return "terminal"
-
-    case = state["case"]
-    fc = case.fairness_check
-    if fc is not None and fc.critical_issues_found:
-        return "terminal"
-
-    return END
-
-
-def _route_after_case_processing(state: GraphState) -> str:
-    """Route after case-processing: halt on failure | advance."""
-    if state.get("halt"):
-        return "terminal"
-    case = state["case"]
-    if case.status in (CaseStatusEnum.failed, CaseStatusEnum.escalated):
-        return "terminal"
-    return "complexity_routing"
-
-
-# ---------------------------------------------------------------------------
-# Graph assembly
-# ---------------------------------------------------------------------------
-
 
 _FRONTIER_RETRY = RetryPolicy(max_attempts=2, initial_interval=1.0)
 
@@ -154,8 +79,8 @@ def build_graph(checkpointer=None):
     Args:
         checkpointer: Optional `BaseCheckpointSaver`. When omitted, the
             module-level singleton from `checkpointer.get_checkpointer()`
-            is used (set by FastAPI lifespan / arq startup hooks).
-            Tests pass an `InMemorySaver` directly.
+            is used (set by FastAPI lifespan / arq startup hooks). Tests
+            pass an `InMemorySaver` directly.
     """
     from src.pipeline.graph.checkpointer import get_checkpointer
 
@@ -164,93 +89,77 @@ def build_graph(checkpointer=None):
 
     graph = StateGraph(GraphState)
 
-    # --- Nodes (15 total) ---
-    graph.add_node("pre_run_guardrail", pre_run_guardrail)
-    graph.add_node("case_processing", case_processing)
-    graph.add_node("complexity_routing", complexity_routing)
-    graph.add_node("gate2_dispatch", gate2_dispatch)
-    graph.add_node("evidence_analysis", evidence_analysis, retry_policy=_FRONTIER_RETRY)
-    graph.add_node("fact_reconstruction", fact_reconstruction, retry_policy=_FRONTIER_RETRY)
-    graph.add_node("witness_analysis", witness_analysis, retry_policy=_FRONTIER_RETRY)
-    graph.add_node("legal_knowledge", legal_knowledge, retry_policy=_FRONTIER_RETRY)
-    graph.add_node("gate2_join", gate2_join)
-    graph.add_node("gate2_retry_router", _gate2_retry_router)
-    graph.add_node("argument_construction", argument_construction, retry_policy=_FRONTIER_RETRY)
-    graph.add_node("hearing_analysis", hearing_analysis, retry_policy=_FRONTIER_RETRY)
-    graph.add_node("hearing_analysis_retry_router", _hearing_analysis_retry_router)
-    graph.add_node("hearing_governance", hearing_governance, retry_policy=_FRONTIER_RETRY)
+    # ------------------------------------------------------------------
+    # Phase nodes (LLM-calling) + research fan-out scaffolding
+    # ------------------------------------------------------------------
+    graph.add_node("intake", make_phase_node("intake"), retry_policy=_FRONTIER_RETRY)
+    graph.add_node("research_dispatch", research_dispatch_node)
+    for scope in RESEARCH_SCOPES:
+        graph.add_node(
+            RESEARCH_SUBAGENT_NODES[scope],
+            make_research_node(scope),
+            retry_policy=_FRONTIER_RETRY,
+        )
+    graph.add_node("research_join", research_join_node)
+    graph.add_node("synthesis", make_phase_node("synthesis"), retry_policy=_FRONTIER_RETRY)
+    graph.add_node("auditor", make_phase_node("audit"), retry_policy=_FRONTIER_RETRY)
+
+    # ------------------------------------------------------------------
+    # Gate pause + apply pairs (HITL)
+    # ------------------------------------------------------------------
+    graph.add_node("gate1_pause", make_gate_pause("gate1"))
+    graph.add_node(
+        "gate1_apply",
+        make_gate_apply("gate1", advance_target="research_dispatch", rerun_target="intake"),
+    )
+    graph.add_node("gate2_pause", make_gate_pause("gate2"))
+    graph.add_node(
+        "gate2_apply",
+        make_gate_apply("gate2", advance_target="synthesis", rerun_target="research_dispatch"),
+    )
+    graph.add_node("gate3_pause", make_gate_pause("gate3"))
+    graph.add_node(
+        "gate3_apply",
+        make_gate_apply("gate3", advance_target="auditor", rerun_target="synthesis"),
+    )
+    graph.add_node("gate4_pause", make_gate_pause("gate4"))
+    graph.add_node(
+        "gate4_apply",
+        make_gate_apply("gate4", advance_target=END, rerun_target="auditor"),
+    )
+
     graph.add_node("terminal", terminal)
 
-    # --- Entry ---
-    # When start_agent is set (gate-by-gate / what-if), skip to the named node.
-    _jump_targets = {
-        "case_processing": "case_processing",
-        "gate2_dispatch": "gate2_dispatch",
-        "argument_construction": "argument_construction",
-        "hearing_governance": "hearing_governance",
-        # Allow individual L2 agent retries as entry
-        "evidence_analysis": "evidence_analysis",
-        "fact_reconstruction": "fact_reconstruction",
-        "witness_analysis": "witness_analysis",
-        "legal_knowledge": "legal_knowledge",
-    }
+    # ------------------------------------------------------------------
+    # Edges
+    # ------------------------------------------------------------------
+    graph.add_edge(START, "intake")
 
-    def _route_after_pre_run_guardrail(state: GraphState) -> str:
-        start = state.get("start_agent")
-        if start and start in _jump_targets:
-            return start
-        return "case_processing"
+    # Phase 1 (intake) → gate1
+    graph.add_edge("intake", "gate1_pause")
+    graph.add_edge("gate1_pause", "gate1_apply")
+    # gate1_apply is a Command-returning node — its `goto` handles routing.
 
-    graph.add_edge(START, "pre_run_guardrail")
+    # Phase 2 (research) — Send fan-out via conditional edges (V-4)
     graph.add_conditional_edges(
-        "pre_run_guardrail",
-        _route_after_pre_run_guardrail,
-        {**_jump_targets, "case_processing": "case_processing"},
+        "research_dispatch",
+        route_to_research_subagents,
+        list(RESEARCH_SUBAGENT_NODES.values()),
     )
+    for scope in RESEARCH_SCOPES:
+        graph.add_edge(RESEARCH_SUBAGENT_NODES[scope], "research_join")
+    graph.add_edge("research_join", "gate2_pause")
+    graph.add_edge("gate2_pause", "gate2_apply")
 
-    # --- Gate 1 ---
-    graph.add_conditional_edges(
-        "case_processing",
-        _route_after_case_processing,
-        {"complexity_routing": "complexity_routing", "terminal": "terminal"},
-    )
-    graph.add_conditional_edges(
-        "complexity_routing",
-        _route_after_complexity_routing,
-        {
-            "gate2_dispatch": "gate2_dispatch",
-            "terminal": "terminal",
-            END: END,
-        },
-    )
+    # Phase 3 (synthesis) → gate3
+    graph.add_edge("synthesis", "gate3_pause")
+    graph.add_edge("gate3_pause", "gate3_apply")
 
-    # --- Gate 2 fan-out (static parallel edges) ---
-    graph.add_edge("gate2_dispatch", "evidence_analysis")
-    graph.add_edge("gate2_dispatch", "fact_reconstruction")
-    graph.add_edge("gate2_dispatch", "witness_analysis")
-    graph.add_edge("gate2_dispatch", "legal_knowledge")
+    # Phase 4 (auditor) → gate4
+    graph.add_edge("auditor", "gate4_pause")
+    graph.add_edge("gate4_pause", "gate4_apply")
 
-    # --- Gate 2 implicit barrier join ---
-    graph.add_edge("evidence_analysis", "gate2_join")
-    graph.add_edge("fact_reconstruction", "gate2_join")
-    graph.add_edge("witness_analysis", "gate2_join")
-    graph.add_edge("legal_knowledge", "gate2_join")
-
-    # --- Gate 2 post-barrier routing (retry-router node handles counter + routing) ---
-    graph.add_edge("gate2_join", "gate2_retry_router")
-
-    # --- Gate 3 ---
-    graph.add_edge("argument_construction", "hearing_analysis")
-    graph.add_edge("hearing_analysis", "hearing_analysis_retry_router")
-
-    # --- Gate 4 ---
-    graph.add_conditional_edges(
-        "hearing_governance",
-        _route_after_hearing_governance,
-        {"terminal": "terminal", END: END},
-    )
-
-    # Terminal is a sink
+    # Terminal sink
     graph.add_edge("terminal", END)
 
     return graph.compile(checkpointer=checkpointer)

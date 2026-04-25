@@ -6,7 +6,13 @@ from typing import Annotated, Any
 
 from typing_extensions import TypedDict
 
-from src.pipeline.graph.schemas import ResearchOutput, ResearchPart
+from src.pipeline.graph.schemas import (
+    AuditOutput,
+    IntakeOutput,
+    ResearchOutput,
+    ResearchPart,
+    SynthesisOutput,
+)
 from src.shared.case_state import AuditEntry, CaseState
 
 
@@ -129,6 +135,19 @@ class GraphState(TypedDict):
     # Output of `research_join_node` (1.A1.5). Default LWW semantics — the
     # join writes once per pipeline run and a re-entered join overwrites.
     research_output: ResearchOutput | None
+
+    # Phase-output state slots (1.A1.7). Written by `make_phase_node(...)`
+    # via the factory's `{phase}_output` return shape; consumed by gate
+    # pauses (snapshot-for-judge) and by Sprint 2 case-state integration.
+    # LWW semantics — each phase writes once per pipeline run.
+    intake_output: IntakeOutput | None
+    synthesis_output: SynthesisOutput | None
+    audit_output: AuditOutput | None
+
+    # Carrier for the judge's gate decision (1.A1.7). The pause node writes
+    # the `interrupt()` return value here; the apply node reads it, derives
+    # the next-node target, and clears the slot. LWW.
+    pending_action: dict[str, Any] | None
 
     # True when resuming from a checkpoint (skip already-completed gates)
     is_resume: bool
