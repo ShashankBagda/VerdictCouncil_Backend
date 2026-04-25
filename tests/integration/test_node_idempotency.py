@@ -73,11 +73,13 @@ def test_pause_node_has_no_pre_interrupt_side_effects(gate: str) -> None:
         "interrupt payload must be identical on each replay; otherwise "
         "the checkpointer cannot deterministically resume the node"
     )
-    # Payload contract: gate / case_id / actions only — no monotonic
-    # counters or timestamps that would diverge between replays.
+    # Minimum payload keys present (4.A3.3 will add phase_output, trace_id,
+    # etc.; do not pin the upper bound). The replay-equality check above is
+    # the real idempotency contract.
     payload = captured[0]
-    assert set(payload.keys()) == {"gate", "case_id", "actions"}, (
-        f"pause payload schema drift: {sorted(payload.keys())}"
+    required = {"gate", "case_id", "actions"}
+    assert required.issubset(payload.keys()), (
+        f"pause payload missing required keys; got {sorted(payload.keys())}"
     )
 
 
