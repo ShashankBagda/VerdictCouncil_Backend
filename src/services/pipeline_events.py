@@ -72,6 +72,10 @@ def _is_terminal_event(parsed: dict) -> bool:
     - ``pipeline`` + ``cancelled`` is emitted when the judge explicitly
       cancels a running pipeline via POST /cases/{id}/cancel.
     """
+    # Interrupt frame (Sprint 4 4.A3.7) closes the SSE cycle so the client
+    # can mount the gate review panel and reconnect after the judge resumes.
+    if parsed.get("kind") == "interrupt":
+        return True
     agent = parsed.get("agent")
     phase = parsed.get("phase")
     if agent == "hearing-governance" and phase in _GOVERNANCE_TERMINAL_PHASES:
@@ -102,6 +106,106 @@ async def publish_progress(event: PipelineProgressEvent) -> None:
         asyncio.create_task(_tee_write(event.case_id, event.model_dump(mode="json")))
     except Exception:
         logger.exception("Failed to publish pipeline progress event")
+
+
+async def publish_interrupt(
+    case_id: str | object,
+    gate: str,
+    payload: dict,
+) -> None:
+    """Publish an InterruptEvent and write legacy `awaiting_review_gateN` compat.
+
+    Sprint 4 4.A3.7. Fired when the LangGraph pipeline pauses at a gate.
+    The graph nodes themselves stay side-effect-free (4.A3.2 invariant);
+    this function is the boundary layer that materialises the interrupt
+    for downstream readers:
+
+    1. Redis pub/sub fan-out to the SSE stream — `<GateReviewPanel>`
+       mounts on receipt.
+    2. ``pipeline_events`` table tee-write for replay / case-data
+       reconstruction.
+    3. **Legacy compat:** UPSERT ``cases.status = awaiting_review_gateN``
+       and ``cases.gate_state`` JSONB so existing case-list filters and
+       watchdog queries (which key off these fields, not the saver) keep
+       working through the cutover.
+
+    The DB write is naturally idempotent — the same UPDATE re-fires on
+    every replay with identical values. ``publish_interrupt`` itself
+    can be called repeatedly for the same (case_id, gate) without
+    corruption; consumers dedupe at the (case_id, gate) layer.
+    """
+    from uuid import UUID as _UUID
+
+    from src.api.schemas.pipeline_events import InterruptEvent
+    from src.api.trace_propagation import current_trace_id
+
+    case_uuid = case_id if isinstance(case_id, _UUID) else _UUID(str(case_id))
+    trace_id = payload.get("trace_id") or current_trace_id()
+
+    event = InterruptEvent(
+        case_id=case_uuid,
+        gate=gate,  # type: ignore[arg-type]
+        actions=list(payload.get("actions") or []),
+        phase_output=payload.get("phase_output"),
+        audit_summary=payload.get("audit_summary"),
+        trace_id=trace_id,
+        ts=datetime.now(UTC),
+    )
+
+    # 1 + 2: Redis fan-out + pipeline_events tee-write
+    try:
+        r = await _get_redis_client()
+        await r.publish(_channel(case_id), event.model_dump_json())
+        asyncio.create_task(_tee_write(case_id, event.model_dump(mode="json")))
+    except Exception:
+        logger.exception("Failed to publish InterruptEvent for case %s", case_id)
+
+    # 3: Legacy compat UPSERT — case.status + case.gate_state
+    try:
+        await _upsert_legacy_gate_status(case_uuid, gate)
+    except Exception:
+        logger.exception(
+            "Failed to upsert legacy gate status for case=%s gate=%s",
+            case_id,
+            gate,
+        )
+
+
+async def _upsert_legacy_gate_status(case_id: object, gate: str) -> None:
+    """UPSERT cases.status + cases.gate_state for the legacy review surface.
+
+    Idempotent — replay-safe by construction (UPDATE … WHERE id = X).
+    Skips silently if the case row is missing.
+    """
+    from src.models.case import Case, CaseStatus
+    from src.services.database import async_session
+
+    if gate not in {"gate1", "gate2", "gate3", "gate4"}:
+        logger.warning("_upsert_legacy_gate_status: unknown gate %r", gate)
+        return
+
+    status_value = f"awaiting_review_{gate}"
+    try:
+        new_status = CaseStatus(status_value)
+    except ValueError:
+        logger.warning("_upsert_legacy_gate_status: status %r missing", status_value)
+        return
+
+    gate_num = int(gate[-1])
+    gate_state = {
+        "current_gate": gate_num,
+        "awaiting_review": True,
+        "rerun_agent": None,
+    }
+
+    async with async_session() as db:
+        case = await db.get(Case, case_id)
+        if case is None:
+            logger.info("_upsert_legacy_gate_status: case %s not found", case_id)
+            return
+        case.status = new_status
+        case.gate_state = gate_state
+        await db.commit()
 
 
 async def publish_agent_event(case_id: str | object, event: dict) -> None:

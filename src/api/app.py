@@ -185,6 +185,7 @@ def create_app() -> FastAPI:
         auth,
         case_data,
         cases,
+        cost,
         dashboard,
         documents,
         domains,
@@ -207,6 +208,7 @@ def create_app() -> FastAPI:
     app.include_router(hearing_pack.router, prefix="/api/v1/cases", tags=["hearing-pack"])
     app.include_router(reopen_requests.router, prefix="/api/v1/cases", tags=["reopen-requests"])
     app.include_router(audit.router, prefix="/api/v1/audit", tags=["audit"])
+    app.include_router(cost.router, prefix="/api/v1/cost", tags=["cost"])
     app.include_router(dashboard.router, prefix="/api/v1/dashboard", tags=["dashboard"])
     app.include_router(health.router, prefix="/api/v1/health", tags=["health"])
     app.include_router(

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from decimal import Decimal
 from enum import Enum
 from typing import Any
 
@@ -81,6 +82,14 @@ class AuditEntry(BaseModel):
     tool_calls: list[dict[str, Any]] | None = None
     model: str | None = None
     token_usage: dict[str, Any] | None = None
+
+    # Sprint 4 4.C4.2 — observability + cost + provenance + redaction.
+    # All optional — older checkpoints round-trip cleanly with these unset.
+    trace_id: str | None = None
+    span_id: str | None = None
+    retrieved_source_ids: list[str] | None = None
+    cost_usd: Decimal | None = None
+    redaction_applied: bool = False
 
 
 class CaseState(BaseModel):
