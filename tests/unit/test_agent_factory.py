@@ -159,3 +159,72 @@ def test_phase_middleware_stack_includes_all_four_hooks():
         audit_tool_call,
         token_usage_emitter,
     }
+
+
+# ---------------------------------------------------------------------------
+# _extract_source_ids_from_messages — Sprint 3 3.B.5
+# ---------------------------------------------------------------------------
+
+
+class TestExtractSourceIdsFromMessages:
+    def test_picks_source_ids_off_tool_message_artifacts(self):
+        from langchain_core.documents import Document
+        from langchain_core.messages import ToolMessage
+
+        from src.pipeline.graph.agents.factory import _extract_source_ids_from_messages
+
+        msg = ToolMessage(
+            content="x",
+            tool_call_id="tc-1",
+            artifact=[
+                Document(page_content="a", metadata={"source_id": "f-1:abc"}),
+                Document(page_content="b", metadata={"source_id": "f-2:def"}),
+            ],
+        )
+        assert _extract_source_ids_from_messages([msg]) == ["f-1:abc", "f-2:def"]
+
+    def test_dedupes_across_messages(self):
+        from langchain_core.documents import Document
+        from langchain_core.messages import ToolMessage
+
+        from src.pipeline.graph.agents.factory import _extract_source_ids_from_messages
+
+        m1 = ToolMessage(
+            content="",
+            tool_call_id="t1",
+            artifact=[Document(page_content="a", metadata={"source_id": "f:1"})],
+        )
+        m2 = ToolMessage(
+            content="",
+            tool_call_id="t2",
+            artifact=[
+                Document(page_content="b", metadata={"source_id": "f:1"}),
+                Document(page_content="c", metadata={"source_id": "f:2"}),
+            ],
+        )
+        assert _extract_source_ids_from_messages([m1, m2]) == ["f:1", "f:2"]
+
+    def test_skips_messages_without_artifact(self):
+        from langchain_core.messages import AIMessage, ToolMessage
+
+        from src.pipeline.graph.agents.factory import _extract_source_ids_from_messages
+
+        plain = ToolMessage(content="plain", tool_call_id="t")
+        ai = AIMessage(content="hi")
+        assert _extract_source_ids_from_messages([plain, ai]) == []
+
+    def test_skips_documents_without_source_id(self):
+        from langchain_core.documents import Document
+        from langchain_core.messages import ToolMessage
+
+        from src.pipeline.graph.agents.factory import _extract_source_ids_from_messages
+
+        msg = ToolMessage(
+            content="",
+            tool_call_id="t",
+            artifact=[
+                Document(page_content="a", metadata={"file_id": "no-source-id"}),
+                Document(page_content="b", metadata={"source_id": "f:1"}),
+            ],
+        )
+        assert _extract_source_ids_from_messages([msg]) == ["f:1"]

@@ -11,7 +11,7 @@ from src.pipeline.graph.prompts import (
     GATE_AGENTS,
     MODEL_TIER_MAP,
 )
-from src.pipeline.graph.state import _merge_case
+from src.pipeline.graph.state import _merge_case, _merge_source_ids
 from src.shared.case_state import (
     AuditEntry,
     CaseState,
@@ -298,3 +298,27 @@ class TestPromptConstants:
 
     def test_complexity_routing_has_no_tools(self):
         assert AGENT_TOOLS["complexity-routing"] == []
+
+
+# ---------------------------------------------------------------------------
+# _merge_source_ids — Sprint 3 3.B.5
+# ---------------------------------------------------------------------------
+
+
+class TestMergeSourceIds:
+    def test_empty_base_returns_update(self):
+        assert _merge_source_ids([], ["a", "b"]) == ["a", "b"]
+
+    def test_empty_update_keeps_base(self):
+        assert _merge_source_ids(["a", "b"], []) == ["a", "b"]
+
+    def test_concatenates_unique_entries(self):
+        assert _merge_source_ids(["a"], ["b", "c"]) == ["a", "b", "c"]
+
+    def test_dedupes_overlap_preserving_first_occurrence(self):
+        assert _merge_source_ids(["a", "b"], ["b", "c", "a"]) == ["a", "b", "c"]
+
+    def test_idempotent_on_repeated_merge(self):
+        once = _merge_source_ids(["a"], ["b"])
+        twice = _merge_source_ids(once, ["a", "b"])
+        assert twice == ["a", "b"]

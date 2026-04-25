@@ -35,6 +35,7 @@ from typing import Any
 from langgraph.types import Send
 
 from src.pipeline.graph.agents.factory import make_research_subagent
+from src.pipeline.graph.output_validator import validate_law_citations
 from src.pipeline.graph.schemas import ResearchOutput, ResearchPart
 
 RESEARCH_SCOPES: tuple[str, ...] = ("evidence", "facts", "witnesses", "law")
@@ -69,13 +70,21 @@ def route_to_research_subagents(state: dict[str, Any]) -> list[Send]:
 
 
 def research_join_node(state: dict[str, Any]) -> dict[str, Any]:
-    """Barrier-fold: merge accumulated `research_parts` into a `ResearchOutput`.
+    """Barrier-fold: merge accumulated `research_parts` into a `ResearchOutput`,
+    then enforce citation provenance on the law part (Sprint 3 3.B.5).
 
     `from_parts` sets `partial=True` when any of the four expected scopes
     is missing from the dict, which the gate2 UI surfaces to the judge.
+    Citations whose `supporting_sources` don't match the run's retrieved
+    set are stripped and recorded in `LawResearch.suppressed_citations`
+    before the join's output reaches the gate.
     """
     parts: dict[str, ResearchPart] = state.get("research_parts") or {}
     merged = ResearchOutput.from_parts(parts)
+    if merged.law is not None:
+        retrieved = state.get("retrieved_source_ids") or []
+        validated_law = validate_law_citations(merged.law, retrieved)
+        merged = merged.model_copy(update={"law": validated_law})
     return {"research_output": merged}
 
 
@@ -99,7 +108,13 @@ def make_research_node(scope: str) -> Callable:
         result = await inner(state)
         structured = result.get(structured_key)
         part = ResearchPart(scope=scope, **{scope: structured})
-        return {"research_parts": {scope: part}}
+        update: dict[str, Any] = {"research_parts": {scope: part}}
+        # Sprint 3 3.B.5 — fan citation source_ids up to the join so it
+        # can validate self-reported supporting_sources.
+        source_ids = result.get("retrieved_source_ids") or []
+        if source_ids:
+            update["retrieved_source_ids"] = list(source_ids)
+        return update
 
     _node.__name__ = f"research_{scope}_node"
     return _node

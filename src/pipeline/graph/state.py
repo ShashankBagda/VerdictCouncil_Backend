@@ -44,6 +44,23 @@ def _merge_research_parts(
     return {**base, **update}
 
 
+def _merge_source_ids(base: list[str], update: list[str]) -> list[str]:
+    """Reducer for `retrieved_source_ids` — order-preserving union (Sprint 3 3.B.5).
+
+    Each parallel research subagent contributes the citation source_ids it
+    retrieved via tool calls; the join node consumes the accumulated set
+    to validate self-reported supporting_sources on every cited rule and
+    precedent. We dedupe so a rerun of one scope doesn't double-count.
+    """
+    seen = set(base)
+    merged = list(base)
+    for src in update:
+        if src not in seen:
+            seen.add(src)
+            merged.append(src)
+    return merged
+
+
 def _merge_case(base: CaseState, update: CaseState) -> CaseState:
     """Reducer for the 'case' field in GraphState.
 
@@ -118,6 +135,12 @@ class GraphState(TypedDict):
     # `{scope: ResearchPart(...)}`; the reducer dict-merges by scope so
     # parallel branches and judge-driven reruns coexist cleanly.
     research_parts: Annotated[dict[str, ResearchPart], _merge_research_parts]
+
+    # Citation source_ids retrieved by every tool call across the run
+    # (Sprint 3 3.B.5). Order-preserving union reducer — research subagents
+    # contribute the source_ids they pulled; research_join consumes the
+    # full set when validating self-reported supporting_sources.
+    retrieved_source_ids: Annotated[list[str], _merge_source_ids]
 
     # Output of `research_join_node` (1.A1.5). Default LWW semantics — the
     # join writes once per pipeline run and a re-entered join overwrites.

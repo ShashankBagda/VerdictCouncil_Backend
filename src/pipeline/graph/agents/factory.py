@@ -163,6 +163,27 @@ def _filter_tools(state: dict[str, Any], phase_or_scope: str, allowed: list[str]
     return selected
 
 
+def _extract_source_ids_from_messages(messages: list[Any]) -> list[str]:
+    """Pull `source_id`s from every tool-message artifact in `messages`.
+
+    Order-preserving + deduped. Sprint 3 3.B.5 — research_join uses the
+    accumulated set to validate self-reported `supporting_sources`.
+    """
+    seen: set[str] = set()
+    out: list[str] = []
+    for msg in messages:
+        artifact = getattr(msg, "artifact", None)
+        if not artifact:
+            continue
+        for doc in artifact:
+            meta = getattr(doc, "metadata", None) or {}
+            sid = meta.get("source_id")
+            if sid and sid not in seen:
+                seen.add(sid)
+                out.append(str(sid))
+    return out
+
+
 def _make_node(
     *,
     phase_or_scope: str,
@@ -201,7 +222,14 @@ def _make_node(
         }
         result = await agent.ainvoke(agent_state)
         structured = result.get("structured_response")
-        return {f"{phase_or_scope}_output": structured}
+        update: dict[str, Any] = {f"{phase_or_scope}_output": structured}
+        # Sprint 3 3.B.5 — surface citation source_ids from this agent's
+        # tool-message chain so the research_join validator can verify
+        # self-reported supporting_sources without re-querying the audit log.
+        source_ids = _extract_source_ids_from_messages(result.get("messages") or [])
+        if source_ids:
+            update["retrieved_source_ids"] = source_ids
+        return update
 
     _node.__name__ = f"phase_node_{phase_or_scope}"
     return _node
