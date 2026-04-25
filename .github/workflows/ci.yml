@@ -2,7 +2,10 @@ name: CI
 
 on:
   push:
-    branches: ["**"]
+    # Only trigger on direct pushes to long-lived branches.
+    # Feature branches with open PRs run via `pull_request` instead,
+    # avoiding the double-CI issue where every push fires both events.
+    branches: [main, development, "release/**"]
   pull_request:
     branches: [development, main]
 
