@@ -99,26 +99,37 @@ def _build_topology() -> StateGraph:
 
     # ------------------------------------------------------------------
     # Gate pause + apply pairs (HITL)
+    #
+    # Each `gate*_apply` node returns `Command(goto=...)` at runtime to
+    # one of three targets: advance (continue forward), rerun (re-run
+    # the previous phase), or halt (route to `terminal`). The
+    # `destinations=` tuple declares those targets statically so Studio
+    # can render the topology — without it the graph appears to dead-end
+    # at the apply node.
     # ------------------------------------------------------------------
     graph.add_node("gate1_pause", make_gate_pause("gate1"))
     graph.add_node(
         "gate1_apply",
         make_gate_apply("gate1", advance_target="research_dispatch", rerun_target="intake"),
+        destinations=("research_dispatch", "intake", "terminal"),
     )
     graph.add_node("gate2_pause", make_gate_pause("gate2"))
     graph.add_node(
         "gate2_apply",
         make_gate_apply("gate2", advance_target="synthesis", rerun_target="research_dispatch"),
+        destinations=("synthesis", "research_dispatch", "terminal"),
     )
     graph.add_node("gate3_pause", make_gate_pause("gate3"))
     graph.add_node(
         "gate3_apply",
         make_gate_apply("gate3", advance_target="auditor", rerun_target="synthesis"),
+        destinations=("auditor", "synthesis", "terminal"),
     )
     graph.add_node("gate4_pause", make_gate_pause("gate4"))
     graph.add_node(
         "gate4_apply",
         make_gate_apply("gate4", advance_target=END, rerun_target="auditor"),
+        destinations=(END, "auditor", "terminal"),
     )
 
     graph.add_node("terminal", terminal)
