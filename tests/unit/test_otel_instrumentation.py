@@ -14,15 +14,20 @@ from src.api.app import create_app
 
 @pytest.fixture()
 def span_exporter() -> InMemorySpanExporter:
-    """Install an in-memory OTEL exporter on a fresh tracer provider.
+    """Install an in-memory OTEL exporter on the active tracer provider.
 
-    Uses the global provider because FastAPIInstrumentor reads from it
-    when emitting per-request spans.
+    OTEL's global provider is set-once at process scope; if a previous test
+    already installed one we attach our exporter to it instead of trying
+    (and silently failing) to override.
     """
     exporter = InMemorySpanExporter()
-    provider = TracerProvider()
-    provider.add_span_processor(SimpleSpanProcessor(exporter))
-    trace.set_tracer_provider(provider)
+    current = trace.get_tracer_provider()
+    if isinstance(current, TracerProvider):
+        current.add_span_processor(SimpleSpanProcessor(exporter))
+    else:
+        provider = TracerProvider()
+        provider.add_span_processor(SimpleSpanProcessor(exporter))
+        trace.set_tracer_provider(provider)
     return exporter
 
 

@@ -8,6 +8,7 @@ from starlette.routing import Route
 
 from src.api.middleware.metrics import MetricsMiddleware, metrics_endpoint
 from src.api.middleware.rate_limit import RateLimitMiddleware
+from src.api.middleware.trace_context import TraceContextMiddleware
 from src.pipeline.graph.checkpointer import lifespan_checkpointer
 from src.pipeline.observability import configure_mlflow
 from src.shared.config import settings
@@ -176,6 +177,9 @@ def create_app() -> FastAPI:
     )
     app.add_middleware(MetricsMiddleware)
     app.add_middleware(RateLimitMiddleware)
+    # TraceContext runs first (last added → first executed) so handlers and
+    # downstream middleware can read `request.state.trace_id`.
+    app.add_middleware(TraceContextMiddleware)
 
     from src.api.routes import (
         admin,
