@@ -6,6 +6,7 @@ from typing import Annotated, Any
 
 from typing_extensions import TypedDict
 
+from src.pipeline.graph.schemas import ResearchOutput, ResearchPart
 from src.shared.case_state import AuditEntry, CaseState
 
 
@@ -27,6 +28,21 @@ def _merge_dicts(base: dict, update: dict) -> dict:
 
     Later writes for the same key win. Prevents parallel Gate-2 nodes from
     clobbering each other's entries via last-writer-wins.
+    """
+    return {**base, **update}
+
+
+def _merge_research_parts(
+    base: dict[str, ResearchPart],
+    update: dict[str, ResearchPart],
+) -> dict[str, ResearchPart]:
+    """Reducer for the dict-keyed `research_parts` accumulator (1.A1.5 / SA F-2).
+
+    Each research subagent writes `{"research_parts": {scope: ResearchPart(...)}}`.
+    The reducer is a shallow dict union keyed by scope name, so re-running a
+    single scope (e.g. judge-driven rerun) naturally overwrites that key
+    without a sentinel reset. Out-of-band wholesale resets go through
+    `update_state(..., values, as_node=...)` with `Overwrite`.
     """
     return {**base, **update}
 
@@ -104,6 +120,15 @@ class GraphState(TypedDict):
     # MLflow run IDs written by each node after its agent_run() context manager exits
     # Value is (mlflow_run_id, experiment_id)
     mlflow_run_ids: Annotated[dict[str, tuple[str, str]], _merge_dicts]
+
+    # Research fan-out accumulator (1.A1.5). Subagents write
+    # `{scope: ResearchPart(...)}`; the reducer dict-merges by scope so
+    # parallel branches and judge-driven reruns coexist cleanly.
+    research_parts: Annotated[dict[str, ResearchPart], _merge_research_parts]
+
+    # Output of `research_join_node` (1.A1.5). Default LWW semantics — the
+    # join writes once per pipeline run and a re-entered join overwrites.
+    research_output: ResearchOutput | None
 
     # True when resuming from a checkpoint (skip already-completed gates)
     is_resume: bool
