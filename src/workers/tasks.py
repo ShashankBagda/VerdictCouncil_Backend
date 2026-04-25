@@ -2,11 +2,14 @@
 
 Each task:
   1. Loads its `pipeline_jobs` row and no-ops if already `completed`.
-  2. Delegates to the existing helper (`_run_case_pipeline`,
+  2. Re-establishes OTEL trace context from `job.traceparent` so the
+     worker's spans (and downstream LangSmith run) inherit the API
+     request's trace_id (Sprint 2 2.C1.4).
+  3. Delegates to the existing helper (`_run_case_pipeline`,
      `_run_whatif_scenario`, `_run_stability_computation`) — the
      helpers already own their own per-scenario/per-case status
      transitions and session lifecycle.
-  3. Flips the outbox row to `completed` on success or `failed`
+  4. Flips the outbox row to `completed` on success or `failed`
      (with attempts++ and error_message) on exception.
 
 Tasks are idempotent: redelivery (from dispatcher retry or stuck-job
@@ -18,8 +21,15 @@ from __future__ import annotations
 
 import logging
 import uuid
+from contextlib import nullcontext
 from typing import Any
 
+from opentelemetry import trace
+
+from src.api.trace_propagation import (
+    parse_traceparent,
+    remote_span_from_traceparent,
+)
 from src.models.pipeline_job import PipelineJob, PipelineJobStatus, PipelineJobType
 from src.services.database import async_session
 from src.workers.outbox import mark_completed, mark_failed
@@ -65,8 +75,27 @@ async def _run_with_outbox(
         )
         return
 
+    # Re-establish OTEL context from the API request that enqueued this job
+    # so the worker's spans and the downstream LangSmith run inherit the
+    # original trace_id. Legacy queued jobs (pre-0025 migration) lack
+    # `traceparent`; we log once and run without trace continuity.
+    trace_id: str | None = None
+    parent_span = remote_span_from_traceparent(job.traceparent)
+    if parent_span is None:
+        if job.traceparent:
+            logger.warning(
+                "pipeline_job %s has malformed traceparent=%r; running without trace continuity",
+                job_id,
+                job.traceparent,
+            )
+        context_cm = nullcontext()
+    else:
+        trace_id = parse_traceparent(job.traceparent).get("trace_id")
+        context_cm = trace.use_span(parent_span, end_on_exit=False)
+
     try:
-        await runner(job)
+        with context_cm:
+            await runner(job, trace_id=trace_id)
     except Exception as exc:
         logger.exception("pipeline_job %s failed (type=%s)", job_id, expected_type.value)
         await _fail(job_id, exc)
@@ -80,7 +109,7 @@ async def run_case_pipeline_job(ctx: dict[str, Any], job_id: str) -> None:  # no
     await _run_with_outbox(
         job_id,
         PipelineJobType.case_pipeline,
-        lambda job: _run_case_pipeline(job.case_id),
+        lambda job, *, trace_id=None: _run_case_pipeline(job.case_id, trace_id=trace_id),
     )
 
 
@@ -90,7 +119,7 @@ async def run_whatif_scenario_job(ctx: dict[str, Any], job_id: str) -> None:  # 
     await _run_with_outbox(
         job_id,
         PipelineJobType.whatif_scenario,
-        lambda job: _run_whatif_scenario(job.target_id),
+        lambda job, *, trace_id=None: _run_whatif_scenario(job.target_id, trace_id=trace_id),
     )
 
 
@@ -100,12 +129,14 @@ async def run_stability_computation_job(ctx: dict[str, Any], job_id: str) -> Non
     await _run_with_outbox(
         job_id,
         PipelineJobType.stability_computation,
-        lambda job: _run_stability_computation(job.target_id),
+        lambda job, *, trace_id=None: _run_stability_computation(
+            job.target_id, trace_id=trace_id
+        ),
     )
 
 
 async def run_gate_job(ctx: dict[str, Any], job_id: str) -> None:  # noqa: ARG001
-    async def _runner(job: PipelineJob) -> None:
+    async def _runner(job: PipelineJob, *, trace_id: str | None = None) -> None:
         from datetime import UTC, datetime
 
         from src.api.schemas.pipeline_events import PipelineProgressEvent
@@ -203,6 +234,7 @@ async def run_gate_job(ctx: dict[str, Any], job_id: str) -> None:  # noqa: ARG00
             gate_name,
             start_agent=start_agent,
             extra_instructions=instructions,
+            trace_id=trace_id,
         )
 
         gate_state_payload = {
@@ -252,7 +284,7 @@ async def run_gate_job(ctx: dict[str, Any], job_id: str) -> None:  # noqa: ARG00
 
 
 async def run_intake_extraction_job(ctx: dict[str, Any], job_id: str) -> None:  # noqa: ARG001
-    async def _runner(job: PipelineJob) -> None:
+    async def _runner(job: PipelineJob, *, trace_id: str | None = None) -> None:  # noqa: ARG001
         from src.services.database import async_session
         from src.services.intake_extraction import run_intake_extraction
 

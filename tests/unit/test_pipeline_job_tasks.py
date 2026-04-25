@@ -23,6 +23,7 @@ def _make_job(
     *,
     job_type: PipelineJobType = PipelineJobType.case_pipeline,
     status: PipelineJobStatus = PipelineJobStatus.dispatched,
+    traceparent: str | None = None,
 ) -> PipelineJob:
     job = PipelineJob(
         id=uuid.uuid4(),
@@ -31,6 +32,7 @@ def _make_job(
         target_id=None,
         status=status,
         attempts=0,
+        traceparent=traceparent,
     )
     return job
 
@@ -64,7 +66,7 @@ async def test_task_marks_completed_on_success():
     ):
         await tasks.run_case_pipeline_job({}, str(job.id))
 
-    mock_run.assert_awaited_once_with(job.case_id)
+    mock_run.assert_awaited_once_with(job.case_id, trace_id=None)
     mock_complete.assert_awaited_once_with(job.id)
     mock_fail.assert_not_called()
 
@@ -122,3 +124,38 @@ async def test_task_noops_when_job_row_missing():
     mock_run.assert_not_called()
     mock_complete.assert_not_called()
     mock_fail.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_task_extracts_trace_id_from_job_traceparent():
+    """Worker reconstitutes trace_id from job.traceparent (Sprint 2 2.C1.4)."""
+    traceparent = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"
+    job = _make_job(traceparent=traceparent)
+
+    with (
+        patch.object(tasks, "_load_job", new=AsyncMock(return_value=job)),
+        patch.object(tasks, "_complete", new=AsyncMock()),
+        patch.object(tasks, "_fail", new=AsyncMock()),
+        patch("src.api.routes.cases._run_case_pipeline", new=AsyncMock()) as mock_run,
+    ):
+        await tasks.run_case_pipeline_job({}, str(job.id))
+
+    mock_run.assert_awaited_once_with(
+        job.case_id, trace_id="0af7651916cd43dd8448eb211c80319c"
+    )
+
+
+@pytest.mark.asyncio
+async def test_task_runs_without_trace_id_when_traceparent_missing():
+    """Legacy queued jobs without traceparent still dispatch (graceful fallback)."""
+    job = _make_job(traceparent=None)
+
+    with (
+        patch.object(tasks, "_load_job", new=AsyncMock(return_value=job)),
+        patch.object(tasks, "_complete", new=AsyncMock()),
+        patch.object(tasks, "_fail", new=AsyncMock()),
+        patch("src.api.routes.cases._run_case_pipeline", new=AsyncMock()) as mock_run,
+    ):
+        await tasks.run_case_pipeline_job({}, str(job.id))
+
+    mock_run.assert_awaited_once_with(job.case_id, trace_id=None)

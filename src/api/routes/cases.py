@@ -1269,8 +1269,13 @@ async def stream_pipeline_status(
     )
 
 
-async def _run_case_pipeline(case_id: UUID) -> None:
-    """Background task: run the 9-agent pipeline for a case and persist results."""
+async def _run_case_pipeline(case_id: UUID, *, trace_id: str | None = None) -> None:
+    """Background task: run the 9-agent pipeline for a case and persist results.
+
+    `trace_id` (Sprint 2 2.C1.4) is the W3C hex trace id resurrected by the
+    worker from `pipeline_jobs.traceparent`. It is stamped onto LangSmith
+    metadata so the agent run can be cross-referenced with its OTEL trace.
+    """
 
     from src.api.schemas.pipeline_events import PipelineProgressEvent
     from src.db.persist_case_results import persist_case_results
@@ -1348,7 +1353,7 @@ async def _run_case_pipeline(case_id: UUID) -> None:
     try:
         from src.pipeline.graph.runner import GraphPipelineRunner
 
-        final_state = await GraphPipelineRunner().run(initial_state)
+        final_state = await GraphPipelineRunner().run(initial_state, trace_id=trace_id)
     except Exception as exc:
         logger.exception("Pipeline run failed for case_id=%s", case_id)
         # Sprint 1 1.A1.6: legacy AgentOutputParseError is gone — `create_agent`

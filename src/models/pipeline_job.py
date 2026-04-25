@@ -55,6 +55,10 @@ class PipelineJob(UUIDPrimaryKeyMixin, Base):
     )
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # 2.C1.4: W3C traceparent captured at enqueue. The worker re-establishes
+    # OTEL context from this so the worker's spans (and downstream LangSmith
+    # run) inherit the API request's trace_id. Nullable for legacy queued jobs.
+    traceparent: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

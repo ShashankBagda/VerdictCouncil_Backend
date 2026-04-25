@@ -41,11 +41,17 @@ router = APIRouter()
 # --------------------------------------------------------------------------- #
 
 
-async def _run_whatif_scenario(scenario_id: uuid.UUID) -> None:
+async def _run_whatif_scenario(
+    scenario_id: uuid.UUID, *, trace_id: str | None = None  # noqa: ARG001
+) -> None:
     """Background task that executes the what-if scenario.
 
     Imports are deferred to avoid circular dependencies and to create
     a fresh database session for the background task.
+
+    `trace_id` is accepted from the worker boundary but not yet threaded
+    through `WhatIfController`; the controller wiring lands in Sprint 4
+    A5 alongside the rest of the what-if observability work.
     """
     from src.db.pipeline_state import (
         CheckpointCorruptError,
@@ -144,8 +150,14 @@ async def _run_whatif_scenario(scenario_id: uuid.UUID) -> None:
             raise
 
 
-async def _run_stability_computation(stability_id: uuid.UUID) -> None:
-    """Background task that computes the stability score."""
+async def _run_stability_computation(
+    stability_id: uuid.UUID, *, trace_id: str | None = None  # noqa: ARG001
+) -> None:
+    """Background task that computes the stability score.
+
+    `trace_id` accepted for parity with `_run_case_pipeline`; threading
+    through `WhatIfController` is deferred to Sprint 4 A5.
+    """
     from src.db.pipeline_state import (
         CheckpointCorruptError,
         CheckpointSchemaMismatchError,

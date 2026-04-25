@@ -100,7 +100,9 @@ class GraphPipelineRunner:
             start_agent=start_agent,
         )
 
-    async def _invoke(self, initial_state: GraphState) -> CaseState:
+    async def _invoke(
+        self, initial_state: GraphState, *, trace_id: str | None = None
+    ) -> CaseState:
         """Drive the compiled graph via streaming and return the final CaseState.
 
         Threads `thread_id = case_id` into the LangGraph config so the
@@ -132,13 +134,19 @@ class GraphPipelineRunner:
         # `metadata` (1.C3a.1) tags every LangSmith trace with env / case_id
         # / run_id so a single `verdictcouncil` project can be filtered per
         # environment without splitting the project namespace.
+        metadata: dict[str, str] = {
+            "env": settings.app_env,
+            "case_id": case_id,
+            "run_id": run_id,
+        }
+        # 2.C1.4: stamp trace_id when the caller (API endpoint or worker that
+        # re-established context) supplied one. LangSmith filters by metadata
+        # key, so this is what binds an OTEL trace to its agent run trace.
+        if trace_id:
+            metadata["trace_id"] = trace_id
         config = {
             "configurable": {"thread_id": case_id},
-            "metadata": {
-                "env": settings.app_env,
-                "case_id": case_id,
-                "run_id": run_id,
-            },
+            "metadata": metadata,
         }
 
         await stream_to_sse(
@@ -155,11 +163,20 @@ class GraphPipelineRunner:
     # Public surface (matches PipelineRunner)
     # ------------------------------------------------------------------
 
-    async def run(self, case_state: CaseState) -> CaseState:
+    async def run(
+        self, case_state: CaseState, *, trace_id: str | None = None
+    ) -> CaseState:
         """Run gate 1 for a new case submission.
 
         Matches `PipelineRunner.run(case_state)` — only gate 1 executes;
         judge reviews and triggers subsequent gates via `run_gate`.
+
+        Args:
+            case_state: Initial CaseState for the run.
+            trace_id: Hex W3C trace id to stamp onto LangSmith metadata so the
+                agent run can be cross-referenced with its OTEL trace. Workers
+                pass the value extracted from `pipeline_jobs.traceparent`;
+                tests / direct callers may omit it.
         """
         run_id = case_state.run_id or str(uuid.uuid4())
         initial_state = self._build_initial_state(case_state, run_id)
@@ -169,7 +186,7 @@ class GraphPipelineRunner:
             run_id=run_id,
             mode="langgraph",
         ):
-            result = await self._invoke(initial_state)
+            result = await self._invoke(initial_state, trace_id=trace_id)
 
         return result
 
@@ -180,6 +197,7 @@ class GraphPipelineRunner:
         *,
         start_agent: str | None = None,
         extra_instructions: str | None = None,
+        trace_id: str | None = None,
     ) -> CaseState:
         """Run one gate's agents then pause for judge review.
 
@@ -213,7 +231,7 @@ class GraphPipelineRunner:
             run_id=run_id,
             mode="langgraph",
         ):
-            result = await self._invoke(initial_state)
+            result = await self._invoke(initial_state, trace_id=trace_id)
 
         gate_pause_status = CaseStatusEnum[f"awaiting_review_{gate_name}"]
         result = result.model_copy(update={"status": gate_pause_status})
@@ -230,6 +248,7 @@ class GraphPipelineRunner:
         *,
         start_agent: str,
         run_id: str | None = None,
+        trace_id: str | None = None,
     ) -> CaseState:
         """Resume from a specific agent for What-If analysis.
 
@@ -245,4 +264,4 @@ class GraphPipelineRunner:
             start_agent=start_agent,
             is_resume=True,
         )
-        return await self._invoke(initial_state)
+        return await self._invoke(initial_state, trace_id=trace_id)
