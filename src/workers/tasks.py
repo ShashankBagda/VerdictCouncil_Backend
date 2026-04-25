@@ -129,9 +129,7 @@ async def run_stability_computation_job(ctx: dict[str, Any], job_id: str) -> Non
     await _run_with_outbox(
         job_id,
         PipelineJobType.stability_computation,
-        lambda job, *, trace_id=None: _run_stability_computation(
-            job.target_id, trace_id=trace_id
-        ),
+        lambda job, *, trace_id=None: _run_stability_computation(job.target_id, trace_id=trace_id),
     )
 
 
@@ -381,9 +379,7 @@ async def _run_gate_via_legacy(job: PipelineJob, *, trace_id: str | None) -> Non
                     .values(pages=pages)
                 )
 
-        await persist_case_results(
-            db, case_id, final_state, gate_state_payload=gate_state_payload
-        )
+        await persist_case_results(db, case_id, final_state, gate_state_payload=gate_state_payload)
 
     await publish_progress(
         PipelineProgressEvent(

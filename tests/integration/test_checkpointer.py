@@ -93,9 +93,7 @@ async def test_aupdate_state_overwrite_bypasses_reducer_merge() -> None:
     # Overwrite skips the reducer and replaces the field wholesale.
     await graph.aupdate_state(config, {"counts": Overwrite({"only": 99})})
     overwritten = (await graph.aget_state(config)).values
-    assert overwritten["counts"] == {"only": 99}, (
-        "Overwrite must replace, not merge"
-    )
+    assert overwritten["counts"] == {"only": 99}, "Overwrite must replace, not merge"
 
 
 @pytest.mark.asyncio

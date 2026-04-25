@@ -44,9 +44,7 @@ _PAUSE_NODE_SUFFIX = "_pause"
 
 def gate_from_pause_node(node_name: str) -> str | None:
     """Return ``gate1`` … ``gate4`` from a ``gate{N}_pause`` node name."""
-    if not node_name.startswith(_PAUSE_NODE_PREFIX) or not node_name.endswith(
-        _PAUSE_NODE_SUFFIX
-    ):
+    if not node_name.startswith(_PAUSE_NODE_PREFIX) or not node_name.endswith(_PAUSE_NODE_SUFFIX):
         return None
     middle = node_name[len(_PAUSE_NODE_PREFIX) : -len(_PAUSE_NODE_SUFFIX)]
     if not middle.isdigit():
@@ -72,9 +70,7 @@ def build_resume_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """
     action = payload.get("resume_action")
     if action not in {"advance", "rerun", "halt"}:
-        raise ValueError(
-            f"resume_action must be one of advance/rerun/halt; got {action!r}"
-        )
+        raise ValueError(f"resume_action must be one of advance/rerun/halt; got {action!r}")
 
     resume: dict[str, Any] = {"action": action}
     notes = payload.get("notes")
@@ -91,9 +87,7 @@ def build_resume_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return resume
 
 
-async def has_pending_interrupt(
-    graph: CompiledStateGraph[Any], config: dict[str, Any]
-) -> bool:
+async def has_pending_interrupt(graph: CompiledStateGraph[Any], config: dict[str, Any]) -> bool:
     """True when the saver has a checkpointed task awaiting `Command(resume=...)`."""
     state = await graph.aget_state(cast(RunnableConfig, config))
     return any(t.interrupts for t in state.tasks)

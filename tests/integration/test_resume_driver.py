@@ -89,12 +89,8 @@ def _stub_research_factory(scope: str):
 
 
 def _patch_factories(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "src.pipeline.graph.builder.make_phase_node", _stub_phase_factory
-    )
-    monkeypatch.setattr(
-        "src.pipeline.graph.builder.make_research_node", _stub_research_factory
-    )
+    monkeypatch.setattr("src.pipeline.graph.builder.make_phase_node", _stub_phase_factory)
+    monkeypatch.setattr("src.pipeline.graph.builder.make_research_node", _stub_research_factory)
 
 
 def _initial_state(thread_id: str) -> dict[str, Any]:

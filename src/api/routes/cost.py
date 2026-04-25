@@ -73,9 +73,7 @@ async def cost_summary(
     stmt = select(cost_col, count_col)
 
     if case_id is not None:
-        target = (
-            await db.execute(select(Case).where(Case.id == case_id))
-        ).scalar_one_or_none()
+        target = (await db.execute(select(Case).where(Case.id == case_id))).scalar_one_or_none()
         if target is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
         if current_user.role == UserRole.judge and target.created_by != current_user.id:

@@ -64,9 +64,7 @@ def _live_case_row() -> Case:
     case.id = uuid.uuid4()
     case.domain_id = uuid.uuid4()
     case.domain = CaseDomainEnum.small_claims
-    case.domain_ref = MagicMock(
-        is_active=True, vector_store_id="vs_abc", code="small_claims"
-    )
+    case.domain_ref = MagicMock(is_active=True, vector_store_id="vs_abc", code="small_claims")
     case.status_value = "processing"
     return case
 
@@ -124,12 +122,8 @@ async def test_resume_path_persists_then_publishes_interrupt() -> None:
 
     call_order: list[str] = []
     persist_mock.side_effect = lambda *a, **kw: call_order.append("persist")
-    publish_interrupt_mock.side_effect = lambda *a, **kw: call_order.append(
-        "publish_interrupt"
-    )
-    publish_progress_mock.side_effect = lambda *a, **kw: call_order.append(
-        "publish_progress"
-    )
+    publish_interrupt_mock.side_effect = lambda *a, **kw: call_order.append("publish_interrupt")
+    publish_progress_mock.side_effect = lambda *a, **kw: call_order.append("publish_progress")
 
     with (
         patch.object(tasks, "_load_job", new=AsyncMock(return_value=job)),
@@ -165,8 +159,7 @@ async def test_resume_path_persists_then_publishes_interrupt() -> None:
     persist_idx = call_order.index("persist")
     interrupt_idx = call_order.index("publish_interrupt")
     assert persist_idx < interrupt_idx, (
-        f"persist_case_results must run before publish_interrupt; "
-        f"got call_order={call_order!r}"
+        f"persist_case_results must run before publish_interrupt; got call_order={call_order!r}"
     )
 
     # gate_state_payload reflects the gate the saver paused at, not the
@@ -292,9 +285,7 @@ async def test_resume_path_aborts_when_domain_retired_between_gates() -> None:
     retired_case.id = job.case_id
     retired_case.domain_id = uuid.uuid4()
     retired_case.domain = CaseDomainEnum.small_claims
-    retired_case.domain_ref = MagicMock(
-        is_active=False, vector_store_id=None, code="small_claims"
-    )
+    retired_case.domain_ref = MagicMock(is_active=False, vector_store_id=None, code="small_claims")
     retired_case.status_value = "processing"
     db_mock = _db_mock_with_case(retired_case)
 

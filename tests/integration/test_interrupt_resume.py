@@ -146,9 +146,7 @@ async def _drive_to_gate(
     state = await compiled.aget_state(config)
     paused = _interrupted_node_names(state)
     expected = f"gate{target_gate}_pause"
-    assert expected in paused, (
-        f"Expected pause at {expected}; got interrupted_tasks={paused}"
-    )
+    assert expected in paused, f"Expected pause at {expected}; got interrupted_tasks={paused}"
 
 
 # ---------------------------------------------------------------------------
@@ -272,8 +270,7 @@ async def test_halt_terminates_run(monkeypatch, from_gate: int) -> None:
 
     state = await compiled.aget_state(config)
     assert not _interrupted_node_names(state), (
-        f"Halt must reach END with no further interrupts; "
-        f"got {_interrupted_node_names(state)}"
+        f"Halt must reach END with no further interrupts; got {_interrupted_node_names(state)}"
     )
     assert state.next == (), f"Graph must be at END; got next={state.next!r}"
 
@@ -298,9 +295,7 @@ async def test_rerun_with_field_corrections_writes_state_slot(monkeypatch) -> No
     config = {"configurable": {"thread_id": "thread-fieldcorrect"}}
 
     await _drive_to_gate(compiled, config, "fieldcorrect", 3)
-    corrections = {
-        "synthesis_output": {"judicial_questions": ["Edited Q1?", "Edited Q2?"]}
-    }
+    corrections = {"synthesis_output": {"judicial_questions": ["Edited Q1?", "Edited Q2?"]}}
     await compiled.ainvoke(
         Command(
             resume={

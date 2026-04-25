@@ -135,9 +135,7 @@ def main() -> int:
             encoding="utf-8",
         )
 
-    regressed = [
-        scorer for scorer, (_b, _c, d) in deltas.items() if -d > args.threshold
-    ]
+    regressed = [scorer for scorer, (_b, _c, d) in deltas.items() if -d > args.threshold]
     if regressed:
         scorers = ", ".join(regressed)
         threshold = f"{args.threshold:.0%}"

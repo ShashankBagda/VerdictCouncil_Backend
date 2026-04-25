@@ -140,9 +140,7 @@ async def test_task_extracts_trace_id_from_job_traceparent():
     ):
         await tasks.run_case_pipeline_job({}, str(job.id))
 
-    mock_run.assert_awaited_once_with(
-        job.case_id, trace_id="0af7651916cd43dd8448eb211c80319c"
-    )
+    mock_run.assert_awaited_once_with(job.case_id, trace_id="0af7651916cd43dd8448eb211c80319c")
 
 
 @pytest.mark.asyncio

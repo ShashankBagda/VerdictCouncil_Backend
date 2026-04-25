@@ -101,9 +101,7 @@ async def test_cost_summary_per_case_updates_prometheus_gauge() -> None:
     case.created_by = JUDGE_ID
 
     app.dependency_overrides[get_current_user] = _make_auth()
-    app.dependency_overrides[get_db] = _override_db_with_total(
-        Decimal("0.500000"), 7, case=case
-    )
+    app.dependency_overrides[get_db] = _override_db_with_total(Decimal("0.500000"), 7, case=case)
 
     metrics_store._case_cost_usd.clear()
 
@@ -133,9 +131,7 @@ async def test_cost_summary_judge_cannot_query_other_judges_case() -> None:
     case.created_by = other  # owned by someone else
 
     app.dependency_overrides[get_current_user] = _make_auth(user_id=JUDGE_ID)
-    app.dependency_overrides[get_db] = _override_db_with_total(
-        Decimal("99"), 1, case=case
-    )
+    app.dependency_overrides[get_db] = _override_db_with_total(Decimal("99"), 1, case=case)
 
     async with _client() as c:
         r = await c.get(f"/api/v1/cost/summary?case_id={CASE_ID}")
@@ -146,9 +142,7 @@ async def test_cost_summary_judge_cannot_query_other_judges_case() -> None:
 @pytest.mark.asyncio
 async def test_cost_summary_404_on_missing_case() -> None:
     app.dependency_overrides[get_current_user] = _make_auth()
-    app.dependency_overrides[get_db] = _override_db_with_total(
-        Decimal("0"), 0, case=None
-    )
+    app.dependency_overrides[get_db] = _override_db_with_total(Decimal("0"), 0, case=None)
 
     async with _client() as c:
         r = await c.get(f"/api/v1/cost/summary?case_id={CASE_ID}")
@@ -163,9 +157,7 @@ async def test_cost_summary_admin_sees_other_case() -> None:
     case.created_by = other
 
     app.dependency_overrides[get_current_user] = _make_auth(role=UserRole.admin)
-    app.dependency_overrides[get_db] = _override_db_with_total(
-        Decimal("2.000000"), 3, case=case
-    )
+    app.dependency_overrides[get_db] = _override_db_with_total(Decimal("2.000000"), 3, case=case)
 
     async with _client() as c:
         r = await c.get(f"/api/v1/cost/summary?case_id={CASE_ID}")

@@ -1465,9 +1465,7 @@ async def _run_case_pipeline(case_id: UUID, *, trace_id: str | None = None) -> N
     # the gate-review payload; this event is the legacy compat signal
     # for clients still keying off agent/phase only.
     if paused_gate is not None or status_val.startswith("awaiting_review_gate"):
-        stopped_at = (
-            f"awaiting_review_{paused_gate}" if paused_gate else status_val
-        )
+        stopped_at = f"awaiting_review_{paused_gate}" if paused_gate else status_val
         close_event = PipelineProgressEvent(
             case_id=case_id,
             agent="pipeline",
@@ -1887,9 +1885,7 @@ async def respond_to_gate(
         return MessageResponse(message=f"Halted at {current_gate}")
 
     # advance / rerun — same outbox enqueue path as legacy endpoints.
-    audit_action = (
-        "gate_advanced" if payload.action == "advance" else "gate_rerun_requested"
-    )
+    audit_action = "gate_advanced" if payload.action == "advance" else "gate_rerun_requested"
     audit_input: dict[str, Any] = {
         "gate": current_gate,
         "action": payload.action,
