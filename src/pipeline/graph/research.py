@@ -39,9 +39,7 @@ from src.pipeline.graph.schemas import ResearchOutput, ResearchPart
 
 RESEARCH_SCOPES: tuple[str, ...] = ("evidence", "facts", "witnesses", "law")
 
-RESEARCH_SUBAGENT_NODES: dict[str, str] = {
-    scope: f"research_{scope}" for scope in RESEARCH_SCOPES
-}
+RESEARCH_SUBAGENT_NODES: dict[str, str] = {scope: f"research_{scope}" for scope in RESEARCH_SCOPES}
 
 
 def research_dispatch_node(state: dict[str, Any]) -> dict[str, Any]:
