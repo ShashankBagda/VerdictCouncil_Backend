@@ -1,4 +1,4 @@
-"""Unit tests for src.services.whatif_controller.diff_engine.generate_diff."""
+"""Unit tests for src.services.whatif.diff.generate_diff."""
 
 from __future__ import annotations
 
@@ -74,7 +74,7 @@ def _base_case_state() -> CaseState:
 class TestVerdictChange:
     def test_verdict_changed_detected(self):
         """Different hearing analyses should yield analysis_changed=True."""
-        from src.services.whatif_controller.diff_engine import generate_diff
+        from src.services.whatif.diff import generate_diff
 
         original = _base_case_state()
         modified = copy.deepcopy(original)
@@ -88,7 +88,7 @@ class TestVerdictChange:
 
     def test_verdict_unchanged(self):
         """Same hearing analysis should yield analysis_changed=False."""
-        from src.services.whatif_controller.diff_engine import generate_diff
+        from src.services.whatif.diff import generate_diff
 
         original = _base_case_state()
         modified = copy.deepcopy(original)
@@ -107,7 +107,7 @@ class TestVerdictChange:
 class TestConfidenceDelta:
     def test_confidence_delta_calculated(self):
         """Confidence drop from 80 to 65 should produce delta=-15."""
-        from src.services.whatif_controller.diff_engine import generate_diff
+        from src.services.whatif.diff import generate_diff
 
         original = _base_case_state()
         modified = copy.deepcopy(original)
@@ -128,7 +128,7 @@ class TestConfidenceDelta:
 class TestFactChanges:
     def test_fact_changes_listed(self):
         """Toggling a fact's status should appear in fact_changes."""
-        from src.services.whatif_controller.diff_engine import generate_diff
+        from src.services.whatif.diff import generate_diff
 
         original = _base_case_state()
         modified = copy.deepcopy(original)
@@ -155,7 +155,7 @@ class TestFactChanges:
 class TestEvidenceChanges:
     def test_evidence_changes_listed(self):
         """Excluding an evidence item should appear in evidence_changes."""
-        from src.services.whatif_controller.diff_engine import generate_diff
+        from src.services.whatif.diff import generate_diff
 
         original = _base_case_state()
         modified = copy.deepcopy(original)
