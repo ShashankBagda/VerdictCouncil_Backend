@@ -27,6 +27,7 @@ from src.api.schemas.cases import (
     SuggestedQuestionsUpdate,
 )
 from src.api.schemas.common import ErrorResponse, MessageResponse, ValidationErrorResponse
+from src.api.schemas.resume import ResumePayload
 from src.models.audit import AuditLog
 from src.models.case import (
     Case,
@@ -1757,6 +1758,169 @@ async def rerun_gate(
     await db.commit()
 
     return MessageResponse(message=f"Re-running {gate_name}")
+
+
+# ---------------------------------------------------------------------------
+# Sprint 4 4.A3.15 — unified /respond endpoint
+# ---------------------------------------------------------------------------
+
+
+_PHASE_TO_GATE: dict[str, str] = {
+    "intake": "gate1",
+    "research": "gate2",
+    "synthesis": "gate3",
+    "audit": "gate4",
+}
+
+
+def _gate_for_phase(phase: str) -> str:
+    """Map ResumePayload phase to the gate that pauses after it."""
+    return _PHASE_TO_GATE[phase]
+
+
+@router.post(
+    "/{case_id}/respond",
+    response_model=MessageResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    operation_id="respond_to_gate",
+    summary="Unified gate-resume endpoint (advance / rerun / halt / send_back)",
+)
+async def respond_to_gate(
+    case_id: UUID,
+    payload: ResumePayload,
+    db: DBSession,
+    current_user: User = require_role(UserRole.judge),
+) -> MessageResponse:
+    """Single endpoint handling all four judge gate-resume actions.
+
+    Authorization: judge owns the case (404 on miss — no enumeration).
+    Validation: action must be valid for the current gate (409 otherwise).
+    Behaviour: enqueues a gate_run worker job carrying the resume payload.
+    The worker translates the payload into ``Command(resume=...)`` against
+    the saver-checkpointed thread.
+
+    The legacy ``/advance`` and ``/rerun`` endpoints stay as thin wrappers
+    that target this same code path; ``/respond`` is the source-of-truth
+    for the FE ``<GateReviewPanel>``. ``send_back`` requires the worker
+    rewrite (4.A3.5/4.A3.14) and currently returns 501.
+    """
+    from src.models.pipeline_job import PipelineJobType
+    from src.workers.outbox import enqueue_outbox_job
+
+    case = (await db.execute(select(Case).where(Case.id == case_id))).scalar_one_or_none()
+    if case is None or case.created_by != current_user.id:
+        # Same response shape — judge enumeration is not allowed.
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
+
+    if case.status not in _GATE_PAUSE_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Case is not paused at any gate",
+        )
+
+    current_gate = case.status.value.removeprefix("awaiting_review_")
+    if current_gate not in _VALID_GATE_NAMES:
+        # Defensive — _GATE_PAUSE_STATUSES guarantees this, but pin the invariant.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Unrecognised pause status {case.status.value!r}",
+        )
+
+    # Action vs current-gate compatibility — gate4 cannot 'advance' (it is END).
+    if payload.action == "advance" and current_gate == "gate4":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Gate 4 is the final gate; record a decision instead",
+        )
+
+    # send_back — wired in 4.A3.14 worker support. Schema is final.
+    if payload.action == "send_back":
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail="send_back routing requires worker checkpoint rewind (4.A3.14)",
+        )
+
+    # halt — short-circuit; cancel rather than enqueue.
+    if payload.action == "halt":
+        db.add(
+            AuditLog(
+                case_id=case_id,
+                agent_name="judge",
+                action="gate_halt",
+                input_payload={"gate": current_gate, "notes": payload.notes},
+            )
+        )
+        case.status = CaseStatus.failed
+        await db.commit()
+        return MessageResponse(message=f"Halted at {current_gate}")
+
+    # advance / rerun — same outbox enqueue path as legacy endpoints.
+    audit_action = (
+        "gate_advanced" if payload.action == "advance" else "gate_rerun_requested"
+    )
+    audit_input: dict[str, Any] = {
+        "gate": current_gate,
+        "action": payload.action,
+        "notes": payload.notes,
+    }
+    if payload.action == "rerun":
+        audit_input["phase"] = payload.phase
+        audit_input["subagent"] = payload.subagent
+        audit_input["has_field_corrections"] = payload.field_corrections is not None
+    db.add(
+        AuditLog(
+            case_id=case_id,
+            agent_name="judge",
+            action=audit_action,
+            input_payload=audit_input,
+        )
+    )
+
+    case.status = CaseStatus.processing
+
+    if payload.action == "advance":
+        next_gate = _NEXT_GATE[current_gate]
+        if next_gate is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Gate 4 is the final gate; record a decision instead",
+            )
+        await enqueue_outbox_job(
+            db,
+            case_id=case_id,
+            job_type=PipelineJobType.gate_run,
+            payload={
+                "gate_name": next_gate,
+                "resume_action": "advance",
+                "notes": payload.notes,
+            },
+        )
+        await db.commit()
+        return MessageResponse(message=f"Advancing to {next_gate}")
+
+    # action == "rerun"
+    job_payload: dict[str, Any] = {
+        "gate_name": current_gate,
+        "resume_action": "rerun",
+        "phase": payload.phase,
+        "notes": payload.notes,
+    }
+    if payload.subagent is not None:
+        job_payload["subagent"] = payload.subagent
+    if payload.field_corrections is not None:
+        job_payload["field_corrections"] = payload.field_corrections
+    # Carry instructions in the legacy slot so the existing worker still
+    # reads them while the saver-driven rewrite is in flight.
+    if payload.notes:
+        job_payload["instructions"] = payload.notes
+    await enqueue_outbox_job(
+        db,
+        case_id=case_id,
+        job_type=PipelineJobType.gate_run,
+        payload=job_payload,
+    )
+    await db.commit()
+    return MessageResponse(message=f"Re-running {current_gate}")
 
 
 @router.post(
