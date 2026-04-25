@@ -1,0 +1,9 @@
+{
+  "$schema": "https://raw.githubusercontent.com/langchain-ai/langgraph/main/libs/cli/schemas/schema.json",
+  "dependencies": ["."],
+  "graphs": {
+    "verdictcouncil": "./src/pipeline/graph/builder.py:build_graph"
+  },
+  "env": "./.env",
+  "python_version": "3.12"
+}
