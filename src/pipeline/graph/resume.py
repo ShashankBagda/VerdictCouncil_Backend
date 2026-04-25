@@ -201,10 +201,7 @@ async def send_back_to_phase(
     # rewind point.
     target_config: RunnableConfig | None = None
     async for snap in graph.aget_state_history(runnable_config):
-        if any(
-            task.name == target_pause_node and task.interrupts
-            for task in snap.tasks
-        ):
+        if any(task.name == target_pause_node and task.interrupts for task in snap.tasks):
             target_config = snap.config
             break
 
@@ -276,14 +273,10 @@ async def cancel_via_halt(
         resume_payload: dict[str, Any] = {"action": "halt"}
         if reason:
             resume_payload["notes"] = reason
-        await graph.ainvoke(
-            Command(resume=resume_payload), cast(RunnableConfig, config)
-        )
+        await graph.ainvoke(Command(resume=resume_payload), cast(RunnableConfig, config))
         # The gate-apply node sets halt.reason="judge_halt"; overwrite to
         # "cancelled" + carry the `by` field, which judge_halt does not.
-        await graph.aupdate_state(
-            cast(RunnableConfig, config), {"halt": halt_payload}
-        )
+        await graph.aupdate_state(cast(RunnableConfig, config), {"halt": halt_payload})
         return
 
     await graph.aupdate_state(cast(RunnableConfig, config), {"halt": halt_payload})

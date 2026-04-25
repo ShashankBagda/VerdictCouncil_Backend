@@ -233,9 +233,7 @@ async def test_cancel_via_halt_paused_drives_to_terminal(monkeypatch) -> None:
     await _drive_to_gate(compiled, config, "cancel-paused", 1)
     assert await has_pending_interrupt(compiled, config)
 
-    await cancel_via_halt(
-        compiled, config, reason="judge cancelled mid-flight", by="judge-7"
-    )
+    await cancel_via_halt(compiled, config, reason="judge cancelled mid-flight", by="judge-7")
 
     state = await compiled.aget_state(config)
     assert state.next == (), f"Cancel must reach END; got next={state.next!r}"
@@ -320,22 +318,19 @@ async def test_send_back_to_synthesis_rewinds_thread(monkeypatch) -> None:
     )
 
     assert new_pause == "gate3", (
-        f"After send_back to synthesis the thread must re-pause at gate3; "
-        f"got {new_pause!r}"
+        f"After send_back to synthesis the thread must re-pause at gate3; got {new_pause!r}"
     )
 
     state = await compiled.aget_state(config)
     extras = state.values.get("extra_instructions") or {}
-    assert (
-        extras.get("synthesis")
-        == "redo conclusion 2 with stricter uncertainty handling"
-    ), "Note must land in extra_instructions[target_phase] for the re-run"
+    assert extras.get("synthesis") == "redo conclusion 2 with stricter uncertainty handling", (
+        "Note must land in extra_instructions[target_phase] for the re-run"
+    )
 
     # Stale gate4 checkpoints remain reachable via history (audit trail).
     history_after = [snap async for snap in compiled.aget_state_history(config)]
     assert len(history_after) > len(history_before), (
-        "Send-back must extend history with new fork checkpoints, not "
-        "drop the stale ones"
+        "Send-back must extend history with new fork checkpoints, not drop the stale ones"
     )
 
 
