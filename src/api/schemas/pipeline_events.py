@@ -103,6 +103,28 @@ class NarrationEvent(BaseModel):
     trace_id: str | None = None
 
 
+class InterruptEvent(BaseModel):
+    """Gate-pause interrupt — judge must respond via /cases/{id}/respond.
+
+    Emitted by `publish_interrupt(...)` (Sprint 4 4.A3.7) whenever the
+    LangGraph pipeline pauses at a gate. The ``phase_output`` carries
+    the per-gate review payload (intake / research / synthesis / audit
+    output for gates 1-4 respectively). ``audit_summary`` is gate4-only
+    and surfaces the optional `recommend_send_back` recommendation
+    from the auditor (4.A3.14).
+    """
+
+    kind: Literal["interrupt"] = "interrupt"
+    schema_version: Literal[1] = 1
+    case_id: UUID
+    gate: Literal["gate1", "gate2", "gate3", "gate4"]
+    actions: list[str]
+    phase_output: dict[str, Any] | None = None
+    audit_summary: dict[str, Any] | None = None
+    trace_id: str | None = None
+    ts: datetime
+
+
 class HeartbeatEvent(BaseModel):
     """Keepalive frame emitted on each SSE heartbeat tick."""
 
@@ -122,6 +144,11 @@ class AuthExpiringEvent(BaseModel):
 
 #: Discriminated union of all SSE event shapes on both streaming endpoints.
 Event = Annotated[
-    PipelineProgressEvent | AgentEvent | NarrationEvent | HeartbeatEvent | AuthExpiringEvent,
+    PipelineProgressEvent
+    | AgentEvent
+    | NarrationEvent
+    | InterruptEvent
+    | HeartbeatEvent
+    | AuthExpiringEvent,
     Field(discriminator="kind"),
 ]
