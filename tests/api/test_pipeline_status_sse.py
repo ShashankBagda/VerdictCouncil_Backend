@@ -231,9 +231,9 @@ class TestCancelPipeline:
             patch(
                 "src.pipeline.graph.runner.GraphPipelineRunner.run",
                 new_callable=AsyncMock,
-                return_value=__import__(
-                    "src.shared.case_state", fromlist=["CaseState"]
-                ).CaseState(case_id=str(case_id), status="processing"),
+                return_value=__import__("src.shared.case_state", fromlist=["CaseState"]).CaseState(
+                    case_id=str(case_id), status="processing"
+                ),
             ),
             patch(
                 "src.services.pipeline_events.check_cancel_flag",

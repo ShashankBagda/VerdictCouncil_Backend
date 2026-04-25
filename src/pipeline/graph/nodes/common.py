@@ -305,6 +305,7 @@ async def _run_agent_node(agent_name: str, state: GraphState) -> dict[str, Any]:
         if settings.mlflow_enabled:
             try:
                 import mlflow
+
                 if mlflow.active_run():
                     mlflow.log_text(
                         ai_msg.content if isinstance(ai_msg.content, str) else raw_content,

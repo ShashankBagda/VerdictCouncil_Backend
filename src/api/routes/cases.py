@@ -1240,10 +1240,7 @@ async def stream_pipeline_status(
                                 "schema_version": 1,
                                 "expires_at": token_expires_at.isoformat(),
                             }
-                            yield (
-                                f"event: auth_expiring\n"
-                                f"data: {json.dumps(auth_expiring)}\n\n"
-                            )
+                            yield (f"event: auth_expiring\ndata: {json.dumps(auth_expiring)}\n\n")
                     continue
                 # Extract the `kind` field to emit the named SSE event type so
                 # EventSource.addEventListener('progress'/'agent', ...) fires natively.
@@ -1364,6 +1361,7 @@ async def _run_case_pipeline(case_id: UUID) -> None:
         mlflow_run_id: str | None = None
         try:
             import mlflow as _mlflow
+
             active = _mlflow.active_run()
             if active:
                 mlflow_run_id = active.info.run_id

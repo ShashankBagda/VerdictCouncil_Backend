@@ -96,9 +96,7 @@ def test_response_format_returns_validated_pydantic_instance() -> None:
         model_config = ConfigDict(extra="forbid")
         message: str = Field(min_length=1)
 
-    fake = _ToolCallingFakeModel.build(
-        tool_name="EchoOutput", tool_args={"message": "hello"}
-    )
+    fake = _ToolCallingFakeModel.build(tool_name="EchoOutput", tool_args={"message": "hello"})
     agent = create_agent(
         model=fake,
         tools=[],
@@ -128,10 +126,7 @@ def test_smoke_surface_emits_no_deprecation_warnings() -> None:
         from langgraph.types import Command, Send, interrupt  # noqa: F401
         from langsmith import Client  # noqa: F401
 
-    deprecations = [
-        w for w in caught if issubclass(w.category, DeprecationWarning)
-    ]
-    assert not deprecations, (
-        "DeprecationWarning raised by Sprint 1 dep surface:\n"
-        + "\n".join(f"  - {w.filename}:{w.lineno} {w.message}" for w in deprecations)
+    deprecations = [w for w in caught if issubclass(w.category, DeprecationWarning)]
+    assert not deprecations, "DeprecationWarning raised by Sprint 1 dep surface:\n" + "\n".join(
+        f"  - {w.filename}:{w.lineno} {w.message}" for w in deprecations
     )

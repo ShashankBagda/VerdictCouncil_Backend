@@ -77,9 +77,7 @@ class TestToolLoopCap:
                 return_value=([fake_tool], MagicMock(metadata=None)),
             ),
             patch("src.pipeline.graph.nodes.common.publish_progress", new_callable=AsyncMock),
-            patch(
-                "src.pipeline.graph.nodes.common.publish_agent_event", new_callable=AsyncMock
-            ),
+            patch("src.pipeline.graph.nodes.common.publish_agent_event", new_callable=AsyncMock),
             patch("src.pipeline.graph.nodes.common.check_cancel_flag", return_value=False),
             patch(
                 "src.pipeline.graph.nodes.common.agent_run",
@@ -149,9 +147,7 @@ class TestToolLoopCap:
                 return_value=([fake_tool], MagicMock(metadata=None)),
             ),
             patch("src.pipeline.graph.nodes.common.publish_progress", new_callable=AsyncMock),
-            patch(
-                "src.pipeline.graph.nodes.common.publish_agent_event", new_callable=AsyncMock
-            ),
+            patch("src.pipeline.graph.nodes.common.publish_agent_event", new_callable=AsyncMock),
             patch("src.pipeline.graph.nodes.common.check_cancel_flag", return_value=False),
             patch(
                 "src.pipeline.graph.nodes.common.agent_run",
