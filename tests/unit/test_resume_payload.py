@@ -7,7 +7,6 @@ from pydantic import ValidationError
 
 from src.api.schemas.resume import ResumePayload
 
-
 # ---------------------------------------------------------------------------
 # Happy paths
 # ---------------------------------------------------------------------------

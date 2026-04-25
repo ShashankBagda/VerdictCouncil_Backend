@@ -72,7 +72,7 @@ class ResumePayload(BaseModel):
     )
 
     @model_validator(mode="after")
-    def _check_action_fields(self) -> "ResumePayload":
+    def _check_action_fields(self) -> ResumePayload:
         action = self.action
 
         rerun_only = (self.phase, self.subagent, self.field_corrections)

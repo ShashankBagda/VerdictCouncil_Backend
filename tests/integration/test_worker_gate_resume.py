@@ -35,7 +35,6 @@ from src.shared.case_state import CaseDomainEnum, CaseState, CaseStatusEnum
 from src.tools.exceptions import RetiredDomainError
 from src.workers import tasks
 
-
 # ---------------------------------------------------------------------------
 # Fixtures — minimal mocks that mirror the legacy test's shape
 # ---------------------------------------------------------------------------
@@ -322,9 +321,9 @@ async def test_resume_path_aborts_when_domain_retired_between_gates() -> None:
             new=publish_interrupt_mock,
         ),
         patch("src.services.pipeline_events.publish_progress", new=AsyncMock()),
+        pytest.raises(RetiredDomainError),
     ):
-        with pytest.raises(RetiredDomainError):
-            await tasks.run_gate_job({}, str(job.id))
+        await tasks.run_gate_job({}, str(job.id))
 
     drive_resume_mock.assert_not_awaited()
     persist_mock.assert_not_awaited()

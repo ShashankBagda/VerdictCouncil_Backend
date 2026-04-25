@@ -45,7 +45,10 @@ def _experiment_scores(client, name: str) -> dict[str, float]:
 
     aggregated: dict[str, list[float]] = {}
     for row in rows:
-        feedback = getattr(row, "feedback", None) or row.get("feedback", []) if isinstance(row, dict) else []
+        if isinstance(row, dict):
+            feedback = row.get("feedback", []) or []
+        else:
+            feedback = getattr(row, "feedback", None) or []
         for fb in feedback:
             key = fb.get("key") if isinstance(fb, dict) else getattr(fb, "key", None)
             score = fb.get("score") if isinstance(fb, dict) else getattr(fb, "score", None)
@@ -136,8 +139,10 @@ def main() -> int:
         scorer for scorer, (_b, _c, d) in deltas.items() if -d > args.threshold
     ]
     if regressed:
+        scorers = ", ".join(regressed)
+        threshold = f"{args.threshold:.0%}"
         print(
-            f"\n::error::Eval regression on scorers: {', '.join(regressed)} (>{args.threshold:.0%} drop)",
+            f"\n::error::Eval regression on scorers: {scorers} (>{threshold} drop)",
             file=sys.stderr,
         )
         return 1

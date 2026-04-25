@@ -36,7 +36,6 @@ from src.pipeline.graph.schemas import (
 )
 from src.shared.case_state import CaseState
 
-
 # ---------------------------------------------------------------------------
 # Stubs (avoid OpenAI; same shape as test_interrupt_resume.py)
 # ---------------------------------------------------------------------------

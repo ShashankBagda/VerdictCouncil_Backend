@@ -24,7 +24,6 @@ from __future__ import annotations
 from src.pipeline.graph import builder
 from src.pipeline.graph.state import _merge_retry_counts
 
-
 # ---------------------------------------------------------------------------
 # 4.A4.1 — reducer-only mutation
 # ---------------------------------------------------------------------------

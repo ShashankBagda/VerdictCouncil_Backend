@@ -29,7 +29,6 @@ from typing import Any
 
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
-from langgraph.graph import END
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command
 
@@ -142,7 +141,7 @@ async def _drive_to_gate(
     interrupt task.
     """
     await compiled.ainvoke(_initial_state(thread_id), config)
-    for gate_num in range(1, target_gate):
+    for _gate_num in range(1, target_gate):
         await compiled.ainvoke(Command(resume={"action": "advance"}), config)
     state = await compiled.aget_state(config)
     paused = _interrupted_node_names(state)
@@ -320,7 +319,7 @@ async def test_rerun_with_field_corrections_writes_state_slot(monkeypatch) -> No
     assert syn == corrections["synthesis_output"], (
         f"field_corrections must land in synthesis_output; got {syn!r}"
     )
-    assert f"gate3_pause" in _interrupted_node_names(state)
+    assert "gate3_pause" in _interrupted_node_names(state)
 
 
 # ---------------------------------------------------------------------------
