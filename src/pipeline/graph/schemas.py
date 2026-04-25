@@ -228,6 +228,10 @@ class LegalRule(BaseModel):
     citation: str
     text: str
     applicability: str
+    # Sprint 3 3.B.4 — citation provenance: source_ids backing this rule.
+    # Populated by 3.B.5 from the run's tool-artifact chain. Empty default
+    # keeps legacy outputs parseable during the rollout.
+    supporting_sources: list[str] = Field(default_factory=list)
 
 
 class Precedent(BaseModel):
@@ -237,6 +241,7 @@ class Precedent(BaseModel):
     jurisdiction: str
     holding: str
     relevance_rationale: str
+    supporting_sources: list[str] = Field(default_factory=list)
 
 
 class PrecedentProvenance(BaseModel):

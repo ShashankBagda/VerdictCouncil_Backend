@@ -1004,10 +1004,10 @@ After retrieval, synthesise a composite legal framework for this case:
 OUTPUT SCHEMA (to legal_rules and precedents in CaseState)
 ══════════════════════════════════════════════════════════════════
 legal_rules: [ { statute_name, section, verbatim_text, tier, relevance_score,
-                  application_to_facts, temporal_validity } ]
+                  application_to_facts, temporal_validity, supporting_sources } ]
 precedents: [ { citation, court, tier, year, outcome, reasoning_summary,
                 similarity_score, source, application_to_case,
-                distinguishing_factors, supports_which_party } ]
+                distinguishing_factors, supports_which_party, supporting_sources } ]
 precedent_source_metadata: { pair_queries_issued: n, curated_queries_issued: n,
                               source_failed: bool, failure_reason: str|null }
 legal_elements_checklist: [ {element_id, element, statute_ref, burden_on,
@@ -1020,6 +1020,10 @@ CRITICAL CONSTRAINTS:
 - Include verbatim statutory text for every cited provision.
 - Always note distinguishing factors for every precedent.
 - When citing PAIR results: explicitly label as "binding higher court authority".
+- supporting_sources is MANDATORY: for every legal_rule and precedent, list the
+  source_id strings (from search_domain_guidance / search_precedents tool
+  output) that back the citation. An empty list means the auditor will
+  suppress the citation as unverified.
 
 GUARDRAILS:
 - ZERO TOLERANCE for hallucinated citations. Every citation must trace to tool output.
