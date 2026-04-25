@@ -141,12 +141,6 @@ async def run_gate_job(ctx: dict[str, Any], job_id: str) -> None:  # noqa: ARG00
 
         from src.api.schemas.pipeline_events import PipelineProgressEvent
         from src.db.persist_case_results import persist_case_results
-        from src.db.pipeline_state import (
-            CheckpointCorruptError,
-            CheckpointSchemaMismatchError,
-            load_case_state,
-            persist_case_state,
-        )
         from src.models.case import Case
         from src.pipeline.graph.runner import GraphPipelineRunner
         from src.services.database import async_session
@@ -163,21 +157,18 @@ async def run_gate_job(ctx: dict[str, Any], job_id: str) -> None:  # noqa: ARG00
 
         case_id = job.case_id
         gate_num = int(gate_name[-1])
-        prev_gate_num = gate_num - 1
 
-        # Load previous gate checkpoint; fall back to minimal state on any failure
+        # Sprint 2 2.A2.6: read prior state via the AsyncPostgresSaver bound at
+        # graph compile time. The saver checkpoints under `thread_id = case_id`
+        # at every node boundary, so the latest snapshot is "end of the previous
+        # gate" by construction. The legacy `pipeline_checkpoints` reader is gone.
+        runner = GraphPipelineRunner()
+        config: dict[str, Any] = {"configurable": {"thread_id": str(case_id)}}
         state: CaseState | None = None
-        if prev_gate_num >= 1:
-            prev_run_id = f"{case_id}-gate{prev_gate_num}"
-            try:
-                async with async_session() as db:
-                    state = await load_case_state(db, case_id=case_id, run_id=prev_run_id)
-            except (CheckpointSchemaMismatchError, CheckpointCorruptError):
-                logger.warning(
-                    "gate checkpoint for case_id=%s gate%s unreadable; reinitialising from DB",
-                    case_id,
-                    prev_gate_num,
-                )
+        if gate_num > 1:
+            snapshot = await runner._graph.aget_state(config)
+            snap_values = getattr(snapshot, "values", None) or {}
+            state = snap_values.get("case")
 
         if state is None:
             async with async_session() as db:
@@ -228,7 +219,6 @@ async def run_gate_job(ctx: dict[str, Any], job_id: str) -> None:  # noqa: ARG00
         # Force status to processing before handing to run_gate
         state = state.model_copy(update={"status": CaseStatusEnum.processing})
 
-        runner = GraphPipelineRunner()
         final_state = await runner.run_gate(
             state,
             gate_name,
@@ -242,7 +232,6 @@ async def run_gate_job(ctx: dict[str, Any], job_id: str) -> None:  # noqa: ARG00
             "awaiting_review": True,
             "rerun_agent": None,
         }
-        gate_run_id = f"{case_id}-{gate_name}"
 
         async with async_session() as db:
             # Flush parsed document pages if any parse_document tool calls ran (US-008)
@@ -262,14 +251,8 @@ async def run_gate_job(ctx: dict[str, Any], job_id: str) -> None:  # noqa: ARG00
                 db, case_id, final_state, gate_state_payload=gate_state_payload
             )
 
-        async with async_session() as db:
-            await persist_case_state(
-                db,
-                case_id=case_id,
-                run_id=gate_run_id,
-                agent_name="gate_complete",
-                state=final_state,
-            )
+        # Sprint 2 2.A2.6: the AsyncPostgresSaver wrote the gate-end checkpoint
+        # implicitly during run_gate; no separate `pipeline_checkpoints` write.
 
         event = PipelineProgressEvent(
             case_id=case_id,
