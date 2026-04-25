@@ -36,22 +36,25 @@ PROMPTS_DIR = REPO_ROOT / "prompts"
 load_dotenv(REPO_ROOT / ".env", override=False)
 
 # Maps `prompts/<file>.md` → LangSmith prompt identifier.
-# Filenames are deliberately NOT prefixed with `verdict-council/`; the
-# subdirectory of the LangSmith project is added when we push so the
-# repo layout stays clean.
+#
+# LangSmith treats the part before `/` as the OWNER/TENANT, not as a
+# logical namespace. With a personal-scoped API key (Sprint 0 decision)
+# there is no `verdict-council` tenant to push under, so prompts live
+# in the personal namespace under their bare name. Logical grouping is
+# preserved via the `verdictcouncil` tag below.
 PROMPT_FILES: dict[str, str] = {
-    "intake.md": "verdict-council/intake",
-    "research-evidence.md": "verdict-council/research-evidence",
-    "research-facts.md": "verdict-council/research-facts",
-    "research-witnesses.md": "verdict-council/research-witnesses",
-    "research-law.md": "verdict-council/research-law",
-    "synthesis.md": "verdict-council/synthesis",
-    "audit.md": "verdict-council/audit",
+    "intake.md": "vc-intake",
+    "research-evidence.md": "vc-research-evidence",
+    "research-facts.md": "vc-research-facts",
+    "research-witnesses.md": "vc-research-witnesses",
+    "research-law.md": "vc-research-law",
+    "synthesis.md": "vc-synthesis",
+    "audit.md": "vc-audit",
 }
 
 # Tags applied to every commit so traces and registry browsers can
 # filter to the new-topology Sprint 1 prompts.
-COMMIT_TAGS = ["sprint-1", "topology-6phase"]
+COMMIT_TAGS = ["sprint-1", "topology-6phase", "verdictcouncil"]
 
 
 def _load_local(filename: str) -> str:

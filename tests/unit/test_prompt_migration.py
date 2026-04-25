@@ -69,7 +69,7 @@ def test_push_one_unchanged_when_remote_matches_local() -> None:
 
     action = _push_one(
         client,
-        "verdict-council/intake",
+        "vc-intake",
         "intake.md",
         dry_run=False,
     )
@@ -85,7 +85,7 @@ def test_push_one_updated_when_remote_drifts() -> None:
 
     action = _push_one(
         client,
-        "verdict-council/intake",
+        "vc-intake",
         "intake.md",
         dry_run=False,
     )
@@ -100,7 +100,7 @@ def test_push_one_created_when_remote_missing() -> None:
 
     action = _push_one(
         client,
-        "verdict-council/intake",
+        "vc-intake",
         "intake.md",
         dry_run=False,
     )
@@ -115,7 +115,7 @@ def test_push_one_dry_run_makes_no_api_calls_to_push() -> None:
 
     action = _push_one(
         client,
-        "verdict-council/intake",
+        "vc-intake",
         "intake.md",
         dry_run=True,
     )
@@ -129,4 +129,4 @@ def test_unrelated_pull_exception_propagates() -> None:
     client.pull_prompt.side_effect = RuntimeError("Connection refused")
 
     with pytest.raises(RuntimeError, match="Connection refused"):
-        _push_one(client, "verdict-council/intake", "intake.md", dry_run=False)
+        _push_one(client, "vc-intake", "intake.md", dry_run=False)
