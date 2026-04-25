@@ -167,7 +167,11 @@ class TestSearchPrecedentsTool:
             max_results=5,
             vector_store_id="vs-999",
         )
-        assert result == [{"case": "Test v Test"}]
+        # Tool now returns content_and_artifact; ainvoke({args}) surfaces only
+        # the content string. The artifact path is exercised in test_tool_artifact.
+        import json as _json
+
+        assert _json.loads(result) == [{"case": "Test v Test"}]
         assert side_ch.metadata == {"source_failed": False, "pair_status": "ok"}
 
     @pytest.mark.asyncio

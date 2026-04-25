@@ -10,8 +10,11 @@ node; the caller folds this into CaseState.precedent_source_metadata at exit.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 from typing import Any
 
+from langchain_core.documents import Document
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
@@ -54,6 +57,63 @@ class PrecedentMetaSideChannel:
     @property
     def metadata(self) -> dict[str, Any] | None:
         return self._meta
+
+
+# ---------------------------------------------------------------------------
+# Citation provenance helpers (Sprint 3 Workstream B)
+# ---------------------------------------------------------------------------
+
+
+def _content_hash(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+
+
+def _resolve_file_id(precedent: dict[str, Any]) -> str:
+    """Return a stable identifier for the precedent's source document.
+
+    Vector-store hits expose a real OpenAI `file_id`; live PAIR results do
+    not, so we synthesise one from the URL (or citation as last resort) so
+    every artifact carries a verifiable provenance key.
+    """
+    file_id = precedent.get("file_id")
+    if file_id:
+        return str(file_id)
+    surrogate = precedent.get("url") or precedent.get("citation") or ""
+    digest = hashlib.sha256(surrogate.encode("utf-8")).hexdigest()[:12]
+    return f"pair:{digest}"
+
+
+def _precedent_to_document(precedent: dict[str, Any]) -> Document:
+    """Project a precedent dict into a Document carrying citation provenance.
+
+    The page_content is a deterministic projection of the citable fields so
+    the resulting `source_id` is reproducible across runs.
+    """
+    citation = precedent.get("citation", "")
+    summary = precedent.get("reasoning_summary", "")
+    page_content = f"{citation}\n{summary}".strip()
+    file_id = _resolve_file_id(precedent)
+    source_id = f"{file_id}:{_content_hash(page_content)}"
+    score = precedent.get("similarity_score", 0)
+    return Document(
+        page_content=page_content,
+        metadata={
+            "source_id": source_id,
+            "file_id": file_id,
+            "filename": citation,
+            "score": score,
+            "url": precedent.get("url", ""),
+            "source": precedent.get("source", ""),
+        },
+    )
+
+
+def _format_precedents_for_llm(precedents: list[dict[str, Any]]) -> str:
+    """Render the precedent list back to the agent — the same JSON shape it
+    saw before content_and_artifact wrapping, so prompts stay backward-
+    compatible while artifacts carry typed Documents to the audit layer.
+    """
+    return json.dumps(precedents)
 
 
 # ---------------------------------------------------------------------------
@@ -260,12 +320,16 @@ def make_tools(
     # ------------------------------------------------------------------
     # search_precedents  (vector_store_id injected via closure)
     # ------------------------------------------------------------------
-    @tool("search_precedents", args_schema=_SearchPrecedentsInput)
+    @tool(
+        "search_precedents",
+        args_schema=_SearchPrecedentsInput,
+        response_format="content_and_artifact",
+    )
     async def search_precedents_tool(
         query: str,
         domain: str = "small_claims",
         max_results: int = 5,
-    ) -> list[dict]:
+    ) -> tuple[str, list[Document]]:
         """Query the PAIR Search API for binding higher court case law.
 
         Use this to find precedent cases matching the current fact pattern.
@@ -281,7 +345,8 @@ def make_tools(
             vector_store_id=vector_store_id,
         )
         precedent_meta.record(result.metadata)
-        return result.precedents
+        artifact = [_precedent_to_document(p) for p in result.precedents]
+        return _format_precedents_for_llm(result.precedents), artifact
 
     all_tools["search_precedents"] = search_precedents_tool
 

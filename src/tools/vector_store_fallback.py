@@ -93,6 +93,7 @@ async def vector_store_search(
                             "similarity_score": result.score if result.score else 0,
                             "url": "",
                             "source": "vector_store_fallback",
+                            "file_id": getattr(result, "file_id", "") or "",
                         }
                     )
 
