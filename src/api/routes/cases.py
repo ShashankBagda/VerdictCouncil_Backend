@@ -1353,7 +1353,18 @@ async def _run_case_pipeline(case_id: UUID) -> None:
 
         final_state = await GraphPipelineRunner().run(initial_state)
     except Exception as exc:
+        from src.pipeline.graph.nodes.common import AgentOutputParseError
+
         logger.exception("Pipeline run failed for case_id=%s", case_id)
+        reason = "llm_output_unparseable" if isinstance(exc, AgentOutputParseError) else "orchestrator_exception"
+        mlflow_run_id: str | None = None
+        try:
+            import mlflow as _mlflow
+            active = _mlflow.active_run()
+            if active:
+                mlflow_run_id = active.info.run_id
+        except Exception:
+            pass
         await publish_progress(
             PipelineProgressEvent(
                 case_id=case_id,
@@ -1362,7 +1373,7 @@ async def _run_case_pipeline(case_id: UUID) -> None:
                 step=None,
                 ts=datetime.now(UTC),
                 error=str(exc)[:500],
-                detail={"reason": "orchestrator_exception"},
+                detail={"reason": reason, **({"mlflow_run_id": mlflow_run_id} if mlflow_run_id else {})},
             )
         )
         async with async_session() as db:

@@ -52,6 +52,10 @@ logger = logging.getLogger(__name__)
 _MAX_TOOL_ITERATIONS = 10
 
 
+class AgentOutputParseError(ValueError):
+    """Raised when an agent's LLM output cannot be parsed as valid JSON state."""
+
+
 def _resolve_model(agent_name: str) -> str:
     tier = AGENT_MODEL_TIER[agent_name]
     attr = MODEL_TIER_MAP[tier]
@@ -289,9 +293,30 @@ async def _run_agent_node(agent_name: str, state: GraphState) -> dict[str, Any]:
 
     try:
         agent_output = json.loads(raw_content)
-    except json.JSONDecodeError:
-        logger.error("Agent '%s' returned non-JSON: %s", agent_name, raw_content[:500])
-        agent_output = {}
+    except json.JSONDecodeError as exc:
+        marker_found = _STATE_MARKER in (ai_msg.content if isinstance(ai_msg.content, str) else "")
+        logger.error(
+            "Agent '%s' returned unparseable output (marker_found=%s): %s",
+            agent_name,
+            marker_found,
+            raw_content[:500],
+        )
+        # Log the raw output to MLflow so it is inspectable after the run.
+        if settings.mlflow_enabled:
+            try:
+                import mlflow
+                if mlflow.active_run():
+                    mlflow.log_text(
+                        ai_msg.content if isinstance(ai_msg.content, str) else raw_content,
+                        "unparseable_output.txt",
+                    )
+                    mlflow.set_tag("parse_error", str(exc)[:200])
+            except Exception:
+                pass
+        raise AgentOutputParseError(
+            f"Agent '{agent_name}' returned non-JSON state "
+            f"(---STATE--- marker {'found' if marker_found else 'MISSING'}): {raw_content[:500]}"
+        ) from exc
 
     agent_output = normalize_agent_output(agent_name, agent_output)
 
