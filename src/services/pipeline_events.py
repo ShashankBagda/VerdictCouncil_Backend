@@ -84,7 +84,18 @@ async def publish_progress(event: PipelineProgressEvent) -> None:
 
     Failures are logged but never raised — pipeline execution must not
     be blocked by the observability sidecar.
+
+    Sprint 2 2.C1.5: stamps the active OTEL trace_id onto the event when
+    the caller did not supply one. Workers run inside an OTEL context
+    re-established from `pipeline_jobs.traceparent`, so this captures the
+    original API request's trace.
     """
+    if event.trace_id is None:
+        from src.api.trace_propagation import current_trace_id
+
+        tid = current_trace_id()
+        if tid:
+            event = event.model_copy(update={"trace_id": tid})
     try:
         r = await _get_redis_client()
         await r.publish(_channel(event.case_id), event.model_dump_json())
@@ -108,8 +119,12 @@ async def publish_agent_event(case_id: str | object, event: dict) -> None:
     running pipeline.
     """
     try:
+        from src.api.trace_propagation import current_trace_id
+
         r = await _get_redis_client()
         stamped = {"kind": "agent", "schema_version": 1, **event}
+        if "trace_id" not in stamped:
+            stamped["trace_id"] = current_trace_id()
         await r.publish(_channel(case_id), json.dumps(stamped, default=str))
         asyncio.create_task(_tee_write(case_id, stamped))
     except Exception:
@@ -129,6 +144,8 @@ async def publish_narration(
     text as soon as the agent finishes its analysis.
     """
     try:
+        from src.api.trace_propagation import current_trace_id
+
         r = await _get_redis_client()
         event = {
             "kind": "narration",
@@ -138,6 +155,7 @@ async def publish_narration(
             "content": content,
             "chunk_index": chunk_index,
             "ts": datetime.now(UTC).isoformat(),
+            "trace_id": current_trace_id(),
         }
         await r.publish(_channel(case_id), json.dumps(event, default=str))
         asyncio.create_task(_tee_write(case_id, event))

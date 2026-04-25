@@ -3,6 +3,6 @@
   "scenario": "tool_call",
   "pydantic_class": "AgentEvent",
   "publisher": "publish_agent_event (services/pipeline_events.py)",
-  "wire_payload": "{\"kind\": \"agent\", \"schema_version\": 1, \"case_id\": \"11111111-1111-1111-1111-111111111111\", \"ts\": \"2026-04-25T12:00:00+00:00\", \"agent\": \"legal-knowledge\", \"event\": \"tool_call\", \"tool_name\": \"search_precedents\", \"args\": {\"query\": \"fair use of copyrighted material\", \"top_k\": 3}}",
-  "sse_frame": "event: agent\ndata: {\"kind\": \"agent\", \"schema_version\": 1, \"case_id\": \"11111111-1111-1111-1111-111111111111\", \"ts\": \"2026-04-25T12:00:00+00:00\", \"agent\": \"legal-knowledge\", \"event\": \"tool_call\", \"tool_name\": \"search_precedents\", \"args\": {\"query\": \"fair use of copyrighted material\", \"top_k\": 3}}\n\n"
+  "wire_payload": "{\"kind\": \"agent\", \"schema_version\": 1, \"case_id\": \"11111111-1111-1111-1111-111111111111\", \"ts\": \"2026-04-25T12:00:00+00:00\", \"trace_id\": \"0af7651916cd43dd8448eb211c80319c\", \"agent\": \"legal-knowledge\", \"event\": \"tool_call\", \"tool_name\": \"search_precedents\", \"args\": {\"query\": \"fair use of copyrighted material\", \"top_k\": 3}}",
+  "sse_frame": "event: agent\ndata: {\"kind\": \"agent\", \"schema_version\": 1, \"case_id\": \"11111111-1111-1111-1111-111111111111\", \"ts\": \"2026-04-25T12:00:00+00:00\", \"trace_id\": \"0af7651916cd43dd8448eb211c80319c\", \"agent\": \"legal-knowledge\", \"event\": \"tool_call\", \"tool_name\": \"search_precedents\", \"args\": {\"query\": \"fair use of copyrighted material\", \"top_k\": 3}}\n\n"
 }

@@ -79,6 +79,13 @@ class PipelineProgressEvent(BaseModel):
             "MLflow UI URL because the path includes /experiments/<id>/runs/<run_id>."
         ),
     )
+    trace_id: str | None = Field(
+        None,
+        description=(
+            "W3C OTEL trace id (32 lowercase hex chars). Sprint 2 2.C1.5; "
+            "consumers tolerate absence for backward compat."
+        ),
+    )
 
 
 class AgentEvent(BaseModel):
@@ -94,6 +101,7 @@ class AgentEvent(BaseModel):
     args: dict[str, Any] | None = None
     result: str | None = None
     ts: str
+    trace_id: str | None = None
 
 
 class NarrationEvent(BaseModel):
@@ -106,6 +114,7 @@ class NarrationEvent(BaseModel):
     content: str
     chunk_index: int = 0
     ts: str
+    trace_id: str | None = None
 
 
 class HeartbeatEvent(BaseModel):
@@ -114,6 +123,7 @@ class HeartbeatEvent(BaseModel):
     kind: Literal["heartbeat"] = "heartbeat"
     schema_version: Literal[1] = 1
     ts: datetime
+    trace_id: str | None = None
 
 
 class AuthExpiringEvent(BaseModel):

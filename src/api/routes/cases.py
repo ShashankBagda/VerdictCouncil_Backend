@@ -846,10 +846,13 @@ async def stream_intake_events(
                 except TimeoutError:
                     if producer_done.is_set() and queue.empty():
                         return
+                    from src.api.trace_propagation import current_trace_id
+
                     heartbeat = {
                         "kind": "heartbeat",
                         "schema_version": 1,
                         "ts": datetime.now(UTC).isoformat(),
+                        "trace_id": current_trace_id(),
                     }
                     yield f"event: heartbeat\ndata: {json.dumps(heartbeat)}\n\n"
                     continue
@@ -1222,11 +1225,14 @@ async def stream_pipeline_status(
                 except TimeoutError:
                     if producer_done.is_set() and queue.empty():
                         return
+                    from src.api.trace_propagation import current_trace_id
+
                     now = datetime.now(UTC)
                     heartbeat = {
                         "kind": "heartbeat",
                         "schema_version": 1,
                         "ts": now.isoformat(),
+                        "trace_id": current_trace_id(),
                     }
                     yield f"event: heartbeat\ndata: {json.dumps(heartbeat)}\n\n"
                     # Emit auth_expiring when the session cookie will expire within

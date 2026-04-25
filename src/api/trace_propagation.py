@@ -31,6 +31,22 @@ _TRACEPARENT_RE = re.compile(
 )
 
 
+def current_trace_id() -> str | None:
+    """Return the active span's trace id as 32 lowercase hex chars, or None.
+
+    Returns None when no span is active or the span context is invalid
+    (e.g., tests that don't install a tracer provider). Callers should
+    treat absence as "no trace context" rather than failing.
+    """
+    from opentelemetry import trace
+
+    span = trace.get_current_span()
+    ctx = span.get_span_context()
+    if not ctx.is_valid:
+        return None
+    return f"{ctx.trace_id:032x}"
+
+
 def format_w3c_traceparent(span: Span) -> str | None:
     """Render the active span as a W3C traceparent header value.
 

@@ -3,6 +3,6 @@
   "scenario": "tool_result",
   "pydantic_class": "AgentEvent",
   "publisher": "publish_agent_event (services/pipeline_events.py)",
-  "wire_payload": "{\"kind\": \"agent\", \"schema_version\": 1, \"case_id\": \"11111111-1111-1111-1111-111111111111\", \"ts\": \"2026-04-25T12:00:00+00:00\", \"agent\": \"legal-knowledge\", \"event\": \"tool_result\", \"tool_name\": \"search_precedents\", \"result\": \"[{'case_name': 'Smith v Jones', 'year': 2018, 'score': 0.83}]\"}",
-  "sse_frame": "event: agent\ndata: {\"kind\": \"agent\", \"schema_version\": 1, \"case_id\": \"11111111-1111-1111-1111-111111111111\", \"ts\": \"2026-04-25T12:00:00+00:00\", \"agent\": \"legal-knowledge\", \"event\": \"tool_result\", \"tool_name\": \"search_precedents\", \"result\": \"[{'case_name': 'Smith v Jones', 'year': 2018, 'score': 0.83}]\"}\n\n"
+  "wire_payload": "{\"kind\": \"agent\", \"schema_version\": 1, \"case_id\": \"11111111-1111-1111-1111-111111111111\", \"ts\": \"2026-04-25T12:00:00+00:00\", \"trace_id\": \"0af7651916cd43dd8448eb211c80319c\", \"agent\": \"legal-knowledge\", \"event\": \"tool_result\", \"tool_name\": \"search_precedents\", \"result\": \"[{'case_name': 'Smith v Jones', 'year': 2018, 'score': 0.83}]\"}",
+  "sse_frame": "event: agent\ndata: {\"kind\": \"agent\", \"schema_version\": 1, \"case_id\": \"11111111-1111-1111-1111-111111111111\", \"ts\": \"2026-04-25T12:00:00+00:00\", \"trace_id\": \"0af7651916cd43dd8448eb211c80319c\", \"agent\": \"legal-knowledge\", \"event\": \"tool_result\", \"tool_name\": \"search_precedents\", \"result\": \"[{'case_name': 'Smith v Jones', 'year': 2018, 'score': 0.83}]\"}\n\n"
 }

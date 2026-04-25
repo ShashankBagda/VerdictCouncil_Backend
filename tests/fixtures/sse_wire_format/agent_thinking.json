@@ -3,6 +3,6 @@
   "scenario": "thinking",
   "pydantic_class": "AgentEvent",
   "publisher": "publish_agent_event (services/pipeline_events.py)",
-  "wire_payload": "{\"kind\": \"agent\", \"schema_version\": 1, \"case_id\": \"11111111-1111-1111-1111-111111111111\", \"ts\": \"2026-04-25T12:00:00+00:00\", \"agent\": \"evidence-analysis\", \"event\": \"thinking\", \"content\": \"\\u2192 gpt-5 \\u00b7 tools=2\"}",
-  "sse_frame": "event: agent\ndata: {\"kind\": \"agent\", \"schema_version\": 1, \"case_id\": \"11111111-1111-1111-1111-111111111111\", \"ts\": \"2026-04-25T12:00:00+00:00\", \"agent\": \"evidence-analysis\", \"event\": \"thinking\", \"content\": \"\\u2192 gpt-5 \\u00b7 tools=2\"}\n\n"
+  "wire_payload": "{\"kind\": \"agent\", \"schema_version\": 1, \"case_id\": \"11111111-1111-1111-1111-111111111111\", \"ts\": \"2026-04-25T12:00:00+00:00\", \"trace_id\": \"0af7651916cd43dd8448eb211c80319c\", \"agent\": \"evidence-analysis\", \"event\": \"thinking\", \"content\": \"\\u2192 gpt-5 \\u00b7 tools=2\"}",
+  "sse_frame": "event: agent\ndata: {\"kind\": \"agent\", \"schema_version\": 1, \"case_id\": \"11111111-1111-1111-1111-111111111111\", \"ts\": \"2026-04-25T12:00:00+00:00\", \"trace_id\": \"0af7651916cd43dd8448eb211c80319c\", \"agent\": \"evidence-analysis\", \"event\": \"thinking\", \"content\": \"\\u2192 gpt-5 \\u00b7 tools=2\"}\n\n"
 }

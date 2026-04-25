@@ -38,6 +38,8 @@ FROZEN_TS = datetime(2026, 4, 25, 12, 0, 0, tzinfo=UTC)
 FROZEN_TS_ISO = FROZEN_TS.isoformat()
 FROZEN_CASE_ID = "11111111-1111-1111-1111-111111111111"
 FROZEN_RUN_ID = "22222222-2222-2222-2222-222222222222"
+# Sprint 2 2.C1.5: pinned W3C trace id for byte-stable fixtures.
+FROZEN_TRACE_ID = "0af7651916cd43dd8448eb211c80319c"
 
 
 def _sse_frame(kind: str, payload: str) -> str:
@@ -64,6 +66,7 @@ def fixture_progress_agent_started() -> dict:
         phase="started",
         step=3,
         ts=FROZEN_TS,
+        trace_id=FROZEN_TRACE_ID,
     )
     payload = event.model_dump_json()
     return {
@@ -85,6 +88,7 @@ def fixture_progress_agent_completed() -> dict:
         ts=FROZEN_TS,
         mlflow_run_id="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         mlflow_experiment_id="0",
+        trace_id=FROZEN_TRACE_ID,
     )
     payload = event.model_dump_json()
     return {
@@ -105,6 +109,7 @@ def fixture_progress_pipeline_terminal() -> dict:
         step=None,
         ts=FROZEN_TS,
         detail={"reason": "completed", "stopped_at": "hearing-governance"},
+        trace_id=FROZEN_TRACE_ID,
     )
     payload = event.model_dump_json()
     return {
@@ -131,6 +136,7 @@ def _agent_event(extra: dict) -> dict:
         "schema_version": 1,
         "case_id": FROZEN_CASE_ID,
         "ts": FROZEN_TS_ISO,
+        "trace_id": FROZEN_TRACE_ID,
     }
     return {**base, **extra}
 
@@ -231,6 +237,7 @@ def fixture_narration() -> dict:
         ),
         "chunk_index": 0,
         "ts": FROZEN_TS_ISO,
+        "trace_id": FROZEN_TRACE_ID,
     }
     payload = json.dumps(event, default=str)
     return {
@@ -254,9 +261,10 @@ def fixture_heartbeat() -> dict:
         "kind": "heartbeat",
         "schema_version": 1,
         "ts": FROZEN_TS_ISO,
+        "trace_id": FROZEN_TRACE_ID,
     }
     payload = json.dumps(heartbeat_dict)
-    pydantic_payload = HeartbeatEvent(ts=FROZEN_TS).model_dump_json()
+    pydantic_payload = HeartbeatEvent(ts=FROZEN_TS, trace_id=FROZEN_TRACE_ID).model_dump_json()
     return {
         "event_type": "heartbeat",
         "scenario": "idle_keepalive",
@@ -391,6 +399,7 @@ def fixture_scenario_gate2_fanout() -> dict:
             phase="started",
             step=idx,
             ts=FROZEN_TS,
+            trace_id=FROZEN_TRACE_ID,
         )
         sequence.append(json.loads(event.model_dump_json()))
 
