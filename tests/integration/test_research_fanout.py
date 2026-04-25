@@ -145,7 +145,6 @@ def _initial_state() -> GraphState:
         extra_instructions={},
         retry_counts={},
         halt=None,
-        mlflow_run_ids={},
         research_parts={},
         research_output=None,
         is_resume=False,

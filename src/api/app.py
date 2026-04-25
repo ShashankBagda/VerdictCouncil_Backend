@@ -10,7 +10,6 @@ from src.api.middleware.metrics import MetricsMiddleware, metrics_endpoint
 from src.api.middleware.rate_limit import RateLimitMiddleware
 from src.api.middleware.trace_context import TraceContextMiddleware
 from src.pipeline.graph.checkpointer import lifespan_checkpointer
-from src.pipeline.observability import configure_mlflow
 from src.shared.config import settings
 
 OPENAPI_TAGS = [
@@ -126,7 +125,6 @@ def _custom_openapi(app: FastAPI) -> dict:
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
-    configure_mlflow()
     # Hold the LangGraph AsyncPostgresSaver context manager open over the
     # FastAPI app lifetime so checkpointer connections survive across
     # requests (per source-driven audit F-1/F-1b). Setting `LANGGRAPH_CHECKPOINTER=disabled`

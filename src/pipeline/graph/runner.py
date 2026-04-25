@@ -14,7 +14,6 @@ import uuid
 from src.pipeline.graph.builder import build_graph
 from src.pipeline.graph.runner_stream_adapter import stream_to_sse
 from src.pipeline.graph.state import GraphState
-from src.pipeline.observability import pipeline_run
 from src.shared.case_state import CaseState, CaseStatusEnum
 from src.shared.config import settings
 
@@ -89,7 +88,6 @@ class GraphPipelineRunner:
             extra_instructions=extra_instructions or {},
             retry_counts={},
             halt=None,
-            mlflow_run_ids={},
             research_parts={},
             research_output=None,
             intake_output=None,
@@ -181,14 +179,7 @@ class GraphPipelineRunner:
         run_id = case_state.run_id or str(uuid.uuid4())
         initial_state = self._build_initial_state(case_state, run_id)
 
-        with pipeline_run(
-            case_id=str(case_state.case_id or "unknown"),
-            run_id=run_id,
-            mode="langgraph",
-        ):
-            result = await self._invoke(initial_state, trace_id=trace_id)
-
-        return result
+        return await self._invoke(initial_state, trace_id=trace_id)
 
     async def run_gate(
         self,
@@ -226,12 +217,7 @@ class GraphPipelineRunner:
             is_resume=start_agent is not None,
         )
 
-        with pipeline_run(
-            case_id=str(case_state.case_id or "unknown"),
-            run_id=run_id,
-            mode="langgraph",
-        ):
-            result = await self._invoke(initial_state, trace_id=trace_id)
+        result = await self._invoke(initial_state, trace_id=trace_id)
 
         gate_pause_status = CaseStatusEnum[f"awaiting_review_{gate_name}"]
         result = result.model_copy(update={"status": gate_pause_status})

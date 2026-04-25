@@ -91,10 +91,7 @@ async def test_runner_run_threads_trace_id_into_config_metadata() -> None:
     runner._graph = MagicMock()
     runner._graph.aget_state = AsyncMock(return_value=snapshot)
 
-    with (
-        patch("src.pipeline.graph.runner.stream_to_sse", side_effect=fake_stream_to_sse),
-        patch("src.pipeline.graph.runner.pipeline_run"),
-    ):
+    with patch("src.pipeline.graph.runner.stream_to_sse", side_effect=fake_stream_to_sse):
         await runner.run(
             CaseState(case_id="11111111-1111-1111-1111-111111111111"),
             trace_id="0af7651916cd43dd8448eb211c80319c",

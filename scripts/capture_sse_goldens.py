@@ -86,8 +86,6 @@ def fixture_progress_agent_completed() -> dict:
         phase="completed",
         step=3,
         ts=FROZEN_TS,
-        mlflow_run_id="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        mlflow_experiment_id="0",
         trace_id=FROZEN_TRACE_ID,
     )
     payload = event.model_dump_json()

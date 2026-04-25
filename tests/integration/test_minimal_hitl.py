@@ -103,7 +103,6 @@ def _initial_state() -> dict[str, Any]:
         "extra_instructions": {},
         "retry_counts": {},
         "halt": None,
-        "mlflow_run_ids": {},
         "research_parts": {},
         "research_output": None,
         "is_resume": False,

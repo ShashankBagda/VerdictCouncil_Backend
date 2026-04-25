@@ -29,15 +29,6 @@ def _merge_retry_counts(base: dict[str, int], update: dict[str, int]) -> dict[st
     return merged
 
 
-def _merge_dicts(base: dict, update: dict) -> dict:
-    """Reducer for dict fields written by parallel branches: shallow union.
-
-    Later writes for the same key win. Prevents parallel Gate-2 nodes from
-    clobbering each other's entries via last-writer-wins.
-    """
-    return {**base, **update}
-
-
 def _merge_research_parts(
     base: dict[str, ResearchPart],
     update: dict[str, ResearchPart],
@@ -122,10 +113,6 @@ class GraphState(TypedDict):
 
     # Set by any node that escalates or halts the pipeline
     halt: dict[str, Any] | None
-
-    # MLflow run IDs written by each node after its agent_run() context manager exits
-    # Value is (mlflow_run_id, experiment_id)
-    mlflow_run_ids: Annotated[dict[str, tuple[str, str]], _merge_dicts]
 
     # Research fan-out accumulator (1.A1.5). Subagents write
     # `{scope: ResearchPart(...)}`; the reducer dict-merges by scope so

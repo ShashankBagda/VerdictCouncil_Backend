@@ -139,10 +139,7 @@ async def startup(ctx: dict[str, Any]) -> None:
     cancelled by arq during shutdown.
     """
     from src.pipeline.graph.checkpointer import lifespan_checkpointer
-    from src.pipeline.observability import configure_mlflow
     from src.shared.config import settings
-
-    configure_mlflow()
 
     # Open the AsyncPostgresSaver context manager once and stash the CM on
     # ctx so `shutdown` can __aexit__ it. Mirrors the FastAPI lifespan path

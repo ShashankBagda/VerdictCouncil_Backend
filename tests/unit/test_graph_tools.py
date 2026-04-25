@@ -23,7 +23,6 @@ def _make_state(vector_store_id: str | None = "vs-test-123") -> dict:
         "extra_instructions": {},
         "retry_counts": {},
         "halt": None,
-        "mlflow_run_ids": {},
         "is_resume": False,
         "start_agent": None,
     }

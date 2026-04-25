@@ -1366,15 +1366,6 @@ async def _run_case_pipeline(case_id: UUID, *, trace_id: str | None = None) -> N
         # with `ToolStrategy(handle_errors=True)` retries on validation errors
         # internally, so a leaked exception here is uniformly orchestrator-level.
         reason = "orchestrator_exception"
-        mlflow_run_id: str | None = None
-        try:
-            import mlflow as _mlflow
-
-            active = _mlflow.active_run()
-            if active:
-                mlflow_run_id = active.info.run_id
-        except Exception:
-            pass
         await publish_progress(
             PipelineProgressEvent(
                 case_id=case_id,
@@ -1383,10 +1374,7 @@ async def _run_case_pipeline(case_id: UUID, *, trace_id: str | None = None) -> N
                 step=None,
                 ts=datetime.now(UTC),
                 error=str(exc)[:500],
-                detail={
-                    "reason": reason,
-                    **({"mlflow_run_id": mlflow_run_id} if mlflow_run_id else {}),
-                },
+                detail={"reason": reason},
             )
         )
         async with async_session() as db:

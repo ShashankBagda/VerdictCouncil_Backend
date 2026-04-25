@@ -79,11 +79,6 @@ class Settings(BaseSettings):
     # smoke tests or when running against an env without Postgres).
     langgraph_checkpointer: str = "postgres"
 
-    # MLflow tracing (LLMSecOps observability)
-    mlflow_enabled: bool = False
-    mlflow_tracking_uri: str = "http://localhost:5001"
-    mlflow_experiment: str = "verdictcouncil-pipeline"
-
     # Environment tag (Sprint 1 1.C3a.1). Injected into every graph run's
     # `metadata={"env": ...}` so LangSmith traces can be filtered by env
     # without splitting the project. Values: "dev" | "staging" | "prod".

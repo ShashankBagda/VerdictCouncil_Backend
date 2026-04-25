@@ -15,8 +15,6 @@
       "ts": "2026-04-25T12:00:00Z",
       "error": null,
       "detail": null,
-      "mlflow_run_id": null,
-      "mlflow_experiment_id": null,
       "trace_id": "0af7651916cd43dd8448eb211c80319c"
     },
     {
@@ -30,8 +28,6 @@
       "ts": "2026-04-25T12:00:00Z",
       "error": null,
       "detail": null,
-      "mlflow_run_id": null,
-      "mlflow_experiment_id": null,
       "trace_id": "0af7651916cd43dd8448eb211c80319c"
     },
     {
@@ -45,8 +41,6 @@
       "ts": "2026-04-25T12:00:00Z",
       "error": null,
       "detail": null,
-      "mlflow_run_id": null,
-      "mlflow_experiment_id": null,
       "trace_id": "0af7651916cd43dd8448eb211c80319c"
     },
     {
@@ -60,10 +54,8 @@
       "ts": "2026-04-25T12:00:00Z",
       "error": null,
       "detail": null,
-      "mlflow_run_id": null,
-      "mlflow_experiment_id": null,
       "trace_id": "0af7651916cd43dd8448eb211c80319c"
     }
   ],
-  "sse_frame_concatenated": "event: progress\ndata: {\"kind\": \"progress\", \"schema_version\": 1, \"case_id\": \"11111111-1111-1111-1111-111111111111\", \"agent\": \"evidence-analysis\", \"phase\": \"started\", \"step\": 3, \"total\": 9, \"ts\": \"2026-04-25T12:00:00Z\", \"error\": null, \"detail\": null, \"mlflow_run_id\": null, \"mlflow_experiment_id\": null, \"trace_id\": \"0af7651916cd43dd8448eb211c80319c\"}\n\nevent: progress\ndata: {\"kind\": \"progress\", \"schema_version\": 1, \"case_id\": \"11111111-1111-1111-1111-111111111111\", \"agent\": \"fact-reconstruction\", \"phase\": \"started\", \"step\": 4, \"total\": 9, \"ts\": \"2026-04-25T12:00:00Z\", \"error\": null, \"detail\": null, \"mlflow_run_id\": null, \"mlflow_experiment_id\": null, \"trace_id\": \"0af7651916cd43dd8448eb211c80319c\"}\n\nevent: progress\ndata: {\"kind\": \"progress\", \"schema_version\": 1, \"case_id\": \"11111111-1111-1111-1111-111111111111\", \"agent\": \"witness-analysis\", \"phase\": \"started\", \"step\": 5, \"total\": 9, \"ts\": \"2026-04-25T12:00:00Z\", \"error\": null, \"detail\": null, \"mlflow_run_id\": null, \"mlflow_experiment_id\": null, \"trace_id\": \"0af7651916cd43dd8448eb211c80319c\"}\n\nevent: progress\ndata: {\"kind\": \"progress\", \"schema_version\": 1, \"case_id\": \"11111111-1111-1111-1111-111111111111\", \"agent\": \"legal-knowledge\", \"phase\": \"started\", \"step\": 6, \"total\": 9, \"ts\": \"2026-04-25T12:00:00Z\", \"error\": null, \"detail\": null, \"mlflow_run_id\": null, \"mlflow_experiment_id\": null, \"trace_id\": \"0af7651916cd43dd8448eb211c80319c\"}\n\n"
+  "sse_frame_concatenated": "event: progress\ndata: {\"kind\": \"progress\", \"schema_version\": 1, \"case_id\": \"11111111-1111-1111-1111-111111111111\", \"agent\": \"evidence-analysis\", \"phase\": \"started\", \"step\": 3, \"total\": 9, \"ts\": \"2026-04-25T12:00:00Z\", \"error\": null, \"detail\": null, \"trace_id\": \"0af7651916cd43dd8448eb211c80319c\"}\n\nevent: progress\ndata: {\"kind\": \"progress\", \"schema_version\": 1, \"case_id\": \"11111111-1111-1111-1111-111111111111\", \"agent\": \"fact-reconstruction\", \"phase\": \"started\", \"step\": 4, \"total\": 9, \"ts\": \"2026-04-25T12:00:00Z\", \"error\": null, \"detail\": null, \"trace_id\": \"0af7651916cd43dd8448eb211c80319c\"}\n\nevent: progress\ndata: {\"kind\": \"progress\", \"schema_version\": 1, \"case_id\": \"11111111-1111-1111-1111-111111111111\", \"agent\": \"witness-analysis\", \"phase\": \"started\", \"step\": 5, \"total\": 9, \"ts\": \"2026-04-25T12:00:00Z\", \"error\": null, \"detail\": null, \"trace_id\": \"0af7651916cd43dd8448eb211c80319c\"}\n\nevent: progress\ndata: {\"kind\": \"progress\", \"schema_version\": 1, \"case_id\": \"11111111-1111-1111-1111-111111111111\", \"agent\": \"legal-knowledge\", \"phase\": \"started\", \"step\": 6, \"total\": 9, \"ts\": \"2026-04-25T12:00:00Z\", \"error\": null, \"detail\": null, \"trace_id\": \"0af7651916cd43dd8448eb211c80319c\"}\n\n"
 }

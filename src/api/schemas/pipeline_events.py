@@ -65,20 +65,6 @@ class PipelineProgressEvent(BaseModel):
             "Extra payload for terminal events: {'reason': <halt reason>, 'stopped_at': <stage>}."
         ),
     )
-    mlflow_run_id: str | None = Field(
-        None,
-        description=(
-            "MLflow run UUID for the nested agent run. Populated on the "
-            "`completed` phase when MLflow tracing is enabled."
-        ),
-    )
-    mlflow_experiment_id: str | None = Field(
-        None,
-        description=(
-            "MLflow experiment id owning `mlflow_run_id`. Needed to build the "
-            "MLflow UI URL because the path includes /experiments/<id>/runs/<run_id>."
-        ),
-    )
     trace_id: str | None = Field(
         None,
         description=(

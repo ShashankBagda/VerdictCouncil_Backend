@@ -3,6 +3,6 @@
   "scenario": "agent_completed",
   "pydantic_class": "PipelineProgressEvent",
   "publisher": "publish_progress (services/pipeline_events.py)",
-  "wire_payload": "{\"kind\":\"progress\",\"schema_version\":1,\"case_id\":\"11111111-1111-1111-1111-111111111111\",\"agent\":\"evidence-analysis\",\"phase\":\"completed\",\"step\":3,\"total\":9,\"ts\":\"2026-04-25T12:00:00Z\",\"error\":null,\"detail\":null,\"mlflow_run_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mlflow_experiment_id\":\"0\",\"trace_id\":\"0af7651916cd43dd8448eb211c80319c\"}",
-  "sse_frame": "event: progress\ndata: {\"kind\":\"progress\",\"schema_version\":1,\"case_id\":\"11111111-1111-1111-1111-111111111111\",\"agent\":\"evidence-analysis\",\"phase\":\"completed\",\"step\":3,\"total\":9,\"ts\":\"2026-04-25T12:00:00Z\",\"error\":null,\"detail\":null,\"mlflow_run_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"mlflow_experiment_id\":\"0\",\"trace_id\":\"0af7651916cd43dd8448eb211c80319c\"}\n\n"
+  "wire_payload": "{\"kind\":\"progress\",\"schema_version\":1,\"case_id\":\"11111111-1111-1111-1111-111111111111\",\"agent\":\"evidence-analysis\",\"phase\":\"completed\",\"step\":3,\"total\":9,\"ts\":\"2026-04-25T12:00:00Z\",\"error\":null,\"detail\":null,\"trace_id\":\"0af7651916cd43dd8448eb211c80319c\"}",
+  "sse_frame": "event: progress\ndata: {\"kind\":\"progress\",\"schema_version\":1,\"case_id\":\"11111111-1111-1111-1111-111111111111\",\"agent\":\"evidence-analysis\",\"phase\":\"completed\",\"step\":3,\"total\":9,\"ts\":\"2026-04-25T12:00:00Z\",\"error\":null,\"detail\":null,\"trace_id\":\"0af7651916cd43dd8448eb211c80319c\"}\n\n"
 }
