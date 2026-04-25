@@ -33,7 +33,7 @@ def test_all_seven_prompt_files_exist() -> None:
 
 
 def test_prompt_count_matches_topology() -> None:
-    """Sprint 1 6-phase topology requires exactly 7 prompts (1 intake + 4 research + synthesis + audit)."""
+    """6-phase topology: 1 intake + 4 research + synthesis + audit = 7 prompts."""
     assert len(PROMPT_FILES) == 7, (
         f"Expected 7 phase-aligned prompts (intake + 4 research + synthesis "
         f"+ audit); got {len(PROMPT_FILES)}: {sorted(PROMPT_FILES)}"

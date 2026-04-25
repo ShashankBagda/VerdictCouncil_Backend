@@ -22,10 +22,18 @@ import os
 import sys
 from pathlib import Path
 
+from dotenv import load_dotenv
 from langchain_core.prompts import ChatPromptTemplate
 from langsmith import Client
 
-PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
+REPO_ROOT = Path(__file__).resolve().parent.parent
+PROMPTS_DIR = REPO_ROOT / "prompts"
+
+# Load credentials from the backend's .env so the script can be run
+# straight from the venv without `export LANGSMITH_API_KEY=...`. Existing
+# environment values win — this matches how `Settings(BaseSettings)`
+# behaves elsewhere in the codebase.
+load_dotenv(REPO_ROOT / ".env", override=False)
 
 # Maps `prompts/<file>.md` → LangSmith prompt identifier.
 # Filenames are deliberately NOT prefixed with `verdict-council/`; the
