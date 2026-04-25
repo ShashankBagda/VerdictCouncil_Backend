@@ -269,9 +269,9 @@ async def _run_agent_node(agent_name: str, state: GraphState) -> dict[str, Any]:
     if not raw_content:
         raw_content = "{}"
 
-    _STATE_MARKER = "---STATE---"
-    if _STATE_MARKER in raw_content:
-        _narration_part, _, _state_part = raw_content.partition(_STATE_MARKER)
+    state_marker = "---STATE---"
+    if state_marker in raw_content:
+        _narration_part, _, _state_part = raw_content.partition(state_marker)
         narration_text = _narration_part.strip()
         raw_content = _state_part.strip()
     else:
@@ -294,7 +294,7 @@ async def _run_agent_node(agent_name: str, state: GraphState) -> dict[str, Any]:
     try:
         agent_output = json.loads(raw_content)
     except json.JSONDecodeError as exc:
-        marker_found = _STATE_MARKER in (ai_msg.content if isinstance(ai_msg.content, str) else "")
+        marker_found = state_marker in (ai_msg.content if isinstance(ai_msg.content, str) else "")
         logger.error(
             "Agent '%s' returned unparseable output (marker_found=%s): %s",
             agent_name,

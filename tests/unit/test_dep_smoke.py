@@ -16,8 +16,6 @@ from __future__ import annotations
 
 import warnings
 
-import pytest
-
 
 def test_core_imports_resolve() -> None:
     """All Sprint 1 entry-point symbols must import cleanly."""
