@@ -1677,6 +1677,27 @@ _NEXT_GATE: dict[str, str | None] = {
     "gate4": None,
 }
 
+#: Sprint 4 4.A3 — legacy gate names → unified ResumePayload phase. The
+#: worker keys off ``resume_action`` to choose the saver-driven path
+#: (`drive_resume`) over the legacy ``_run_gate_via_legacy`` path.
+_GATE_TO_PHASE: dict[str, str] = {
+    "gate1": "intake",
+    "gate2": "research",
+    "gate3": "synthesis",
+    "gate4": "audit",
+}
+
+#: Legacy gate2 agent_name → unified ResearchPart subagent. Other
+#: gates have no per-subagent granularity in the new topology, so a
+#: legacy ``agent_name`` for those gates is dropped and a phase-level
+#: rerun is enqueued.
+_AGENT_TO_SUBAGENT: dict[str, str] = {
+    "evidence-analysis": "evidence",
+    "fact-reconstruction": "facts",
+    "witness-analysis": "witnesses",
+    "legal-knowledge": "law",
+}
+
 
 @router.post(
     "/{case_id}/gates/{gate_name}/advance",
@@ -1684,6 +1705,10 @@ _NEXT_GATE: dict[str, str | None] = {
     status_code=status.HTTP_202_ACCEPTED,
     operation_id="advance_gate",
     summary="Advance to the next pipeline gate",
+    description=(
+        "Sprint 4 4.A3 — thin wrapper around POST /respond with "
+        "action='advance'. Kept for clients that haven't migrated."
+    ),
 )
 async def advance_gate(
     case_id: UUID,
@@ -1731,7 +1756,10 @@ async def advance_gate(
         db,
         case_id=case_id,
         job_type=PipelineJobType.gate_run,
-        payload={"gate_name": next_gate},
+        payload={
+            "gate_name": next_gate,
+            "resume_action": "advance",
+        },
     )
     await db.commit()
 
@@ -1744,6 +1772,12 @@ async def advance_gate(
     status_code=status.HTTP_202_ACCEPTED,
     operation_id="rerun_gate",
     summary="Re-run agents in the current gate from a specific agent",
+    description=(
+        "Sprint 4 4.A3 — thin wrapper around POST /respond with "
+        "action='rerun'. Maps legacy gate_name → phase and (gate2 only) "
+        "agent_name → subagent. Other gates' agent_name is dropped and "
+        "a phase-level rerun is enqueued."
+    ),
 )
 async def rerun_gate(
     case_id: UUID,
@@ -1778,6 +1812,9 @@ async def rerun_gate(
             detail=f"Agent {body.agent_name!r} is not in {gate_name}",
         )
 
+    phase = _GATE_TO_PHASE[gate_name]
+    subagent = _AGENT_TO_SUBAGENT.get(body.agent_name) if body.agent_name else None
+
     db.add(
         AuditLog(
             case_id=case_id,
@@ -1785,21 +1822,34 @@ async def rerun_gate(
             action="gate_rerun_requested",
             input_payload={
                 "gate_name": gate_name,
+                "phase": phase,
+                "subagent": subagent,
                 "start_agent": body.agent_name,
                 "has_instructions": bool(body.instructions),
             },
         )
     )
     case.status = CaseStatus.processing
+    job_payload: dict[str, Any] = {
+        "gate_name": gate_name,
+        "resume_action": "rerun",
+        "phase": phase,
+    }
+    if subagent is not None:
+        job_payload["subagent"] = subagent
+    if body.instructions:
+        # Carry the legacy `instructions` slot too — `_run_gate_via_legacy`
+        # still reads it for in-flight pre-cutover jobs (`workers/tasks.py`
+        # backwards-compat path).
+        job_payload["instructions"] = body.instructions
+        job_payload["notes"] = body.instructions
+    if body.agent_name:
+        job_payload["start_agent"] = body.agent_name
     await enqueue_outbox_job(
         db,
         case_id=case_id,
         job_type=PipelineJobType.gate_run,
-        payload={
-            "gate_name": gate_name,
-            "start_agent": body.agent_name,
-            "instructions": body.instructions,
-        },
+        payload=job_payload,
     )
     await db.commit()
 
