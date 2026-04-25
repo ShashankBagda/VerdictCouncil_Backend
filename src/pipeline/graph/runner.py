@@ -12,18 +12,24 @@ import logging
 import uuid
 
 from src.pipeline.graph.builder import build_graph
+from src.pipeline.graph.runner_stream_adapter import stream_to_sse
 from src.pipeline.graph.state import GraphState
 from src.pipeline.observability import pipeline_run
 from src.shared.case_state import CaseState, CaseStatusEnum
 
 logger = logging.getLogger(__name__)
 
-# Gate name → the node name that begins execution for that gate
+# Gate name → the node name that begins execution for that gate (1.A1.7
+# topology). `run_gate` / `run_what_if` use this when the caller does not
+# specify `start_agent`. NOTE: jump-to-start_agent routing is currently
+# unwired — the new builder always begins from `intake`. Reactivating
+# start-from-node semantics is a follow-up (likely Sprint 4 / 4.A3 with
+# the gate UX work).
 _GATE_ENTRY_NODE: dict[str, str] = {
-    "gate1": "case_processing",
-    "gate2": "gate2_dispatch",
-    "gate3": "argument_construction",
-    "gate4": "hearing_governance",
+    "gate1": "intake",
+    "gate2": "research_dispatch",
+    "gate3": "synthesis",
+    "gate4": "auditor",
 }
 
 
@@ -65,17 +71,35 @@ class GraphPipelineRunner:
         )
 
     async def _invoke(self, initial_state: GraphState) -> CaseState:
-        """Invoke the compiled graph and return the final CaseState.
+        """Drive the compiled graph via streaming and return the final CaseState.
 
         Threads `thread_id = case_id` into the LangGraph config so the
-        compile-time checkpointer can persist per-case state across
-        gates and reruns. Without this, `interrupt()` / `Command(resume=...)`
+        compile-time checkpointer can persist per-case state across gates
+        and reruns. Without this, `interrupt()` / `Command(resume=...)`
         cannot work.
+
+        Sprint 1 1.A1.8: the runner uses `stream_to_sse(...)` so SSE
+        side-effects flow through the streaming adapter, then the terminal
+        state is read back from the checkpointer via `aget_state(config)`.
+        Replaces the legacy `graph.ainvoke(...)` call. SSE emission today
+        happens via direct `publish_*` calls inside the agent middleware;
+        the stream-writer-based pattern (V-8) becomes load-bearing once
+        nodes start writing through `get_stream_writer()` in a later
+        sprint, but the runner's invocation surface is already aligned.
         """
         case = initial_state["case"]
-        config = {"configurable": {"thread_id": str(case.case_id)}}
-        result = await self._graph.ainvoke(initial_state, config=config)
-        return result["case"]
+        case_id = str(case.case_id)
+        config = {"configurable": {"thread_id": case_id}}
+
+        await stream_to_sse(
+            graph=self._graph,
+            initial_state=initial_state,
+            config=config,
+            case_id=case_id,
+        )
+
+        snapshot = await self._graph.aget_state(config)
+        return snapshot.values["case"]
 
     # ------------------------------------------------------------------
     # Public surface (matches PipelineRunner)

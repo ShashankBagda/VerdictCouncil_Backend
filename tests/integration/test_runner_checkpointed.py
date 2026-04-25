@@ -63,8 +63,13 @@ def test_runner_invocations_thread_thread_id() -> None:
     The checkpointer needs `config.configurable.thread_id` to persist
     state. Without this, `interrupt()` / `Command(resume=...)` cannot
     work — which Sprint 1's gate stubs depend on (codex P0-2).
+
+    Sprint 1 1.A1.8: the runner now drives the graph via `astream`
+    (through `stream_to_sse`) and reads terminal state via
+    `aget_state`. Both must receive the same case-id-keyed config.
     """
-    from unittest.mock import AsyncMock, patch
+    import asyncio
+    from unittest.mock import patch
 
     from src.pipeline.graph.runner import GraphPipelineRunner
     from src.shared.case_state import CaseDomainEnum, CaseState
@@ -88,17 +93,37 @@ def test_runner_invocations_thread_thread_id() -> None:
 
     runner = GraphPipelineRunner(checkpointer=InMemorySaver())
 
-    captured: dict = {}
+    astream_configs: list = []
+    aget_state_configs: list = []
 
-    async def _fake_ainvoke(state, config=None, **_kwargs):  # type: ignore[no-untyped-def]
-        captured["config"] = config
-        return {"case": case}
+    async def _fake_astream(_state, *, config=None, stream_mode=None):  # type: ignore[no-untyped-def]
+        astream_configs.append(config)
+        if False:  # generator marker
+            yield None
 
-    with patch.object(runner._graph, "ainvoke", new=AsyncMock(side_effect=_fake_ainvoke)):
-        import asyncio
+    class _FakeSnapshot:
+        values = {"case": case}
 
+    async def _fake_aget_state(config):  # type: ignore[no-untyped-def]
+        aget_state_configs.append(config)
+        return _FakeSnapshot()
+
+    with (
+        patch.object(runner._graph, "astream", new=_fake_astream),
+        patch.object(runner._graph, "aget_state", new=_fake_aget_state),
+    ):
         asyncio.run(runner.run(case))
 
-    assert captured["config"] is not None, "runner must pass config to ainvoke"
-    thread_id = captured["config"].get("configurable", {}).get("thread_id")
-    assert thread_id == str(case.case_id), f"thread_id should be the case_id; got {thread_id!r}"
+    expected = str(case.case_id)
+    assert astream_configs and astream_configs[0] is not None, (
+        "runner must pass config to astream (via stream_to_sse)"
+    )
+    assert astream_configs[0].get("configurable", {}).get("thread_id") == expected, (
+        f"astream thread_id should be the case_id; got {astream_configs[0]!r}"
+    )
+    assert aget_state_configs and aget_state_configs[0] is not None, (
+        "runner must pass config to aget_state for terminal state read"
+    )
+    assert aget_state_configs[0].get("configurable", {}).get("thread_id") == expected, (
+        f"aget_state thread_id should be the case_id; got {aget_state_configs[0]!r}"
+    )
