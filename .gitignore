@@ -33,3 +33,6 @@ htmlcov/
 # OS
 .DS_Store
 Thumbs.db
+
+# Local planning / agent context (Claude Code skills + AGENTS doc convention)
+.context/
