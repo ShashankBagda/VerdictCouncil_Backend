@@ -354,7 +354,11 @@ async def get_whatif_result(
         )
     )
     scenario = result.scalar_one_or_none()
-    if not scenario:
+    # R-10 cross-judge isolation (Sprint 4 4.A5.4): a scenario is private
+    # to its creator. Returning 404 (not 403) hides the existence of
+    # another judge's hypothetical from B's view — the URL must be
+    # indistinguishable from a non-existent scenario.
+    if not scenario or scenario.created_by != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Scenario not found",
