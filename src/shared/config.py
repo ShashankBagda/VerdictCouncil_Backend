@@ -74,6 +74,11 @@ class Settings(BaseSettings):
     pair_circuit_breaker_threshold: int = 3
     pair_circuit_breaker_timeout: int = 60
 
+    # LangGraph checkpointer mode — "postgres" wires the AsyncPostgresSaver via
+    # the FastAPI lifespan / arq startup hook; "disabled" skips it (useful for
+    # smoke tests or when running against an env without Postgres).
+    langgraph_checkpointer: str = "postgres"
+
     # MLflow tracing (LLMSecOps observability)
     mlflow_enabled: bool = False
     mlflow_tracking_uri: str = "http://localhost:5001"

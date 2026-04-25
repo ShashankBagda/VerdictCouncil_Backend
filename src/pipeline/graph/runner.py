@@ -30,8 +30,15 @@ _GATE_ENTRY_NODE: dict[str, str] = {
 class GraphPipelineRunner:
     """LangGraph-backed pipeline runner with PipelineRunner-compatible surface."""
 
-    def __init__(self) -> None:
-        self._graph = build_graph()
+    def __init__(self, checkpointer=None) -> None:
+        """Build the compiled graph.
+
+        Args:
+            checkpointer: Optional `BaseCheckpointSaver`. None defers to the
+                process-wide singleton set by the FastAPI lifespan / arq
+                startup hooks. Tests pass an `InMemorySaver` here.
+        """
+        self._graph = build_graph(checkpointer=checkpointer)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -58,8 +65,16 @@ class GraphPipelineRunner:
         )
 
     async def _invoke(self, initial_state: GraphState) -> CaseState:
-        """Invoke the compiled graph and return the final CaseState."""
-        result = await self._graph.ainvoke(initial_state)
+        """Invoke the compiled graph and return the final CaseState.
+
+        Threads `thread_id = case_id` into the LangGraph config so the
+        compile-time checkpointer can persist per-case state across
+        gates and reruns. Without this, `interrupt()` / `Command(resume=...)`
+        cannot work.
+        """
+        case = initial_state["case"]
+        config = {"configurable": {"thread_id": str(case.case_id)}}
+        result = await self._graph.ainvoke(initial_state, config=config)
         return result["case"]
 
     # ------------------------------------------------------------------

@@ -138,9 +138,19 @@ async def startup(ctx: dict[str, Any]) -> None:
     Both tasks run for the lifetime of the worker process and are
     cancelled by arq during shutdown.
     """
+    from src.pipeline.graph.checkpointer import lifespan_checkpointer
     from src.pipeline.observability import configure_mlflow
+    from src.shared.config import settings
 
     configure_mlflow()
+
+    # Open the AsyncPostgresSaver context manager once and stash the CM on
+    # ctx so `shutdown` can __aexit__ it. Mirrors the FastAPI lifespan path
+    # (per source-driven audit F-1/F-1b).
+    if settings.langgraph_checkpointer != "disabled":
+        cm = lifespan_checkpointer(settings.database_url)
+        await cm.__aenter__()
+        ctx["_checkpointer_cm"] = cm
 
     arq_redis: ArqRedis = ctx["redis"]
     ctx["_dispatcher_task"] = asyncio.create_task(dispatcher_loop(arq_redis))
@@ -161,4 +171,11 @@ async def shutdown(ctx: dict[str, Any]) -> None:
             pass
         except Exception:
             logger.exception("error cancelling %s", key)
+
+    cm = ctx.get("_checkpointer_cm")
+    if cm is not None:
+        try:
+            await cm.__aexit__(None, None, None)
+        except Exception:
+            logger.exception("error tearing down LangGraph checkpointer")
     logger.info("pipeline outbox dispatcher + stuck-recovery loops stopped")
