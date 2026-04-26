@@ -75,11 +75,16 @@ def build_resume_payload(payload: dict[str, Any]) -> dict[str, Any]:
     resume: dict[str, Any] = {"action": action}
     notes = payload.get("notes")
     subagent = payload.get("subagent")
-    if action == "rerun" and subagent and notes:
-        # Targeted note — keyed by subagent so the dispatcher's Send
-        # payload reaches the right scope. Other scopes still re-run
-        # but without a corrective instruction.
-        resume["notes"] = {str(subagent): str(notes)}
+    if action == "rerun" and subagent:
+        # Targeted rerun — key the entry by scope so the research
+        # router can scope its fan-out to that subagent only. Empty
+        # string when no note is supplied: the factory's correction
+        # path uses ``if not corrections: return base``, so an empty
+        # string is a no-op for the prompt while still being a truthy
+        # "key present" signal for ``route_to_research_subagents``.
+        # Without this branch, a no-instructions rerun lost the
+        # targeting and silently widened to all four research scopes.
+        resume["notes"] = {str(subagent): str(notes) if notes else ""}
     elif notes:
         resume["notes"] = notes
     if isinstance(payload.get("field_corrections"), dict):

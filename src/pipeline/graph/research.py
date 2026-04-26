@@ -57,16 +57,29 @@ def research_dispatch_node(state: dict[str, Any]) -> dict[str, Any]:
 def route_to_research_subagents(state: dict[str, Any]) -> list[Send]:
     """Conditional-edge router: fan out one `Send` per research scope.
 
+    Targeting (Phase 2 — gate-2 scoped rerun): if
+    ``state["extra_instructions"]`` carries any research-scope key
+    (``evidence`` / ``facts`` / ``witnesses`` / ``law``), fan out only
+    to those scopes. The dict-keyed ``research_parts`` accumulator keeps
+    the other three scopes' outputs intact — a no-instructions rerun of
+    a single subagent therefore preserves its peers' work, not
+    overwrites it. Falls through to all-four when ``extra_instructions``
+    is empty or only carries non-scope keys (e.g. ``{"gate2": ...}`` —
+    the legacy 'whole gate' rerun shape).
+
     Send payload includes only what the subagent needs to do its work:
     the case state and any judge-supplied extra instructions. Each
-    subagent runs independently; LangGraph awaits all four before
-    transitioning to `research_join`.
+    subagent runs independently; LangGraph awaits all dispatched
+    branches before transitioning to ``research_join``.
     """
+    extra: dict[str, Any] = state.get("extra_instructions") or {}
+    target_scopes = [scope for scope in RESEARCH_SCOPES if scope in extra]
+    scopes = tuple(target_scopes) if target_scopes else RESEARCH_SCOPES
     payload: dict[str, Any] = {
         "case": state["case"],
-        "extra_instructions": state.get("extra_instructions", {}),
+        "extra_instructions": extra,
     }
-    return [Send(RESEARCH_SUBAGENT_NODES[scope], payload) for scope in RESEARCH_SCOPES]
+    return [Send(RESEARCH_SUBAGENT_NODES[scope], payload) for scope in scopes]
 
 
 def research_join_node(state: dict[str, Any]) -> dict[str, Any]:
