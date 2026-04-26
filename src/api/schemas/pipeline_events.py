@@ -211,6 +211,58 @@ class InterruptEvent(BaseModel):
     ts: datetime
 
 
+class AgentAwaitingInputEvent(BaseModel):
+    """Q1.11 chat-steering — fired when an agent calls `ask_judge(...)`.
+
+    Shares `kind="interrupt"` with `InterruptEvent` (gate pauses) so the
+    SSE layer routes both through the same `interrupt` event channel.
+    Consumers discriminate on payload shape: gate pauses carry `gate`,
+    agent pauses carry `question` + `interrupt_id`.
+
+    The `interrupt_id` is minted inside the `ask_judge` tool body
+    (uuid4().hex) and rides through to /respond — the API matches the
+    inbound id against the pending interrupt to reject stale double-sends.
+    """
+
+    kind: Literal["interrupt"] = "interrupt"
+    schema_version: Literal[1] = 1
+    case_id: UUID
+    agent: str = Field(
+        ...,
+        description=(
+            "Phase or research-{scope} that fired the interrupt — used by "
+            "the frontend to route the chat panel to the right AgentCard."
+        ),
+    )
+    question: str = Field(..., description="The verbatim question text.")
+    interrupt_id: str = Field(
+        ..., description="UUID4 hex minted by the ask_judge tool body."
+    )
+    ts: datetime
+    trace_id: str | None = None
+
+
+class AgentResumedEvent(BaseModel):
+    """Q1.11 chat-steering — fired immediately after /respond resumes the graph.
+
+    Lets the UI clear the chat input + return the AgentCard to its
+    `running` state before the next `llm_token` frame lands. Without
+    this the panel would hang on `awaiting_input` until the resumed
+    model call started emitting tokens.
+    """
+
+    kind: Literal["agent"] = "agent"
+    schema_version: Literal[1] = 1
+    case_id: str
+    agent: str
+    event: Literal["agent_resumed"]
+    interrupt_id: str = Field(
+        ..., description="Mirrors the resumed interrupt's id for client-side matching."
+    )
+    ts: str
+    trace_id: str | None = None
+
+
 class HeartbeatEvent(BaseModel):
     """Keepalive frame emitted on each SSE heartbeat tick."""
 
@@ -242,6 +294,8 @@ Event = (
     | ToolCallDeltaEvent
     | StructuredArtifactEvent
     | NarrationEvent
+    | AgentAwaitingInputEvent
+    | AgentResumedEvent
     | InterruptEvent
     | HeartbeatEvent
     | AuthExpiringEvent

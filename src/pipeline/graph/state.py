@@ -7,6 +7,9 @@ from typing import Annotated, Any, Generic, TypeVar
 
 from typing_extensions import TypedDict
 
+from langchain_core.messages import BaseMessage
+from langgraph.graph.message import add_messages
+
 from src.pipeline.graph.schemas import (
     AuditOutput,
     IntakeOutput,
@@ -200,3 +203,11 @@ class GraphState(TypedDict):
 
     # When set, graph execution begins from this node instead of case_processing
     start_agent: str | None
+
+    # Append-only chat log between agents and the judge (Q1.11 chat-steering).
+    # AIMessages are agent questions raised via the `ask_judge` tool; HumanMessages
+    # are judge replies posted to /respond with action="message". Phase agents
+    # surface this list in their input payload so prior thread context survives
+    # across gates. Reducer is `add_messages` (LangGraph stdlib): dedupes by id,
+    # appends otherwise — replay-safe by construction.
+    judge_messages: Annotated[list[BaseMessage], add_messages]

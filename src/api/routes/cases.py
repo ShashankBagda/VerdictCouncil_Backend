@@ -2055,12 +2055,128 @@ def _gate_for_phase(phase: str) -> str:
     return _PHASE_TO_GATE[phase]
 
 
+async def _handle_message_resume(
+    case_id: UUID,
+    payload: ResumePayload,
+    db: DBSession,
+) -> MessageResponse:
+    """Q1.11 chat-steering — resume an agent paused on `ask_judge`.
+
+    Distinct from the gate-pause flow: the agent (today only synthesis)
+    is mid-phase, blocked inside its tool call. We:
+      1. Read the checkpointer for a pending `ask_judge` interrupt.
+      2. Verify the inbound `interrupt_id` matches — 409 if stale.
+      3. Append the Judge's reply to `judge_messages` via aupdate_state
+         so the chat thread persists across gates and reruns.
+      4. Schedule the actual `Command(resume=...)` drive as a background
+         task — the post-resume execution may run for many seconds, and
+         the Judge's HTTP request should not block on it.
+      5. Emit AgentResumedEvent so the frontend can clear the chat input
+         immediately, before the next llm_token frame lands.
+    """
+    import asyncio
+
+    from langchain_core.messages import HumanMessage
+    from langgraph.types import Command
+
+    from src.pipeline.graph.runner import GraphPipelineRunner
+    from src.services.pipeline_events import publish_agent_event
+
+    assert payload.text is not None and payload.interrupt_id is not None
+
+    runner = GraphPipelineRunner()
+    if runner._graph is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Graph runtime is in cloud mode; chat-steering not yet wired",
+        )
+
+    config = {"configurable": {"thread_id": str(case_id)}}
+
+    # 1 + 2: locate the pending ask_judge interrupt and validate id match.
+    snapshot = await runner._graph.aget_state(config)
+    pending_match: dict[str, Any] | None = None
+    for task in snapshot.tasks:
+        for interrupt in getattr(task, "interrupts", []) or []:
+            value = getattr(interrupt, "value", None)
+            if (
+                isinstance(value, dict)
+                and value.get("kind") == "ask_judge"
+                and value.get("interrupt_id") == payload.interrupt_id
+            ):
+                pending_match = value
+                break
+        if pending_match is not None:
+            break
+
+    if pending_match is None:
+        # Either no pending ask_judge interrupt, or the id has already
+        # been resolved (typical cause: double-click / network retry).
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="No pending ask_judge interrupt matches that interrupt_id",
+        )
+
+    # 3 + 4. Atomic state-update + resume. We MUST do both in one
+    # `Command(update=..., resume=...)` — calling `aupdate_state` first
+    # would fork state and clear the pending interrupt, after which
+    # `ainvoke(Command(resume=...))` has nothing to resume against.
+    # `add_messages` (the reducer on judge_messages) appends.
+    async def _drive_resume() -> None:
+        try:
+            await runner._graph.ainvoke(
+                Command(
+                    update={
+                        "judge_messages": [HumanMessage(content=payload.text)]
+                    },
+                    resume={"text": payload.text},
+                ),
+                config=config,
+            )
+        except Exception:
+            logger.exception(
+                "ask_judge resume failed for case=%s interrupt_id=%s",
+                case_id,
+                payload.interrupt_id,
+            )
+
+    asyncio.create_task(_drive_resume())
+
+    # Audit log + 5. SSE resumed-event in parallel with the background task.
+    db.add(
+        AuditLog(
+            case_id=case_id,
+            agent_name="judge",
+            action="agent_message",
+            input_payload={
+                "interrupt_id": payload.interrupt_id,
+                "text_chars": len(payload.text),
+            },
+        )
+    )
+    await db.commit()
+
+    await publish_agent_event(
+        str(case_id),
+        {
+            "kind": "agent",
+            "case_id": str(case_id),
+            "agent": "synthesis",
+            "event": "agent_resumed",
+            "interrupt_id": payload.interrupt_id,
+            "ts": datetime.now(UTC).isoformat(),
+        },
+    )
+
+    return MessageResponse(message="Reply delivered; agent resumed")
+
+
 @router.post(
     "/{case_id}/respond",
     response_model=MessageResponse,
     status_code=status.HTTP_202_ACCEPTED,
     operation_id="respond_to_gate",
-    summary="Unified gate-resume endpoint (advance / rerun / halt / send_back)",
+    summary="Unified gate-resume endpoint (advance / rerun / halt / send_back / message)",
 )
 async def respond_to_gate(
     case_id: UUID,
@@ -2088,6 +2204,14 @@ async def respond_to_gate(
     if case is None or case.created_by != current_user.id:
         # Same response shape — judge enumeration is not allowed.
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
+
+    # Q1.11 chat-steering: action="message" replies to an agent-initiated
+    # ask_judge interrupt mid-phase. The case status is `processing` at
+    # this point, NOT awaiting_review_* — the gate-pause guard below would
+    # reject it. Handle this branch first so the rest of the endpoint sees
+    # only gate-paused cases.
+    if payload.action == "message":
+        return await _handle_message_resume(case_id, payload, db)
 
     if case.status not in _GATE_PAUSE_STATUSES:
         raise HTTPException(

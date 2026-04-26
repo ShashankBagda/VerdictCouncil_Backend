@@ -78,7 +78,12 @@ AGENT_TOOLS: dict[str, list[str]] = {
     "fact-reconstruction": ["timeline_construct"],
     "witness-analysis": ["generate_questions"],
     "legal-knowledge": ["search_precedents", "search_domain_guidance"],
-    "argument-construction": ["confidence_calc"],
+    # `ask_judge` (Q1.11) is registered under the legacy entry that maps
+    # closest to the new `synthesis` phase so `_build_all_tools` picks it up;
+    # the new-topology PHASE_TOOL_NAMES["synthesis"] then scopes who can
+    # actually call it. The legacy 9-agent topology is dead, but the tool
+    # aggregator still walks AGENT_TOOLS — keep both in sync.
+    "argument-construction": ["confidence_calc", "ask_judge"],
     "hearing-analysis": [],
     "hearing-governance": [],
 }

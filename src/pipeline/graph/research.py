@@ -37,6 +37,7 @@ from langgraph.types import Send
 from src.pipeline.graph.agents.factory import make_research_subagent
 from src.pipeline.graph.output_validator import validate_law_citations
 from src.pipeline.graph.schemas import ResearchOutput, ResearchPart
+from src.shared.case_state import CaseState, EvidenceAnalysis, ExtractedFacts, Witnesses
 
 RESEARCH_SCOPES: tuple[str, ...] = ("evidence", "facts", "witnesses", "law")
 
@@ -91,6 +92,13 @@ def research_join_node(state: dict[str, Any]) -> dict[str, Any]:
     Citations whose `supporting_sources` don't match the run's retrieved
     set are stripped and recorded in `LawResearch.suppressed_citations`
     before the join's output reaches the gate.
+
+    The merged ResearchOutput also lands on `case.evidence_analysis` /
+    `case.extracted_facts` / `case.witnesses` / `case.legal_rules` etc.
+    Without this, persistence reads `None` from the case fields and the
+    Gate 2 panel surfaces zero counts even though the agents produced
+    real data — `persist_case_results` reads from `state.case`, not from
+    the `research_output` slot.
     """
     parts: dict[str, ResearchPart] = state.get("research_parts") or {}
     merged = ResearchOutput.from_parts(parts)
@@ -107,7 +115,60 @@ def research_join_node(state: dict[str, Any]) -> dict[str, Any]:
         # only flips `partial` when a scope key is missing from the dict;
         # a present-but-empty payload would otherwise slip through.
         merged = merged.model_copy(update={"partial": True})
-    return {"research_output": merged}
+
+    # Mirror research_output onto the canonical case fields the persistence
+    # layer + REST endpoints read from. The _merge_case reducer treats
+    # None/[]/{} as "unset" so this is parallel-safe; subagents don't
+    # touch these fields, only the join does.
+    case_updates: dict[str, Any] = {}
+    if merged.evidence is not None:
+        case_updates["evidence_analysis"] = EvidenceAnalysis(
+            evidence_items=list(merged.evidence.evidence_items),
+            credibility_scores=dict(merged.evidence.credibility_scores or {}),
+        )
+    if merged.facts is not None:
+        case_updates["extracted_facts"] = ExtractedFacts(
+            facts=[f.model_dump() if hasattr(f, "model_dump") else f for f in merged.facts.facts],
+            timeline=[
+                t.model_dump() if hasattr(t, "model_dump") else t
+                for t in (merged.facts.timeline or [])
+            ],
+        )
+    if merged.witnesses is not None:
+        case_updates["witnesses"] = Witnesses(
+            witnesses=[
+                w.model_dump() if hasattr(w, "model_dump") else w
+                for w in merged.witnesses.witnesses
+            ],
+            credibility=dict(merged.witnesses.credibility or {}),
+        )
+    if merged.law is not None:
+        case_updates["legal_rules"] = [
+            r.model_dump() if hasattr(r, "model_dump") else r for r in merged.law.legal_rules
+        ]
+        case_updates["precedents"] = [
+            p.model_dump() if hasattr(p, "model_dump") else p for p in merged.law.precedents
+        ]
+        if merged.law.precedent_source_metadata is not None:
+            case_updates["precedent_source_metadata"] = (
+                merged.law.precedent_source_metadata.model_dump()
+                if hasattr(merged.law.precedent_source_metadata, "model_dump")
+                else merged.law.precedent_source_metadata
+            )
+        case_updates["legal_elements_checklist"] = [
+            e.model_dump() if hasattr(e, "model_dump") else e
+            for e in merged.law.legal_elements_checklist
+        ]
+        case_updates["suppressed_citations"] = [
+            s.model_dump() if hasattr(s, "model_dump") else s
+            for s in merged.law.suppressed_citations
+        ]
+
+    update: dict[str, Any] = {"research_output": merged}
+    if case_updates:
+        existing_case: CaseState = state["case"]
+        update["case"] = existing_case.model_copy(update=case_updates)
+    return update
 
 
 def make_research_node(scope: str) -> Callable:

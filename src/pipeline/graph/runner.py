@@ -96,6 +96,7 @@ class GraphPipelineRunner:
             pending_action=None,
             is_resume=is_resume,
             start_agent=start_agent,
+            judge_messages=[],
         )
 
     async def _invoke(self, initial_state: GraphState, *, trace_id: str | None = None) -> CaseState:

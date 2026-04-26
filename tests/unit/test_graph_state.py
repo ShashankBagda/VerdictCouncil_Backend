@@ -338,3 +338,36 @@ class TestMergeSourceIds:
         once = _merge_source_ids({}, {"law": ["a"]})
         twice = _merge_source_ids(once, {"law": ["a"]})
         assert twice == {"law": ["a"]}
+
+
+# ---------------------------------------------------------------------------
+# GraphState — schema invariants (Q1.11 chat-steering)
+# ---------------------------------------------------------------------------
+
+
+class TestGraphStateSchema:
+    """Lock the judge_messages slot down — drift here would silently break
+    the chat-steering surface (agents could not surface questions and the
+    /respond message handler would have nowhere to write replies)."""
+
+    def test_judge_messages_slot_uses_add_messages_reducer(self):
+        from typing import get_args, get_type_hints
+
+        from langchain_core.messages import BaseMessage
+
+        from src.pipeline.graph.state import GraphState
+
+        hints = get_type_hints(GraphState, include_extras=True)
+        annotated = hints["judge_messages"]
+        list_type, reducer = get_args(annotated)
+        assert list_type == list[BaseMessage]
+        assert callable(reducer)
+        # `add_messages` is wrapped by langgraph; the wrapper has this name.
+        assert reducer.__name__ in {"add_messages", "_add_messages"}
+
+    def test_initial_state_seeds_judge_messages_empty(self):
+        from src.pipeline.graph.runner import GraphPipelineRunner
+
+        runner = GraphPipelineRunner()
+        state = runner._build_initial_state(case=_base(), run_id="r1")
+        assert state["judge_messages"] == []
