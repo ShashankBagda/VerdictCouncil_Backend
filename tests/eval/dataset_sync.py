@@ -160,6 +160,15 @@ def main() -> int:
         action="store_true",
         help="Print what would change without calling LangSmith.",
     )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help=(
+            "Exit non-zero (rc=3) when any fixture still uses placeholder-* "
+            "source_ids, so CI cannot silently sync a placeholder-only dataset "
+            "that would floor --mode graph citation_accuracy at 0."
+        ),
+    )
     args = parser.parse_args()
 
     api_key = os.environ.get("LANGSMITH_API_KEY")
@@ -188,6 +197,13 @@ def main() -> int:
             f"OpenAI vector store.",
             file=sys.stderr,
         )
+        if args.strict:
+            print(
+                "ERROR: --strict refused sync; resolve placeholder source_ids "
+                "against the live vector store before re-running.",
+                file=sys.stderr,
+            )
+            return 3
 
     report = sync(client, fixtures, dry_run=args.dry_run)
     print(f"Dataset: {DATASET_NAME} ({report['dataset_id']})")
