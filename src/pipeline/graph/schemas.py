@@ -66,7 +66,7 @@ class CredibilityScore(BaseModel):
 class SourceRef(BaseModel):
     model_config = ConfigDict(extra="forbid")
     doc_id: str = Field(min_length=1)
-    span: tuple[int, int] | None = None
+    span: list[int] | None = Field(default=None, min_length=2, max_length=2)
     exhibit_id: str | None = None
 
 
