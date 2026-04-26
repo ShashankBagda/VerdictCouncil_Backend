@@ -404,10 +404,34 @@ async def run_intake_extraction_job(ctx: dict[str, Any], job_id: str) -> None:  
     await _run_with_outbox(job_id, PipelineJobType.intake_extraction, _runner)
 
 
+async def run_document_parse_job(ctx: dict[str, Any], job_id: str) -> None:  # noqa: ARG001
+    """Q2.1 — parse a single uploaded document and cache the result.
+
+    Job carries the document UUID in `target_id`. On success the
+    worker writes `documents.parsed_text`. On `parse_document`
+    failure the column stays NULL and the runner-side fallback
+    (Q2.2) re-parses lazily; the outbox row is marked failed so
+    operators can re-enqueue if they want.
+    """
+
+    async def _runner(job: PipelineJob, *, trace_id: str | None = None) -> None:  # noqa: ARG001
+        from src.services.database import async_session
+        from src.services.document_parse import parse_and_persist_document
+
+        if job.target_id is None:
+            logger.warning("document_parse job %s has no target_id; skipping", job.id)
+            return
+        async with async_session() as db:
+            await parse_and_persist_document(db, document_id=job.target_id)
+
+    await _run_with_outbox(job_id, PipelineJobType.document_parse, _runner)
+
+
 TASK_BY_JOB_TYPE: dict[PipelineJobType, str] = {
     PipelineJobType.case_pipeline: run_case_pipeline_job.__name__,
     PipelineJobType.whatif_scenario: run_whatif_scenario_job.__name__,
     PipelineJobType.stability_computation: run_stability_computation_job.__name__,
     PipelineJobType.gate_run: run_gate_job.__name__,
     PipelineJobType.intake_extraction: run_intake_extraction_job.__name__,
+    PipelineJobType.document_parse: run_document_parse_job.__name__,
 }

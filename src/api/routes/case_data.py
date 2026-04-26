@@ -44,9 +44,12 @@ from src.models.case import (
 )
 from src.models.user import UserRole
 from src.pipeline.manifest import (
-    LEGACY_AGENT_ID_TO_LANGGRAPH,
     PIPELINE_AGENT_LABELS as AGENT_LABELS,
+)
+from src.pipeline.manifest import (
     PIPELINE_AGENT_ORDER as PIPELINE_AGENTS,
+)
+from src.pipeline.manifest import (
     normalize_agent_id,
 )
 
@@ -340,18 +343,30 @@ async def upload_documents(
     for doc in created:
         await db.refresh(doc)
 
+    from src.models.pipeline_job import PipelineJobType
+    from src.workers.outbox import enqueue_outbox_job
+
+    # Q2.1: cache parse_document output on documents.parsed_text so the
+    # pipeline runner doesn't pay the parse cost on the hot path. Skip
+    # documents that didn't make it to OpenAI Files (no file_id, nothing
+    # to parse) — runner-side fallback covers them.
+    for doc in created:
+        if doc.openai_file_id:
+            await enqueue_outbox_job(
+                db,
+                case_id=case.id,
+                job_type=PipelineJobType.document_parse,
+                target_id=doc.id,
+            )
+
     # Draft intake: the first authoritative document triggers extraction.
     # Anything uploaded after the case has left intake is business-as-usual
     # (evidence / supplementary uploads for an already-pending case).
     if case.status == CaseStatus.draft and any(k in _INTAKE_TRIGGER_KINDS for k in resolved_kinds):
-        from src.models.pipeline_job import PipelineJobType
-        from src.workers.outbox import enqueue_outbox_job
-
         case.status = CaseStatus.extracting
         await enqueue_outbox_job(db, case_id=case.id, job_type=PipelineJobType.intake_extraction)
-        await db.commit()
-    else:
-        await db.commit()
+
+    await db.commit()
 
     return created
 
@@ -456,6 +471,18 @@ async def upload_supplementary_documents(
     await db.flush()
     for doc in created:
         await db.refresh(doc)
+
+    # Q2.1: cache parse_document output for each newly-uploaded document so
+    # the next pipeline pass hydrates raw_documents from cache.
+    for doc in created:
+        if doc.openai_file_id:
+            await enqueue_outbox_job(
+                db,
+                case_id=case_id,
+                job_type=PipelineJobType.document_parse,
+                target_id=doc.id,
+            )
+
     await db.commit()
 
     return SupplementaryUploadResponse(

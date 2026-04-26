@@ -20,6 +20,12 @@ class PipelineJobType(str, enum.Enum):
     # structured fields (parties, offence_code, title, description, filed_date,
     # claim_amount) for the judge to confirm before the 9-agent pipeline runs.
     intake_extraction = "intake_extraction"
+    # Q2.1: cache `parse_document` output on `documents.parsed_text` so the
+    # pipeline runner can hydrate raw_documents without paying the parse
+    # cost on the hot path. Enqueued per-document at upload time;
+    # `target_id` carries the document UUID. Failures leave `parsed_text`
+    # NULL and the runner-side fallback kicks in (Q2.2).
+    document_parse = "document_parse"
 
 
 class PipelineJobStatus(str, enum.Enum):
