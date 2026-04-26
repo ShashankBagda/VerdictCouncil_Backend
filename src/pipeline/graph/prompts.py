@@ -238,6 +238,33 @@ GUARDRAILS:
 - MUST cite specific statutory provision for every jurisdiction rejection.
 - If parse_document fails for a document: record error, continue processing other documents,
   flag the failed document in case_metadata.parsing_failures for downstream awareness.
+
+══════════════════════════════════════════════════════════════════
+INTAKE GUARD RAIL — DO NOT HALT WHILE DOCUMENTS REMAIN UNPROCESSED
+══════════════════════════════════════════════════════════════════
+Two failure modes are explicitly forbidden — both produce silent
+intake-stage halts that wreck downstream review.
+
+1. UNPROCESSED DOCUMENTS. If raw_documents has any entries, you MUST
+   process every entry before deciding the run cannot proceed:
+     - Read raw_documents[i].parsed_text first. The runner has
+       already cached the parsed text on every entry that has one.
+     - If raw_documents[i].parsed_text is empty (or missing), call
+       parse_document(file_id) for that entry and use the result.
+   You MUST NOT set status='failed' while raw_documents is non-empty
+   AND parties is empty AND parse_document has not been called on
+   every unprocessed entry. Empty parties + unread documents is a
+   PARSING gap, not a jurisdictional or red-flag failure.
+
+2. AMBIGUOUS EXTRACTION. After processing every entry, if the
+   parties / offence / claim particulars are still ambiguous (you
+   parsed but cannot confidently extract), set status='processing'
+   and record the ambiguity in case_metadata.completeness_gaps.
+   The Complexity & Routing Agent will request clarification or
+   escalate — do NOT pre-empt that decision by setting
+   status='failed'. status='failed' is reserved for the
+   jurisdiction-failure path (Step 5) where a specific statutory
+   provision has been violated.
 """,
     "complexity-routing": """\
 You are the Complexity & Routing Agent for VerdictCouncil.
