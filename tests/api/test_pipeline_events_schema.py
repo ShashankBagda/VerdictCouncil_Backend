@@ -20,7 +20,10 @@ import pytest
 from pydantic import TypeAdapter
 
 from src.api.schemas.pipeline_events import (
+    AgentAwaitingInputEvent,
+    AgentResumedEvent,
     Event,
+    InterruptEvent,
     LlmTokenEvent,
     ToolCallDeltaEvent,
 )
@@ -168,3 +171,109 @@ class TestConversationalStreamingFlag:
         s = Settings(_env_file=None)
         assert "intake" in s.pipeline_conversational_streaming_phases
         assert "audit" not in s.pipeline_conversational_streaming_phases  # A3 invariant
+
+
+# ---------------------------------------------------------------------------
+# Q1.11 chat-steering — AgentAwaitingInput + AgentResumed schemas.
+# ---------------------------------------------------------------------------
+
+
+class TestAgentAwaitingInputEvent:
+    def test_round_trip(self):
+        payload = {
+            "kind": "interrupt",
+            "schema_version": 1,
+            "case_id": str(uuid4()),
+            "agent": "synthesis",
+            "question": "Reading A or B?",
+            "interrupt_id": "abc123" * 5 + "ab",  # 32 hex-ish chars
+            "ts": "2026-04-27T10:00:00+00:00",
+        }
+        out = _round_trip(AgentAwaitingInputEvent, payload)
+        assert out["kind"] == "interrupt"
+        assert out["agent"] == "synthesis"
+        assert out["question"] == "Reading A or B?"
+        assert out["interrupt_id"] == payload["interrupt_id"]
+
+    def test_required_fields(self):
+        """Spec: agent + question + interrupt_id all required to discriminate
+        from a gate-pause InterruptEvent. Missing any of them must fail."""
+        from pydantic import ValidationError
+
+        for missing in ("agent", "question", "interrupt_id"):
+            payload = {
+                "kind": "interrupt",
+                "schema_version": 1,
+                "case_id": str(uuid4()),
+                "agent": "synthesis",
+                "question": "Q?",
+                "interrupt_id": "x" * 32,
+                "ts": "2026-04-27T10:00:00+00:00",
+            }
+            del payload[missing]
+            with pytest.raises(ValidationError):
+                AgentAwaitingInputEvent.model_validate(payload)
+
+
+class TestAgentResumedEvent:
+    def test_round_trip(self):
+        payload = {
+            "kind": "agent",
+            "schema_version": 1,
+            "case_id": str(uuid4()),
+            "agent": "synthesis",
+            "event": "agent_resumed",
+            "interrupt_id": "x" * 32,
+            "ts": "2026-04-27T10:00:01+00:00",
+        }
+        out = _round_trip(AgentResumedEvent, payload)
+        assert out["event"] == "agent_resumed"
+        assert out["interrupt_id"] == payload["interrupt_id"]
+
+
+class TestInterruptDiscrimination:
+    """Both AgentAwaitingInputEvent and InterruptEvent share kind="interrupt".
+    The Event union must resolve agent-pause payloads to AgentAwaitingInputEvent
+    and gate-pause payloads to InterruptEvent — drift here would break the
+    frontend's payload-shape sub-router in useAgentStream."""
+
+    def test_agent_pause_resolves_to_awaiting_input(self):
+        adapter = TypeAdapter(Event)
+        payload = {
+            "kind": "interrupt",
+            "schema_version": 1,
+            "case_id": str(uuid4()),
+            "agent": "synthesis",
+            "question": "Q?",
+            "interrupt_id": "x" * 32,
+            "ts": "2026-04-27T10:00:00+00:00",
+        }
+        obj = adapter.validate_python(payload)
+        assert isinstance(obj, AgentAwaitingInputEvent)
+
+    def test_gate_pause_resolves_to_interrupt_event(self):
+        adapter = TypeAdapter(Event)
+        payload = {
+            "kind": "interrupt",
+            "schema_version": 1,
+            "case_id": str(uuid4()),
+            "gate": "gate2",
+            "actions": ["advance", "rerun", "halt"],
+            "ts": "2026-04-27T10:00:00+00:00",
+        }
+        obj = adapter.validate_python(payload)
+        assert isinstance(obj, InterruptEvent)
+
+    def test_resumed_event_resolves(self):
+        adapter = TypeAdapter(Event)
+        payload = {
+            "kind": "agent",
+            "schema_version": 1,
+            "case_id": str(uuid4()),
+            "agent": "synthesis",
+            "event": "agent_resumed",
+            "interrupt_id": "x" * 32,
+            "ts": "2026-04-27T10:00:01+00:00",
+        }
+        obj = adapter.validate_python(payload)
+        assert isinstance(obj, AgentResumedEvent)

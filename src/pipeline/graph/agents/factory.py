@@ -21,6 +21,7 @@ the factory works before 1.C3a.3 wires the LangSmith prompt registry.
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from collections.abc import Callable
@@ -29,7 +30,7 @@ from typing import Any
 
 from langchain.agents import create_agent
 from langchain.agents.structured_output import ToolStrategy
-from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
 
 from src.pipeline.graph.agents.stream_coalescer import StreamCoalescer
 from src.pipeline.graph.middleware import (
@@ -61,7 +62,11 @@ from src.pipeline.graph.tools import make_tools
 
 PHASE_TOOL_NAMES: dict[str, list[str]] = {
     "intake": ["parse_document"],
-    "synthesis": ["search_precedents"],
+    # Q1.11 chat-steering: synthesis is the v1 surface for `ask_judge` —
+    # the gate3 review only carries weight when synthesis surfaces a
+    # genuine calibration call. The synthesis prompt mandates ≥1
+    # ask_judge call per run to guarantee the chat surface fires.
+    "synthesis": ["search_precedents", "ask_judge"],
     "audit": [],
 }
 
@@ -169,6 +174,171 @@ def _chunk_text(chunk: AIMessageChunk) -> str:
     return ""
 
 
+def _build_phase_input_payload(phase_or_scope: str, state: dict[str, Any]) -> dict[str, Any]:
+    """Surface the slice of GraphState the phase prompt expects to read.
+
+    The phase / subagent system prompts in `prompts.py` reference fields
+    like ``raw_documents``, ``intake_extraction``, ``parties``,
+    ``case_metadata``, and the upstream phase outputs as if they live on
+    the agent's input. They don't — `create_agent` only sees what we
+    seed into ``messages``. Without this payload the agent runs blind
+    and reports "no documents provided" even when CaseState is fully
+    hydrated. Each phase gets only the slice it needs to keep prompt
+    context tight.
+    """
+    case = state["case"]
+    case_dump = case.model_dump(mode="json") if hasattr(case, "model_dump") else dict(case)
+
+    payload: dict[str, Any] = {
+        "case_id": case_dump.get("case_id"),
+        "domain": case_dump.get("domain"),
+        "parties": case_dump.get("parties") or [],
+    }
+
+    # `case_metadata` is omitted from the intake payload by design — the
+    # intake prompt names `intake_extraction` as the authoritative source
+    # for parties / offence / claim particulars, and `case_metadata`
+    # carries the same fields copied from the structured-form extractor.
+    # Sending both creates two sources of truth and forces the agent to
+    # silently reconcile drift; sending only `intake_extraction` keeps
+    # the contract clean. Downstream phases still receive `case_metadata`
+    # because they read finalised values, not the raw extraction.
+    if phase_or_scope != "intake":
+        payload["case_metadata"] = case_dump.get("case_metadata") or {}
+
+    # Audit reads the synthesised arguments, not the raw evidence — keep
+    # its context lean.
+    if phase_or_scope != "audit":
+        payload["raw_documents"] = case_dump.get("raw_documents") or []
+        payload["intake_extraction"] = case_dump.get("intake_extraction")
+
+    if phase_or_scope.startswith("research-") or phase_or_scope in {"synthesis", "audit"}:
+        payload["intake_output"] = state.get("intake_output")
+    if phase_or_scope in {"synthesis", "audit"}:
+        payload["research_output"] = state.get("research_output")
+    if phase_or_scope == "audit":
+        payload["synthesis_output"] = state.get("synthesis_output")
+
+    return payload
+
+
+# `case.hearing_analysis.confidence_score` is a 0-100 int on the shared
+# schema (legacy column); the new SynthesisOutput.confidence is a
+# low/med/high enum. Map to a representative midpoint per bucket so the
+# downstream UI's bar / threshold comparisons stay meaningful without
+# inventing precision the LLM didn't emit.
+_CONFIDENCE_LEVEL_TO_SCORE: dict[str, int] = {"low": 25, "med": 60, "high": 90}
+
+
+def _dump_or_passthrough(value: Any) -> Any:
+    """Pydantic model → dict; primitives / dicts pass through.
+
+    Used when mirroring schema-bound phase outputs into CaseState fields
+    typed as `list[dict]` / `dict` — the merge reducer round-trips through
+    `model_dump`, so primitives win.
+    """
+    if hasattr(value, "model_dump"):
+        return value.model_dump(mode="json")
+    return value
+
+
+def _mirror_synthesis_to_case(synthesis_output: Any, case: Any) -> Any | None:
+    """Project SynthesisOutput onto `case.arguments` + `case.hearing_analysis`.
+
+    The persistence layer (`_insert_arguments`, `_insert_hearing_analysis`)
+    reads from these CaseState fields; without the mirror the Gate 3
+    panel surfaces nothing despite the agent producing real output.
+    Field names are reshaped to match the persistence contract:
+    `arguments` becomes a `{side: [{legal_basis, supporting_evidence}]}`
+    dict keyed by `ArgumentSide`; `hearing_analysis` carries the chain,
+    flags, conclusion, and a confidence-bucket midpoint score.
+    """
+    from src.shared.case_state import HearingAnalysis as SharedHearingAnalysis
+
+    arg_set = getattr(synthesis_output, "arguments", None)
+    case_arguments: dict[str, Any] = {}
+    if arg_set is not None:
+        for attr, side_key in (
+            ("claimant_position", "claimant"),
+            ("respondent_position", "respondent"),
+        ):
+            position = getattr(arg_set, attr, None)
+            if position is None:
+                continue
+            case_arguments[side_key] = [
+                {
+                    "legal_basis": getattr(position, "position", None),
+                    "supporting_evidence": [
+                        _dump_or_passthrough(ref)
+                        for ref in getattr(position, "supporting_refs", []) or []
+                    ],
+                }
+            ]
+        if getattr(arg_set, "counter_arguments", None):
+            case_arguments["counter_arguments"] = list(arg_set.counter_arguments)
+        if getattr(arg_set, "contested_points", None):
+            case_arguments["contested_points"] = [
+                _dump_or_passthrough(p) for p in arg_set.contested_points
+            ]
+
+    confidence = getattr(synthesis_output, "confidence", None)
+    confidence_str = (
+        confidence.value if hasattr(confidence, "value") else str(confidence or "")
+    ).lower()
+    hearing = SharedHearingAnalysis(
+        preliminary_conclusion=getattr(synthesis_output, "preliminary_conclusion", None),
+        confidence_score=_CONFIDENCE_LEVEL_TO_SCORE.get(confidence_str),
+        reasoning_chain=[
+            _dump_or_passthrough(s)
+            for s in getattr(synthesis_output, "reasoning_chain", []) or []
+        ],
+        uncertainty_flags=[
+            _dump_or_passthrough(u)
+            for u in getattr(synthesis_output, "uncertainty_flags", []) or []
+        ],
+    )
+
+    updates: dict[str, Any] = {"hearing_analysis": hearing}
+    if case_arguments:
+        updates["arguments"] = case_arguments
+    return case.model_copy(update=updates)
+
+
+def _mirror_audit_to_case(audit_output: Any, case: Any) -> Any | None:
+    """Project AuditOutput.fairness_check onto `case.fairness_check`."""
+    from src.shared.case_state import FairnessCheck as SharedFairnessCheck
+
+    fc = getattr(audit_output, "fairness_check", None)
+    if fc is None:
+        return None
+    mirrored = SharedFairnessCheck(
+        critical_issues_found=fc.critical_issues_found,
+        audit_passed=fc.audit_passed,
+        issues=list(fc.issues or []),
+        recommendations=list(fc.recommendations or []),
+    )
+    return case.model_copy(update={"fairness_check": mirrored})
+
+
+def _mirror_phase_output_to_case(phase_or_scope: str, structured: Any, case: Any) -> Any | None:
+    """Per-phase mirror of the structured agent output onto CaseState.
+
+    Returns the updated case (to slot into the node's update dict) or
+    None when no mirror applies. Research subagents are skipped — their
+    join node owns the merged mirror so per-subagent overlap doesn't
+    fight the parallel _merge_case reducer. Intake's output is also
+    skipped: Gate 1 reads from initial-seed case fields, and the
+    routing_decision sub-payload is currently informational only.
+    """
+    if structured is None:
+        return None
+    if phase_or_scope == "synthesis":
+        return _mirror_synthesis_to_case(structured, case)
+    if phase_or_scope == "audit":
+        return _mirror_audit_to_case(structured, case)
+    return None
+
+
 def _resolve_prompt(phase: str, corrections: str | None = None) -> str:
     """Resolve the system prompt for the active phase.
 
@@ -274,8 +444,22 @@ def _make_node(
 
         case = state["case"]
         case_id = str(case.case_id)
+
+        # Surface the slice of GraphState the prompt expects as a user
+        # message; without it the agent only sees its system prompt and
+        # has no way to read raw_documents / intake_extraction / parties
+        # / upstream phase outputs.
+        input_payload = _build_phase_input_payload(phase_or_scope, state)
+        logger.info(
+            "phase_input phase=%s case_id=%s raw_docs=%d intake_extraction=%s parties=%d",
+            phase_or_scope,
+            case_id,
+            len(input_payload.get("raw_documents") or []),
+            "yes" if input_payload.get("intake_extraction") else "no",
+            len(input_payload.get("parties") or []),
+        )
         agent_state: dict[str, Any] = {
-            "messages": [],
+            "messages": [HumanMessage(content=json.dumps(input_payload, default=str))],
             "case_id": case_id,
             "agent_name": phase_or_scope,
         }
@@ -457,6 +641,14 @@ def _make_node(
 
         structured = result.get("structured_response")
         update: dict[str, Any] = {f"{phase_or_scope}_output": structured}
+        # Mirror the structured output onto canonical CaseState fields the
+        # persistence layer + REST endpoints read from. Without this,
+        # `persist_case_results` writes None to the columns the gate
+        # review panels query (Gate 3 sees no arguments, Gate 4 sees no
+        # fairness_check) even though the agent produced real data.
+        mirrored_case = _mirror_phase_output_to_case(phase_or_scope, structured, case)
+        if mirrored_case is not None:
+            update["case"] = mirrored_case
         # Sprint 3 3.B.5 — surface citation source_ids from this agent's
         # tool-message chain so the research_join validator can verify
         # self-reported supporting_sources without re-querying the audit log.

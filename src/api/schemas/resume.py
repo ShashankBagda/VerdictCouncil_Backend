@@ -36,9 +36,26 @@ class ResumePayload(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    action: Literal["advance", "rerun", "halt", "send_back"]
+    action: Literal["advance", "rerun", "halt", "send_back", "message"]
     notes: str | None = Field(
         None, description="Free-text judge note (audit-logged on every action)."
+    )
+
+    # message-only (Q1.11 chat-steering — agent-initiated ask_judge pause).
+    text: str | None = Field(
+        None,
+        description=(
+            "Judge's reply to a pending ask_judge interrupt. Required "
+            "when action='message'. Forbidden otherwise."
+        ),
+    )
+    interrupt_id: str | None = Field(
+        None,
+        description=(
+            "UUID4 hex matching the pending ask_judge interrupt. Required "
+            "when action='message'. Used to reject stale double-sends with "
+            "a 409 if the pending interrupt has already been resolved."
+        ),
     )
 
     # rerun-only
@@ -77,28 +94,42 @@ class ResumePayload(BaseModel):
 
         rerun_only = (self.phase, self.subagent, self.field_corrections)
         send_back_only = (self.to_phase,)
+        message_only = (self.text, self.interrupt_id)
 
-        if action == "advance" and any(rerun_only) or action == "advance" and any(send_back_only):
+        if action == "advance" and (
+            any(rerun_only) or any(send_back_only) or any(message_only)
+        ):
             raise ValueError(
-                "action='advance' must not carry phase/subagent/field_corrections/to_phase"
+                "action='advance' must not carry phase/subagent/field_corrections/to_phase/text/interrupt_id"
             )
-        if action == "halt" and any(rerun_only) or action == "halt" and any(send_back_only):
+        if action == "halt" and (any(rerun_only) or any(send_back_only) or any(message_only)):
             raise ValueError(
-                "action='halt' must not carry phase/subagent/field_corrections/to_phase"
+                "action='halt' must not carry phase/subagent/field_corrections/to_phase/text/interrupt_id"
             )
         if action == "rerun":
             if self.phase is None:
                 raise ValueError("action='rerun' requires 'phase'")
-            if any(send_back_only):
-                raise ValueError("action='rerun' must not carry 'to_phase'")
+            if any(send_back_only) or any(message_only):
+                raise ValueError(
+                    "action='rerun' must not carry 'to_phase'/'text'/'interrupt_id'"
+                )
             if self.subagent is not None and self.phase != "research":
                 raise ValueError("'subagent' is only valid when phase='research'")
         if action == "send_back":
             if self.to_phase is None:
                 raise ValueError("action='send_back' requires 'to_phase'")
-            if any(rerun_only):
+            if any(rerun_only) or any(message_only):
                 raise ValueError(
-                    "action='send_back' must not carry phase/subagent/field_corrections"
+                    "action='send_back' must not carry phase/subagent/field_corrections/text/interrupt_id"
+                )
+        if action == "message":
+            if self.text is None or not self.text.strip():
+                raise ValueError("action='message' requires non-empty 'text'")
+            if self.interrupt_id is None:
+                raise ValueError("action='message' requires 'interrupt_id'")
+            if any(rerun_only) or any(send_back_only):
+                raise ValueError(
+                    "action='message' must not carry phase/subagent/field_corrections/to_phase"
                 )
 
         return self
