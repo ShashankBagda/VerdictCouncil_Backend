@@ -21,6 +21,7 @@ import argparse
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
 from langchain_core.prompts import ChatPromptTemplate
@@ -113,14 +114,20 @@ def _push_one(
         action = "updated"
 
     if not dry_run:
-        client.push_prompt(
-            identifier,
-            object=template,
-            description=f"Sprint 1 1.C3a.2 — phase prompt for {identifier}",
-            tags=COMMIT_TAGS,
-            commit_tags=COMMIT_TAGS,
-            commit_description=f"Push from {filename}",
-        )
+        # `tags=` is the prompt-level tag set; LangSmith treats it as
+        # "move these tags to the new commit" which 409s when the tag
+        # is already on the initial commit (steady-state on every push
+        # after the first). Only pass `tags` on `created`, not `updated`
+        # — this matches the script's docstring claim that "the first-run
+        # path is the same as steady-state" without the conflict.
+        push_kwargs: dict[str, Any] = {
+            "object": template,
+            "description": f"Sprint 1 1.C3a.2 — phase prompt for {identifier}",
+            "commit_description": f"Push from {filename}",
+        }
+        if action == "created":
+            push_kwargs["tags"] = COMMIT_TAGS
+        client.push_prompt(identifier, **push_kwargs)
     return action
 
 

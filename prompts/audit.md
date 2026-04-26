@@ -15,6 +15,7 @@ Emit a single `AuditOutput` Pydantic instance. Schema reference: `src/pipeline/g
 - `should_rerun: bool` — `true` iff a phase needs to be re-run.
 - `target_phase: RerunTargetPhase | None` — which phase to rerun (`intake` | `research` | `synthesis`).
 - `reason: str | None` — short explanation.
+- `recommend_send_back: SendBackRecommendation | None` — optional structured recommendation surfaced in the gate4 review panel as a "Send back to ▼ <phase>" dropdown (Sprint 4 4.A3.14). Distinct from `should_rerun`: send-back rewinds the LangGraph thread to a checkpoint before the target phase ran; rerun re-executes the phase from current head. `to_phase` is one of `intake | research | synthesis` — `audit` is excluded (use `should_rerun=True, target_phase="audit"` instead).
 
 Severity values: `CRITICAL` | `MAJOR` | `MINOR`.
 
