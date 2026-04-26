@@ -471,6 +471,27 @@ def _make_node(
     return _node
 
 
+# Phases that are HARD-EXCLUDED from conversational mode regardless of
+# what the operator sets in PIPELINE_CONVERSATIONAL_STREAMING_PHASES.
+# `audit` stays JSON-only per architecture decision A3 — strict-correctness
+# path with `response_format=schema, strict=True` is non-negotiable.
+_CONVERSATIONAL_FORBIDDEN_PHASES: frozenset[str] = frozenset({"audit"})
+
+
+def _is_phase_conversational(phase: str) -> bool:
+    """Q1.6a — read the runtime flag and apply the audit hard-exclusion.
+
+    Reads `settings.pipeline_conversational_streaming_phases` fresh on
+    each call so a hot env-var flip during rollout doesn't need a
+    process restart (matches the property's contract in
+    `src/shared/config.py`)."""
+    if phase in _CONVERSATIONAL_FORBIDDEN_PHASES:
+        return False
+    from src.shared.config import settings
+
+    return phase in settings.pipeline_conversational_streaming_phases
+
+
 def make_phase_node(phase: str) -> Callable:
     """Return an async LangGraph node for one of the three phase agents."""
     if phase not in PHASE_TOOL_NAMES:
@@ -483,6 +504,7 @@ def make_phase_node(phase: str) -> Callable:
         schema=schema,
         # `audit` is the only strict-mode phase; the others get ToolStrategy.
         use_strict_response_format=(phase == "audit"),
+        conversational=_is_phase_conversational(phase),
     )
 
 
