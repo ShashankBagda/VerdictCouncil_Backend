@@ -14,7 +14,7 @@ import uuid
 from typing import Any
 
 from src.pipeline.graph.runner import GraphPipelineRunner
-from src.services.whatif_controller.diff_engine import generate_diff
+from src.services.whatif.diff import generate_diff
 from src.shared.case_state import CaseState
 
 logger = logging.getLogger(__name__)
