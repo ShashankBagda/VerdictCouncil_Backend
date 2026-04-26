@@ -239,7 +239,7 @@ class _AskJudgeInput(BaseModel):
 
 def make_tools(
     state: GraphState,
-    agent_name: str,
+    agent_name: str | None = None,
 ) -> tuple[list[Any], PrecedentMetaSideChannel]:
     """Build the LangChain tool list for an agent node.
 
@@ -249,11 +249,23 @@ def make_tools(
 
     Vector store injection: both search tools receive domain_vector_store_id
     from the case state via closure — the LLM never needs to pass this arg.
+
+    `agent_name` is the legacy 9-agent (`AGENT_TOOLS`) filter — when
+    supplied the returned tool list is the per-agent subset declared
+    in `prompts.AGENT_TOOLS`. The new-topology factory (`PHASE_TOOL_NAMES`
+    / `RESEARCH_TOOL_NAMES`) does its own scoping in
+    `_filter_tools(...)`, so production callers pass `agent_name=None`
+    and get every registered tool. The legacy parameter stays for
+    `tests/unit/test_graph_tools.py` and `test_tool_artifact.py` until
+    they're rewritten against the new-topology contract — see
+    follow-up ticket on the orchestration root.
     """
     vector_store_id: str | None = state["case"].domain_vector_store_id
     precedent_meta = PrecedentMetaSideChannel()
 
-    allowed_names = set(AGENT_TOOLS.get(agent_name, []))
+    allowed_names: set[str] | None = (
+        set(AGENT_TOOLS.get(agent_name, [])) if agent_name is not None else None
+    )
     all_tools: dict[str, Any] = {}
 
     # ------------------------------------------------------------------
@@ -506,5 +518,9 @@ def make_tools(
     # ------------------------------------------------------------------
     # Filter to the agent's allowed subset
     # ------------------------------------------------------------------
-    tools = [t for name, t in all_tools.items() if name in allowed_names]
+    if allowed_names is None:
+        # New-topology: caller scopes via PHASE_TOOL_NAMES / RESEARCH_TOOL_NAMES.
+        tools = list(all_tools.values())
+    else:
+        tools = [t for name, t in all_tools.items() if name in allowed_names]
     return tools, precedent_meta
