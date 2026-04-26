@@ -317,24 +317,17 @@ async def test_create_whatif_fork_stamps_parent_lineage_in_metadata(monkeypatch)
 
     fork_snap = await compiled.aget_state({"configurable": {"thread_id": fork_tid}})
     metadata = fork_snap.metadata or {}
-    # The saver hangs run-level metadata under the per-checkpoint
-    # `metadata` slot via the writer; both shapes are accepted.
-    flat = {**metadata, **(metadata.get("writes") or {})}
-    parent_run_id = (
-        metadata.get("parent_run_id")
-        or flat.get("parent_run_id")
-        or fork_snap.values.get("parent_run_id")
+    # Lineage must land in checkpoint metadata — that is where the
+    # LangSmith trace navigator reads it from. Asserting metadata
+    # directly (no values-dict fallback) makes a misrouted stamp fail
+    # loudly instead of silently passing via state leakage.
+    assert metadata.get("parent_run_id") == orig_run_id, (
+        f"fork must stamp parent_run_id in checkpoint metadata; "
+        f"got metadata={metadata!r}, expected parent_run_id={orig_run_id!r}"
     )
-    parent_thread_id = (
-        metadata.get("parent_thread_id")
-        or flat.get("parent_thread_id")
-        or fork_snap.values.get("parent_thread_id")
-    )
-    assert parent_run_id == orig_run_id, (
-        f"fork must stamp parent_run_id; got {parent_run_id!r}, expected {orig_run_id!r}"
-    )
-    assert parent_thread_id == case_id, (
-        f"fork must stamp parent_thread_id; got {parent_thread_id!r}, expected {case_id!r}"
+    assert metadata.get("parent_thread_id") == case_id, (
+        f"fork must stamp parent_thread_id in checkpoint metadata; "
+        f"got metadata={metadata!r}, expected parent_thread_id={case_id!r}"
     )
 
 

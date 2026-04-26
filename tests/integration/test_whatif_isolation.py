@@ -28,7 +28,6 @@ from httpx import ASGITransport, AsyncClient
 
 from src.api.app import create_app
 from src.api.deps import get_current_user, get_db
-from src.models.case import Case, CaseStatus
 from src.models.user import User, UserRole
 from src.models.what_if import (
     ModificationType,
@@ -51,15 +50,6 @@ def _make_judge(judge_id: uuid.UUID | None = None, name: str = "Judge Alpha") ->
     user.created_at = datetime.now(UTC)
     user.updated_at = None
     return user
-
-
-def _make_case(case_id: uuid.UUID, owner_id: uuid.UUID) -> MagicMock:
-    case = MagicMock(spec=Case)
-    case.id = case_id
-    case.created_by = owner_id
-    case.status = CaseStatus.ready_for_review
-    case.latest_run_id = "orig-run"
-    return case
 
 
 def _make_scenario(
