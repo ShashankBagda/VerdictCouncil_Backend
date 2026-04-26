@@ -48,8 +48,7 @@ async def _run_whatif_scenario(
 ) -> None:
     """Background task that executes the what-if scenario via the fork primitive.
 
-    Sprint 4 4.A5.2 — replaces the legacy ``WhatIfController.create_scenario``
-    deep-clone path with a saver-driven LangGraph fork (see
+    Sprint 4 4.A5.2 — saver-driven LangGraph fork (see
     ``services/whatif/fork.py``). The fork seeds the modified CaseState
     into a fresh thread (``case_id-whatif-judge_id-uuid``); driving the
     fork to terminal advances synthesis + audit against the modified
@@ -184,8 +183,10 @@ async def _run_stability_computation(
 ) -> None:
     """Background task that computes the stability score.
 
-    `trace_id` accepted for parity with `_run_case_pipeline`; threading
-    through `WhatIfController` is deferred to Sprint 4 A5.
+    Sprint 4 4.A5.2 — runs N parallel forks via the saver-driven fork
+    primitive (``services/whatif/stability.py``). Each perturbation
+    forks a fresh thread off the case's terminal checkpoint, drives it
+    to terminal, and contributes one cell to the held / total ratio.
     """
     from src.db.pipeline_state import (
         CheckpointCorruptError,
@@ -194,7 +195,7 @@ async def _run_stability_computation(
     )
     from src.pipeline.graph.runner import GraphPipelineRunner
     from src.services.database import async_session
-    from src.services.whatif_controller.controller import WhatIfController
+    from src.services.whatif.stability import compute_stability_score
 
     async with async_session() as db:
         try:
@@ -248,9 +249,18 @@ async def _run_stability_computation(
             # Anchor the stability row at the real terminal run_id.
             stability.run_id = case.latest_run_id
 
-            controller = WhatIfController(GraphPipelineRunner())
-            score_result = await controller.compute_stability_score(
-                case_state, n=stability.perturbation_count
+            # Synthetic judge_id for fork thread keys: stability is a
+            # system computation, not a per-judge what-if, so we scope
+            # the forks under f"stab-{stability_id}" to keep them off
+            # any human judge's saver namespace.
+            runner = GraphPipelineRunner()
+            score_result = await compute_stability_score(
+                graph=runner._graph,
+                case_id=str(case.id),
+                case_state=case_state,
+                n=stability.perturbation_count,
+                fork_judge_id=f"stab-{stability.id}",
+                parent_run_id=case.latest_run_id,
             )
 
             stability.score = score_result["score"]
