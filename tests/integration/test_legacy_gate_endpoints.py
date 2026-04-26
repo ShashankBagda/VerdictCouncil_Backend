@@ -169,3 +169,45 @@ async def test_rerun_gate3_drops_agent_name_subagent_mapping() -> None:
     assert payload["phase"] == "synthesis"
     assert "subagent" not in payload
     assert payload["start_agent"] == "argument-construction"
+
+
+@pytest.mark.asyncio
+async def test_rerun_gate2_accepts_langgraph_agent_id() -> None:
+    """LangGraph node IDs (research-evidence, …) are accepted natively
+    alongside the legacy display names."""
+    db_case = _make_db_case(CaseStatus.awaiting_review_gate2)
+    app.dependency_overrides[get_current_user] = _make_auth_override()
+    app.dependency_overrides[get_db] = _override_db(db_case)
+
+    enqueue_mock = AsyncMock()
+    with patch("src.workers.outbox.enqueue_outbox_job", new=enqueue_mock):
+        async with _client() as c:
+            r = await c.post(
+                f"/api/v1/cases/{CASE_ID}/gates/gate2/rerun",
+                json={"agent_name": "research-evidence"},
+            )
+
+    assert r.status_code == 202
+    payload = enqueue_mock.await_args.kwargs["payload"]
+    assert payload["phase"] == "research"
+    assert payload["subagent"] == "evidence"
+    assert payload["start_agent"] == "research-evidence"
+
+
+@pytest.mark.asyncio
+async def test_rerun_rejects_agent_name_outside_gate() -> None:
+    """Agents from a different gate (in either alphabet) are 422."""
+    db_case = _make_db_case(CaseStatus.awaiting_review_gate2)
+    app.dependency_overrides[get_current_user] = _make_auth_override()
+    app.dependency_overrides[get_db] = _override_db(db_case)
+
+    enqueue_mock = AsyncMock()
+    with patch("src.workers.outbox.enqueue_outbox_job", new=enqueue_mock):
+        async with _client() as c:
+            r = await c.post(
+                f"/api/v1/cases/{CASE_ID}/gates/gate2/rerun",
+                json={"agent_name": "audit"},
+            )
+
+    assert r.status_code == 422
+    enqueue_mock.assert_not_awaited()

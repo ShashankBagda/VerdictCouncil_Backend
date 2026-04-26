@@ -57,17 +57,13 @@ STARTABLE_STATUSES = (CaseStatus.pending, CaseStatus.ready_for_review, CaseStatu
 SSE_HEARTBEAT_SECONDS = 15.0
 SSE_WATCHDOG_SECONDS = 600.0
 
-PIPELINE_AGENT_ORDER = [
-    "case-processing",
-    "complexity-routing",
-    "evidence-analysis",
-    "fact-reconstruction",
-    "witness-analysis",
-    "legal-knowledge",
-    "argument-construction",
-    "hearing-analysis",
-    "hearing-governance",
-]
+# Re-export from the runtime manifest so this file and case_data.py
+# agree on the same 7 LangGraph node IDs.
+from src.pipeline.manifest import (  # noqa: E402
+    GATE_AGENTS as _MANIFEST_GATE_AGENTS,
+    PIPELINE_AGENT_ORDER,
+    normalize_agent_id as _normalize_agent_id,
+)
 
 
 _GATE_PAUSE_STATUSES = {
@@ -269,8 +265,9 @@ def _build_pipeline_progress(case: Case) -> dict[str, Any]:
 
     grouped_logs: dict[str, list[AuditLog]] = {agent_id: [] for agent_id in PIPELINE_AGENT_ORDER}
     for log in case.audit_logs or []:
-        if log.agent_name in grouped_logs:
-            grouped_logs[log.agent_name].append(log)
+        canonical = _normalize_agent_id(log.agent_name)
+        if canonical in grouped_logs:
+            grouped_logs[canonical].append(log)
 
     for agent_id in PIPELINE_AGENT_ORDER:
         logs = grouped_logs[agent_id]
@@ -1337,7 +1334,6 @@ async def _run_case_pipeline(case_id: UUID, *, trace_id: str | None = None) -> N
             case_id=str(case.id),
             domain=case.domain.value if case.domain else None,
             domain_vector_store_id=domain_vector_store_id,
-            status="processing",
             parties=[
                 {
                     "name": party.name,
@@ -1687,15 +1683,23 @@ _GATE_TO_PHASE: dict[str, str] = {
     "gate4": "audit",
 }
 
-#: Legacy gate2 agent_name → unified ResearchPart subagent. Other
+#: Gate2 agent_name → unified ResearchPart subagent. Accepts both the
+#: legacy display names (`evidence-analysis`, …) and the LangGraph node
+#: IDs (`research-evidence`, …) so old and new clients both work. Other
 #: gates have no per-subagent granularity in the new topology, so a
-#: legacy ``agent_name`` for those gates is dropped and a phase-level
+#: per-agent ``agent_name`` for those gates is dropped and a phase-level
 #: rerun is enqueued.
 _AGENT_TO_SUBAGENT: dict[str, str] = {
+    # Legacy display names
     "evidence-analysis": "evidence",
     "fact-reconstruction": "facts",
     "witness-analysis": "witnesses",
     "legal-knowledge": "law",
+    # LangGraph node IDs (canonical)
+    "research-evidence": "evidence",
+    "research-facts": "facts",
+    "research-witnesses": "witnesses",
+    "research-law": "law",
 }
 
 
@@ -1792,7 +1796,7 @@ async def rerun_gate(
     current_user: User = require_role(UserRole.judge),
 ) -> MessageResponse:
     from src.models.pipeline_job import PipelineJobType
-    from src.pipeline.graph.prompts import GATE_AGENTS
+    from src.pipeline.graph.prompts import GATE_AGENTS as _LEGACY_GATE_AGENTS
     from src.workers.outbox import enqueue_outbox_job
 
     if gate_name not in _VALID_GATE_NAMES:
@@ -1811,11 +1815,18 @@ async def rerun_gate(
             detail=f"Case is not paused at {gate_name}",
         )
 
-    if body.agent_name and body.agent_name not in GATE_AGENTS[gate_name]:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Agent {body.agent_name!r} is not in {gate_name}",
+    # Accept both the legacy display names and the LangGraph node IDs
+    # for `agent_name`. Validation passes if the input matches either
+    # alphabet for the requested gate.
+    if body.agent_name:
+        accepted = set(_LEGACY_GATE_AGENTS.get(gate_name, [])) | set(
+            _MANIFEST_GATE_AGENTS.get(gate_name, [])
         )
+        if body.agent_name not in accepted:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Agent {body.agent_name!r} is not in {gate_name}",
+            )
 
     phase = _GATE_TO_PHASE[gate_name]
     subagent = _AGENT_TO_SUBAGENT.get(body.agent_name) if body.agent_name else None

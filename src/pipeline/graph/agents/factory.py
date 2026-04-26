@@ -21,11 +21,14 @@ the factory works before 1.C3a.3 wires the LangSmith prompt registry.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import Any
 
 from langchain.agents import create_agent
 from langchain.agents.structured_output import ToolStrategy
+from langchain_core.messages import AIMessageChunk
 
 from src.pipeline.graph.middleware import (
     CaseAwareState,
@@ -34,6 +37,9 @@ from src.pipeline.graph.middleware import (
     sse_tool_emitter,
     token_usage_emitter,
 )
+from src.services.pipeline_events import publish_agent_event
+
+logger = logging.getLogger(__name__)
 from src.pipeline.graph.prompt_registry import get_prompt
 from src.pipeline.graph.prompts import AGENT_TOOLS
 from src.pipeline.graph.schemas import (
@@ -113,6 +119,41 @@ def _resolve_model(phase_or_scope: str) -> str:
     if phase_or_scope == "intake":
         return "gpt-5-mini"
     return "gpt-5"
+
+
+def _chunk_text(chunk: AIMessageChunk) -> str:
+    """Extract a text delta from a streaming AIMessageChunk.
+
+    Handles three cases that all show up depending on `response_format`:
+
+    - **Plain text** — `chunk.content` is a string. Native streaming for
+      strict-JSON / unstructured responses (e.g. the audit phase).
+    - **Multi-modal content parts** — `chunk.content` is a list of dicts
+      where text parts have `{"type": "text", "text": ...}`. Used by
+      models that surface "thinking" alongside the final answer.
+    - **Tool-call args** — when `response_format=ToolStrategy(schema)`,
+      the structured response lands as a tool call to the schema-binding
+      tool; per-token deltas appear in `chunk.tool_call_chunks[*].args`
+      as a stream of partial JSON. Surfacing those as text gives the UI
+      something to render while the structured response forms.
+    """
+    content = chunk.content
+    if isinstance(content, str) and content:
+        return content
+    if isinstance(content, list):
+        parts = []
+        for part in content:
+            if isinstance(part, dict) and part.get("type") == "text":
+                parts.append(part.get("text", "") or "")
+            elif isinstance(part, str):
+                parts.append(part)
+        joined = "".join(parts)
+        if joined:
+            return joined
+    tool_chunks = getattr(chunk, "tool_call_chunks", None) or []
+    if tool_chunks:
+        return "".join(tc.get("args", "") or "" for tc in tool_chunks)
+    return ""
 
 
 def _resolve_prompt(phase: str, corrections: str | None = None) -> str:
@@ -203,12 +244,53 @@ def _make_node(
         )
 
         case = state["case"]
+        case_id = str(case.case_id)
         agent_state: dict[str, Any] = {
             "messages": [],
-            "case_id": str(case.case_id),
+            "case_id": case_id,
             "agent_name": phase_or_scope,
         }
-        result = await agent.ainvoke(agent_state)
+
+        # Multi-mode astream:
+        #   - "messages" yields (AIMessageChunk, metadata) tuples per token
+        #     of the model's response — published as `llm_chunk` SSE events
+        #     so the UI can render the agent's reasoning live.
+        #   - "values"   yields the full graph state after each step; the
+        #     last yield carries the agent's final `structured_response`
+        #     and accumulated messages.
+        # Tool calls are still emitted by the wrap_tool_call middleware
+        # (`sse_tool_emitter`), so the per-tool wire format is unchanged.
+        result: dict[str, Any] = {}
+        try:
+            async for mode, payload in agent.astream(
+                agent_state,
+                stream_mode=["values", "messages"],
+            ):
+                if mode == "messages":
+                    msg = payload[0] if isinstance(payload, tuple) else payload
+                    if isinstance(msg, AIMessageChunk):
+                        text = _chunk_text(msg)
+                        if text:
+                            await publish_agent_event(
+                                case_id,
+                                {
+                                    "case_id": case_id,
+                                    "agent": phase_or_scope,
+                                    "event": "llm_chunk",
+                                    "delta": text,
+                                    "ts": datetime.now(UTC).isoformat(),
+                                },
+                            )
+                elif mode == "values":
+                    result = payload
+        except Exception:
+            logger.exception(
+                "astream failed for phase=%s case=%s; falling back to ainvoke",
+                phase_or_scope,
+                case_id,
+            )
+            result = await agent.ainvoke(agent_state)
+
         structured = result.get("structured_response")
         update: dict[str, Any] = {f"{phase_or_scope}_output": structured}
         # Sprint 3 3.B.5 — surface citation source_ids from this agent's

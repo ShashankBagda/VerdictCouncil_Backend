@@ -43,6 +43,12 @@ from src.models.case import (
     Witness,
 )
 from src.models.user import UserRole
+from src.pipeline.manifest import (
+    LEGACY_AGENT_ID_TO_LANGGRAPH,
+    PIPELINE_AGENT_LABELS as AGENT_LABELS,
+    PIPELINE_AGENT_ORDER as PIPELINE_AGENTS,
+    normalize_agent_id,
+)
 
 # Typed slots that kick off intake extraction as soon as one is uploaded.
 # Judges can still drop evidence bundles or letters of mitigation into a
@@ -56,33 +62,11 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# 9-agent pipeline topology used for status derivation
-PIPELINE_AGENTS = [
-    "case-processing",
-    "complexity-routing",
-    "evidence-analysis",
-    "fact-reconstruction",
-    "witness-analysis",
-    "legal-knowledge",
-    "argument-construction",
-    "hearing-analysis",
-    "hearing-governance",
-]
-
-AGENT_LABELS = {
-    "case-processing": "Case Processing",
-    "complexity-routing": "Complexity Routing",
-    "evidence-analysis": "Evidence Analysis",
-    "fact-reconstruction": "Fact Reconstruction",
-    "witness-analysis": "Witness Analysis",
-    "legal-knowledge": "Legal Knowledge",
-    "argument-construction": "Argument Construction",
-    "hearing-analysis": "Hearing Analysis",
-    "hearing-governance": "Hearing Governance",
-}
-
-SUPPLEMENTARY_RETRIGGERED_STAGES = PIPELINE_AGENTS[2:]
-SUPPLEMENTARY_PRESERVED_STAGES = PIPELINE_AGENTS[:2]
+# Stages re-triggered when a supplementary document arrives. With the
+# LangGraph topology, intake stays sticky and everything downstream
+# (research → synthesis → audit) re-runs.
+SUPPLEMENTARY_RETRIGGERED_STAGES = PIPELINE_AGENTS[1:]
+SUPPLEMENTARY_PRESERVED_STAGES = PIPELINE_AGENTS[:1]
 
 
 # ---------------------------------------------------------------------------
@@ -102,12 +86,19 @@ async def _get_case_or_404(case_id: UUID, db, current_user) -> Case:
 
 
 def _derive_agent_status(case: Case, audit_logs: list[AuditLog]) -> list[dict[str, Any]]:
-    """Derive per-agent status from the case status and audit log entries."""
+    """Derive per-agent status from the case status and audit log entries.
+
+    Audit rows written by the LangGraph middleware use the canonical
+    LangGraph node IDs (`intake`, `research-evidence`, …); rows written
+    by pre-LangGraph code paths still use the legacy 9-name display
+    list. `normalize_agent_id` collapses the latter onto the former so
+    both stream into the same per-agent bucket.
+    """
     agent_actions: dict[str, list[AuditLog]] = {a: [] for a in PIPELINE_AGENTS}
     for log in audit_logs:
-        name = log.agent_name
-        if name in agent_actions:
-            agent_actions[name].append(log)
+        canonical = normalize_agent_id(log.agent_name)
+        if canonical in agent_actions:
+            agent_actions[canonical].append(log)
 
     agents = []
     for agent_id in PIPELINE_AGENTS:
@@ -486,8 +477,12 @@ async def upload_supplementary_documents(
     "/{case_id}/status",
     operation_id="get_pipeline_status",
     summary="Get pipeline processing status",
-    description="Returns the 9-agent pipeline status derived from the case state "
-    "and audit log. Used by the frontend polling hook.",
+    description=(
+        "Returns the LangGraph 7-agent pipeline status (intake → 4 research "
+        "subagents → synthesis → audit) derived from the case state and audit "
+        "log. Agent IDs match those emitted on the SSE stream. Used by the "
+        "frontend polling hook."
+    ),
     responses={
         404: {"model": ErrorResponse, "description": "Case not found"},
     },

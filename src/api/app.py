@@ -194,6 +194,7 @@ def create_app() -> FastAPI:
         hearing_pack,
         judge,
         knowledge_base,
+        pipeline,
         precedent_search,
         reopen_requests,
         what_if,
@@ -220,6 +221,7 @@ def create_app() -> FastAPI:
     app.include_router(documents.router, prefix="/api/v1/documents", tags=["documents"])
     app.include_router(admin.router, prefix="/api/v1/admin", tags=["admin"])
     app.include_router(domains.router, prefix="/api/v1/domains", tags=["domains"])
+    app.include_router(pipeline.router, prefix="/api/v1/pipeline", tags=["pipeline"])
 
     # Prometheus-compatible metrics (excluded from OpenAPI spec)
     app.routes.append(Route("/metrics", metrics_endpoint, methods=["GET"], include_in_schema=False))

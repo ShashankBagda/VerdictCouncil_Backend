@@ -228,3 +228,187 @@ class TestExtractSourceIdsFromMessages:
             ],
         )
         assert _extract_source_ids_from_messages([msg]) == ["f:1"]
+
+
+# ── Token-streaming chunk extraction (regression: empty-content
+# AIMessageChunks under ToolStrategy mode silently dropped llm_chunk
+# events because the structured response lives in tool_call_chunks.args).
+# ---------------------------------------------------------------------------
+
+
+class TestChunkText:
+    def test_returns_plain_string_content(self) -> None:
+        from langchain_core.messages import AIMessageChunk
+
+        from src.pipeline.graph.agents.factory import _chunk_text
+
+        chunk = AIMessageChunk(content="Hello world")
+        assert _chunk_text(chunk) == "Hello world"
+
+    def test_returns_empty_for_chunk_with_no_text_or_tools(self) -> None:
+        from langchain_core.messages import AIMessageChunk
+
+        from src.pipeline.graph.agents.factory import _chunk_text
+
+        chunk = AIMessageChunk(content="")
+        assert _chunk_text(chunk) == ""
+
+    def test_extracts_text_from_multimodal_content_parts(self) -> None:
+        from langchain_core.messages import AIMessageChunk
+
+        from src.pipeline.graph.agents.factory import _chunk_text
+
+        chunk = AIMessageChunk(
+            content=[
+                {"type": "text", "text": "Reasoning: "},
+                {"type": "text", "text": "the suspect was speeding"},
+                {"type": "image_url", "image_url": "https://example.com/x.png"},
+            ]
+        )
+        assert _chunk_text(chunk) == "Reasoning: the suspect was speeding"
+
+    def test_falls_back_to_tool_call_chunks_when_content_is_empty(self) -> None:
+        """Regression: with response_format=ToolStrategy(schema), the model's
+        structured output streams as tool-call args, NOT as content. Without
+        this fallback the SSE bridge sees zero llm_chunk events even though
+        the model is actively producing tokens."""
+        from langchain_core.messages import AIMessageChunk
+        from langchain_core.messages.tool import ToolCallChunk
+
+        from src.pipeline.graph.agents.factory import _chunk_text
+
+        chunk = AIMessageChunk(
+            content="",
+            tool_call_chunks=[
+                ToolCallChunk(
+                    name="IntakeOutput",
+                    args='{"jurisdiction":',
+                    id="call_1",
+                    index=0,
+                )
+            ],
+        )
+        assert _chunk_text(chunk) == '{"jurisdiction":'
+
+    def test_concatenates_multiple_tool_call_chunk_deltas(self) -> None:
+        from langchain_core.messages import AIMessageChunk
+        from langchain_core.messages.tool import ToolCallChunk
+
+        from src.pipeline.graph.agents.factory import _chunk_text
+
+        chunk = AIMessageChunk(
+            content="",
+            tool_call_chunks=[
+                ToolCallChunk(name=None, args='"sct"', id=None, index=0),
+                ToolCallChunk(name=None, args=', "valid":', id=None, index=0),
+                ToolCallChunk(name=None, args=" true}", id=None, index=0),
+            ],
+        )
+        assert _chunk_text(chunk) == '"sct", "valid": true}'
+
+    def test_prefers_text_content_over_tool_call_chunks_when_both_present(self) -> None:
+        from langchain_core.messages import AIMessageChunk
+        from langchain_core.messages.tool import ToolCallChunk
+
+        from src.pipeline.graph.agents.factory import _chunk_text
+
+        chunk = AIMessageChunk(
+            content="natural language reasoning",
+            tool_call_chunks=[
+                ToolCallChunk(name=None, args='{"x": 1}', id=None, index=0),
+            ],
+        )
+        assert _chunk_text(chunk) == "natural language reasoning"
+
+
+# ── End-to-end node streaming: prove llm_chunk SSE events fire when the
+# agent emits ToolStrategy-style chunks (the previously-broken case).
+# ---------------------------------------------------------------------------
+
+
+class TestNodeStreamsLlmChunks:
+    @pytest.mark.asyncio
+    async def test_node_publishes_llm_chunk_per_message_chunk(self, monkeypatch):
+        """Drive _node with a fake agent that yields multi-mode astream
+        tuples — assert one llm_chunk SSE event fires per chunk.
+
+        Covers both content-bearing chunks and ToolStrategy chunks (where
+        the structured response streams as tool_call_chunks.args).
+        """
+        from langchain_core.messages import AIMessageChunk
+        from langchain_core.messages.tool import ToolCallChunk
+
+        from src.pipeline.graph.agents import factory
+
+        # Capture every event published over the SSE bridge.
+        published: list[dict] = []
+
+        async def _fake_publish(case_id, event):
+            published.append({"case_id": case_id, **event})
+
+        monkeypatch.setattr(factory, "publish_agent_event", _fake_publish)
+
+        # Fake agent.astream yielding (mode, payload) tuples in the
+        # multi-mode shape: 3 message chunks + a final values payload.
+        chunks = [
+            ("messages", (AIMessageChunk(content="Examining "), {})),
+            ("messages", (AIMessageChunk(content="the notice."), {})),
+            (
+                "messages",
+                (
+                    AIMessageChunk(
+                        content="",
+                        tool_call_chunks=[
+                            ToolCallChunk(
+                                name="IntakeOutput",
+                                args='{"jurisdiction": "sct"}',
+                                id="c1",
+                                index=0,
+                            )
+                        ],
+                    ),
+                    {},
+                ),
+            ),
+            ("values", {"structured_response": {"jurisdiction": "sct"}, "messages": []}),
+        ]
+
+        class _FakeAgent:
+            def astream(self, *_args, **_kwargs):
+                async def _gen():
+                    for item in chunks:
+                        yield item
+                return _gen()
+
+            async def ainvoke(self, *_args, **_kwargs):
+                raise AssertionError("ainvoke must not be called when astream succeeds")
+
+        monkeypatch.setattr(factory, "create_agent", lambda **_kw: _FakeAgent())
+        # Stub the prompt + tool resolvers so we don't hit LangSmith / DB.
+        monkeypatch.setattr(factory, "_resolve_prompt", lambda *_a, **_k: "stub")
+        monkeypatch.setattr(factory, "_filter_tools", lambda *_a, **_k: [])
+
+        node = factory.make_phase_node("intake")
+
+        from types import SimpleNamespace
+
+        state = {
+            "case": SimpleNamespace(case_id="case-xyz"),
+            "extra_instructions": {},
+        }
+        result = await node(state)
+
+        # The structured response from the final "values" payload survives.
+        assert result == {"intake_output": {"jurisdiction": "sct"}}
+
+        # Three chunks → three llm_chunk SSE events with the right deltas.
+        chunk_events = [e for e in published if e.get("event") == "llm_chunk"]
+        assert [e["delta"] for e in chunk_events] == [
+            "Examining ",
+            "the notice.",
+            '{"jurisdiction": "sct"}',
+        ]
+        # Every event is tagged with the LangGraph node id + the case id
+        # so the SSE bridge routes them to the right agent card.
+        assert all(e["agent"] == "intake" for e in chunk_events)
+        assert all(e["case_id"] == "case-xyz" for e in chunk_events)

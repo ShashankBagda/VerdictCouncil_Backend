@@ -64,6 +64,10 @@ async def search_domain_guidance(
                     "max_num_results": max_results,
                 }
             ],
+            # Without this include the Responses API runs file_search but
+            # returns `file_search_call.results = None` — the LLM sees the
+            # chunks but the caller cannot.
+            include=["file_search_call.results"],
         )
 
         results = []
