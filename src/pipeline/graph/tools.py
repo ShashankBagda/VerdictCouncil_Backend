@@ -102,7 +102,12 @@ def _precedent_to_document(precedent: dict[str, Any]) -> Document:
     page_content = f"{citation}\n{summary}".strip()
     file_id = _resolve_file_id(precedent, surrogate_prefix="pair")
     source_id = f"{file_id}:{_content_hash(page_content)}"
-    score = precedent.get("similarity_score", 0)
+    # Upstream search backends emit different keys: the precedent fetcher
+    # historically returns ``similarity_score``; the domain-guidance
+    # fetcher returns ``score``. Read both so the projector tolerates
+    # either source shape, and always normalise to ``score`` in the
+    # Document metadata so downstream consumers see one key.
+    score = precedent.get("similarity_score", precedent.get("score", 0))
     return Document(
         page_content=page_content,
         metadata={
@@ -128,13 +133,16 @@ def _guidance_to_document(guidance: dict[str, Any]) -> Document:
     page_content = f"{citation}\n{content}".strip()
     file_id = _resolve_file_id(guidance, surrogate_prefix="guidance")
     source_id = f"{file_id}:{_content_hash(page_content)}"
+    # See _precedent_to_document — accept either `score` or
+    # `similarity_score` from upstream and normalise to `score` here.
+    score = guidance.get("score", guidance.get("similarity_score", 0))
     return Document(
         page_content=page_content,
         metadata={
             "source_id": source_id,
             "file_id": file_id,
             "filename": citation,
-            "score": guidance.get("score", 0),
+            "score": score,
             "source": guidance.get("source", "domain_guidance"),
         },
     )

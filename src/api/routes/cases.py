@@ -1713,7 +1713,7 @@ _AGENT_TO_SUBAGENT: dict[str, str] = {
 async def advance_gate(
     case_id: UUID,
     gate_name: str,
-    body: GateAdvanceRequest,  # noqa: ARG001
+    body: GateAdvanceRequest,
     db: DBSession,
     current_user: User = require_role(UserRole.judge),
 ) -> MessageResponse:
@@ -1743,23 +1743,28 @@ async def advance_gate(
             detail="Gate 4 is the final gate; record a decision instead",
         )
 
+    audit_payload: dict[str, Any] = {"gate_name": gate_name, "next_gate": next_gate}
+    if body.notes:
+        audit_payload["notes"] = body.notes
     db.add(
         AuditLog(
             case_id=case_id,
             agent_name="judge",
             action="gate_advanced",
-            input_payload={"gate_name": gate_name, "next_gate": next_gate},
+            input_payload=audit_payload,
         )
     )
     case.status = CaseStatus.processing
+    job_payload: dict[str, Any] = {"gate_name": next_gate, "resume_action": "advance"}
+    if body.notes:
+        # Forward to the worker so the resume path can attach notes to the
+        # gate_advanced step's downstream audit entries — mirrors POST /respond.
+        job_payload["notes"] = body.notes
     await enqueue_outbox_job(
         db,
         case_id=case_id,
         job_type=PipelineJobType.gate_run,
-        payload={
-            "gate_name": next_gate,
-            "resume_action": "advance",
-        },
+        payload=job_payload,
     )
     await db.commit()
 

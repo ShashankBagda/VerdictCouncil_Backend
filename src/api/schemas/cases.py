@@ -357,7 +357,15 @@ class CaseDetailResponse(CaseResponse):
 
 
 class GateAdvanceRequest(BaseModel):
-    pass
+    notes: str | None = Field(
+        None,
+        description=(
+            "Optional reviewer note recorded on the audit log. Mirrors the "
+            "'notes' field on POST /respond so legacy /advance clients can "
+            "preserve the audit trail without migrating to the unified "
+            "endpoint."
+        ),
+    )
 
 
 class GateRerunRequest(BaseModel):
