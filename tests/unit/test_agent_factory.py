@@ -412,3 +412,164 @@ class TestNodeStreamsLlmChunks:
         # so the SSE bridge routes them to the right agent card.
         assert all(e["agent"] == "intake" for e in chunk_events)
         assert all(e["case_id"] == "case-xyz" for e in chunk_events)
+
+
+# ── Q1.2: streaming_started flag — Risk #1 (no double-call after first chunk).
+# ---------------------------------------------------------------------------
+
+
+class TestStreamingStartedFallbackPolicy:
+    """Q1.2 contract: once any observable side-effect has happened
+    (first message chunk OR first values payload OR first tool call),
+    the broad `except Exception → ainvoke` fallback is unsafe — it
+    would re-execute tools and double-charge OpenAI. Replaced with a
+    `streaming_started` flag: pre-chunk failures still fall back to
+    ainvoke (back-compat); post-chunk failures emit `agent_failed`
+    SSE and re-raise."""
+
+    @pytest.mark.asyncio
+    async def test_post_chunk_failure_emits_agent_failed_and_raises(self, monkeypatch):
+        """Risk #1 regression: mock astream to raise after one chunk.
+        The factory MUST emit `agent_failed` and propagate the
+        exception — NOT silently retry via ainvoke."""
+        from langchain_core.messages import AIMessageChunk
+
+        from src.pipeline.graph.agents import factory
+
+        published: list[dict] = []
+
+        async def _fake_publish(case_id, event):
+            published.append({"case_id": case_id, **event})
+
+        monkeypatch.setattr(factory, "publish_agent_event", _fake_publish)
+
+        ainvoke_called = {"count": 0}
+
+        class _FakeAgent:
+            def astream(self, *_args, **_kwargs):
+                async def _gen():
+                    yield ("messages", (AIMessageChunk(content="streaming…"), {}))
+                    raise RuntimeError("upstream blew up after first chunk")
+                return _gen()
+
+            async def ainvoke(self, *_args, **_kwargs):
+                ainvoke_called["count"] += 1
+                return {"structured_response": {"jurisdiction": "sct"}}
+
+        monkeypatch.setattr(factory, "create_agent", lambda **_kw: _FakeAgent())
+        monkeypatch.setattr(factory, "_resolve_prompt", lambda *_a, **_k: "stub")
+        monkeypatch.setattr(factory, "_filter_tools", lambda *_a, **_k: [])
+
+        node = factory.make_phase_node("intake")
+
+        from types import SimpleNamespace
+
+        state = {"case": SimpleNamespace(case_id="case-xyz"), "extra_instructions": {}}
+
+        with pytest.raises(RuntimeError, match="upstream blew up"):
+            await node(state)
+
+        # No silent retry — ainvoke was NOT called as a fallback.
+        assert ainvoke_called["count"] == 0
+
+        # `agent_failed` SSE was emitted with the contract fields.
+        failed_events = [e for e in published if e.get("event") == "agent_failed"]
+        assert len(failed_events) == 1
+        ev = failed_events[0]
+        assert ev["agent"] == "intake"
+        assert ev["case_id"] == "case-xyz"
+        assert ev["error_class"] == "RuntimeError"
+        # No PII: the original error MESSAGE must NOT be in the event.
+        assert "upstream blew up" not in str(ev)
+
+    @pytest.mark.asyncio
+    async def test_pre_chunk_failure_falls_back_to_ainvoke(self, monkeypatch):
+        """Back-compat: when astream raises BEFORE any observable
+        side-effect (no message chunk, no values payload), the
+        existing ainvoke fallback is still safe — no tools were
+        invoked, so retrying once doesn't double-execute anything."""
+        from src.pipeline.graph.agents import factory
+
+        published: list[dict] = []
+
+        async def _fake_publish(case_id, event):
+            published.append({"case_id": case_id, **event})
+
+        monkeypatch.setattr(factory, "publish_agent_event", _fake_publish)
+
+        ainvoke_called = {"count": 0}
+
+        class _FakeAgent:
+            def astream(self, *_args, **_kwargs):
+                async def _gen():
+                    if False:
+                        yield  # pragma: no cover (make this an async generator)
+                    raise RuntimeError("astream init failed")
+                return _gen()
+
+            async def ainvoke(self, *_args, **_kwargs):
+                ainvoke_called["count"] += 1
+                return {"structured_response": {"jurisdiction": "sct"}}
+
+        monkeypatch.setattr(factory, "create_agent", lambda **_kw: _FakeAgent())
+        monkeypatch.setattr(factory, "_resolve_prompt", lambda *_a, **_k: "stub")
+        monkeypatch.setattr(factory, "_filter_tools", lambda *_a, **_k: [])
+
+        node = factory.make_phase_node("intake")
+
+        from types import SimpleNamespace
+
+        state = {"case": SimpleNamespace(case_id="case-xyz"), "extra_instructions": {}}
+        result = await node(state)
+
+        # ainvoke fallback ran exactly once and produced the structured response.
+        assert ainvoke_called["count"] == 1
+        assert result == {"intake_output": {"jurisdiction": "sct"}}
+
+        # No agent_failed SSE — pre-chunk failures don't surface as
+        # terminal events, the fallback masks them per the existing contract.
+        failed_events = [e for e in published if e.get("event") == "agent_failed"]
+        assert failed_events == []
+
+    @pytest.mark.asyncio
+    async def test_post_values_failure_also_propagates(self, monkeypatch):
+        """A failure AFTER a `values` payload (graph state checkpoint
+        visible to consumers) is also post-chunk — same policy."""
+        from src.pipeline.graph.agents import factory
+
+        published: list[dict] = []
+
+        async def _fake_publish(case_id, event):
+            published.append({"case_id": case_id, **event})
+
+        monkeypatch.setattr(factory, "publish_agent_event", _fake_publish)
+
+        ainvoke_called = {"count": 0}
+
+        class _FakeAgent:
+            def astream(self, *_args, **_kwargs):
+                async def _gen():
+                    yield ("values", {"messages": [{"role": "tool"}], "structured_response": None})
+                    raise RuntimeError("post-tool failure")
+                return _gen()
+
+            async def ainvoke(self, *_args, **_kwargs):
+                ainvoke_called["count"] += 1
+                return {}
+
+        monkeypatch.setattr(factory, "create_agent", lambda **_kw: _FakeAgent())
+        monkeypatch.setattr(factory, "_resolve_prompt", lambda *_a, **_k: "stub")
+        monkeypatch.setattr(factory, "_filter_tools", lambda *_a, **_k: [])
+
+        node = factory.make_phase_node("intake")
+
+        from types import SimpleNamespace
+
+        state = {"case": SimpleNamespace(case_id="case-xyz"), "extra_instructions": {}}
+
+        with pytest.raises(RuntimeError, match="post-tool failure"):
+            await node(state)
+
+        assert ainvoke_called["count"] == 0
+        failed_events = [e for e in published if e.get("event") == "agent_failed"]
+        assert len(failed_events) == 1
