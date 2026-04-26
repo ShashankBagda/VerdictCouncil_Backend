@@ -34,12 +34,14 @@ from src.models.case import (
     CaseComplexity,
     CaseDomain,
     CaseStatus,
+    Document,
     Fact,
     Party,
 )
 from src.models.pipeline_event import PipelineEvent
 from src.models.user import User, UserRole
 from src.services.case_report_data import build_case_report_data
+from src.services.document_parse import parse_and_persist_document
 from src.services.hearing_pack import assemble_pack
 from src.services.pdf_export import render_case_report_pdf
 from src.services.pipeline_events import subscribe as subscribe_pipeline_events
@@ -62,10 +64,10 @@ SSE_WATCHDOG_SECONDS = 600.0
 from src.pipeline.manifest import (  # noqa: E402
     GATE_AGENTS as _MANIFEST_GATE_AGENTS,
 )
-from src.pipeline.manifest import (
+from src.pipeline.manifest import (  # noqa: E402
     PIPELINE_AGENT_ORDER,
 )
-from src.pipeline.manifest import (
+from src.pipeline.manifest import (  # noqa: E402
     normalize_agent_id as _normalize_agent_id,
 )
 
@@ -129,6 +131,89 @@ def _optional_text(value: Any) -> str | None:
 
 def _display_text(value: Any, fallback: str) -> str:
     return _optional_text(value) or fallback
+
+
+# ---------------------------------------------------------------------------
+# Q2.2 — runner-side hydration of CaseState.raw_documents.
+# ---------------------------------------------------------------------------
+#
+# The intake agent needs the parsed text of each uploaded document to do
+# its job. The Q2.1 worker caches `parse_document` output on
+# `Document.parsed_text` at upload time so this hot-path read is just a
+# JSONB column. For documents the worker hasn't covered yet (legacy
+# uploads, worker still in flight, parse failure), the runner does a
+# best-effort back-fill via `parse_and_persist_document`. If even that
+# fails the entry gets `parsed_text=""` and the agent's `parse_document`
+# tool-call fallback handles the gap.
+
+# `parsed_text` is a string in CaseState.raw_documents[i] but a dict
+# (`{text, pages, tables}`) on the Document column. We flatten here.
+
+
+async def _hydrate_raw_documents(db, documents: list[Document]) -> list[dict[str, Any]]:
+    """Build the `raw_documents` list for `CaseState`, hydrating parsed
+    text from `Document.parsed_text` (cache hit) or via a runner-side
+    back-fill (cache miss). Failures degrade to `parsed_text=""` — the
+    run continues and the agent's tool-call fallback covers the gap."""
+    entries: list[dict[str, Any]] = []
+    for document in documents:
+        parsed = document.parsed_text if isinstance(document.parsed_text, dict) else None
+        if parsed is None and document.openai_file_id:
+            try:
+                await parse_and_persist_document(db, document_id=document.id)
+            except Exception as exc:
+                logger.warning(
+                    "raw_documents back-fill failed for document=%s file=%s: %s; "
+                    "entry gets parsed_text='' and the agent will fall back to parse_document",
+                    document.id,
+                    document.openai_file_id,
+                    exc,
+                )
+            else:
+                parsed = (
+                    document.parsed_text
+                    if isinstance(document.parsed_text, dict)
+                    else None
+                )
+
+        text = (parsed or {}).get("text") or ""
+        # Prefer pages from the fresh parse output; fall back to the
+        # legacy `Document.pages` column for rows the upload path never
+        # populated `parsed_text` on. Single source of truth wins.
+        pages = (parsed or {}).get("pages")
+        if pages is None:
+            pages = getattr(document, "pages", None)
+
+        entries.append(
+            {
+                "document_id": str(document.id),
+                "filename": document.filename,
+                "file_type": _optional_text(getattr(document, "file_type", None)),
+                "openai_file_id": _optional_text(getattr(document, "openai_file_id", None)),
+                "pages": pages,
+                "parsed_text": text,
+            }
+        )
+    return entries
+
+
+def _log_intake_phase_start(
+    *,
+    case_id: UUID,
+    raw_documents: list[dict[str, Any]],
+    parties_count: int,
+) -> None:
+    """Operator-facing breadcrumb used to spot intake halts. Logs counts
+    only — no PII, no document text. Format is grep-friendly so an
+    on-call can `grep intake_phase_start` and read the columns."""
+    parsed_text_chars = sum(len(entry.get("parsed_text") or "") for entry in raw_documents)
+    logger.info(
+        "intake_phase_start case_id=%s documents=%d parties=%d parsed_text_chars=%d",
+        case_id,
+        len(raw_documents),
+        parties_count,
+        parsed_text_chars,
+    )
 
 
 def _party_role_lookup(parties: list[Party]) -> dict[str, str]:
@@ -1316,16 +1401,12 @@ async def _run_case_pipeline(case_id: UUID, *, trace_id: str | None = None) -> N
             logger.warning("run_case_pipeline: case %s not found", case_id)
             return
 
-        raw_documents = [
-            {
-                "document_id": str(document.id),
-                "filename": document.filename,
-                "file_type": _optional_text(getattr(document, "file_type", None)),
-                "openai_file_id": _optional_text(getattr(document, "openai_file_id", None)),
-                "pages": getattr(document, "pages", None),
-            }
-            for document in case.documents
-        ]
+        raw_documents = await _hydrate_raw_documents(db, case.documents)
+        _log_intake_phase_start(
+            case_id=case_id,
+            raw_documents=raw_documents,
+            parties_count=len(case.parties),
+        )
 
         domain_vector_store_id = (
             case.domain_ref.vector_store_id
