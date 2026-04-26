@@ -1,7 +1,6 @@
 """Sprint 4 4.A5.1 — LangGraph-native What-If fork primitive.
 
-Replaces the legacy ``services/whatif_controller.create_scenario``
-deep-clone path with a saver-driven fork:
+Saver-driven fork:
 
 1. Read the terminal CaseState from the original case's thread
    (``thread_id == case_id``).
