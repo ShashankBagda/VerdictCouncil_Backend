@@ -76,9 +76,16 @@ class TestCitationAccuracy:
         assert result["score"] == 0.5
         assert "1/2" in result["comment"]
 
-    def test_no_citations_scores_one(self):
+    def test_no_citations_returns_none_score(self):
+        """Empty law block → score=None so LangSmith excludes this row from
+        the accuracy aggregate. Returning 1.0 was gameable: an agent that
+        learned to emit zero citations would have earned a perfect
+        anti-hallucination grade.
+        """
         run = _run({"research": {"law": {"legal_rules": [], "precedents": []}}})
-        assert citation_accuracy(run, None)["score"] == 1.0
+        result = citation_accuracy(run, None)
+        assert result["score"] is None
+        assert "excluded" in result["comment"].lower()
 
     def test_falls_back_to_audit_source_ids(self):
         run = _run(
@@ -92,8 +99,9 @@ class TestCitationAccuracy:
         assert citation_accuracy(run, None)["score"] == 1.0
 
     def test_no_run_outputs_does_not_crash(self):
+        """Missing outputs degrade to no-citations → None (excluded), not crash."""
         result = citation_accuracy(_run({}), None)
-        assert result["score"] == 1.0
+        assert result["score"] is None
 
 
 # ---------------------------------------------------------------------------

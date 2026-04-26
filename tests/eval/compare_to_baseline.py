@@ -60,6 +60,9 @@ def _experiment_scores(client, name: str) -> dict[str, float]:
 def _format_delta_table(
     deltas: dict[str, tuple[float, float, float]],
     threshold: float,
+    *,
+    added: list[str] | None = None,
+    removed: list[str] | None = None,
 ) -> str:
     lines = [
         "| Scorer | Baseline | Current | Delta |",
@@ -68,6 +71,19 @@ def _format_delta_table(
     for scorer, (base, curr, delta) in sorted(deltas.items()):
         marker = "🔴" if -delta > threshold else "✅"
         lines.append(f"| {marker} `{scorer}` | {base:.3f} | {curr:.3f} | {delta:+.3f} |")
+
+    # Added/removed scorers are surfaced separately because zero-fill
+    # comparison falsely trips the gate on remove and falsely passes on add.
+    if added:
+        lines.append("")
+        lines.append("**New scorers (not in baseline, no regression check):**")
+        for scorer in sorted(added):
+            lines.append(f"- ➕ `{scorer}`")
+    if removed:
+        lines.append("")
+        lines.append("**Scorers removed in this PR (was in baseline, not in current):**")
+        for scorer in sorted(removed):
+            lines.append(f"- ➖ `{scorer}`")
     return "\n".join(lines)
 
 
@@ -120,13 +136,23 @@ def main() -> int:
         print(f"ERROR: could not read baseline {args.baseline!r}: {exc}", file=sys.stderr)
         return 2
 
+    # Restrict regression check to scorers present in BOTH experiments.
+    # Zero-filling missing scorers (the previous shape) made
+    # ``delta = curr - 0.0`` for a new-in-PR scorer, which never trips the
+    # gate, and ``delta = 0.0 - base`` for a removed-in-PR scorer, which
+    # always trips it. Surface those classes separately so the gate only
+    # acts on like-for-like comparisons.
+    common = set(current) & set(baseline)
+    added = sorted(set(current) - set(baseline))
+    removed = sorted(set(baseline) - set(current))
+
     deltas: dict[str, tuple[float, float, float]] = {}
-    for scorer in sorted(set(current) | set(baseline)):
-        base = baseline.get(scorer, 0.0)
-        curr = current.get(scorer, 0.0)
+    for scorer in sorted(common):
+        base = baseline[scorer]
+        curr = current[scorer]
         deltas[scorer] = (base, curr, curr - base)
 
-    table = _format_delta_table(deltas, args.threshold)
+    table = _format_delta_table(deltas, args.threshold, added=added, removed=removed)
     print(table)
 
     if args.comment_path:

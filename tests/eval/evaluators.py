@@ -81,8 +81,16 @@ def citation_accuracy(run: Any, example: Any | None = None) -> dict[str, Any]:
     """Fraction of cited source_ids that match the run's retrieved set.
 
     1.0 = every citation is grounded; 0.0 = every citation is hallucinated.
-    Empty law block scores 1.0 (vacuously grounded) so an intake-only
-    case doesn't penalise the eval.
+
+    Empty law block (no citations emitted) returns ``score=None`` so
+    LangSmith excludes the row from the accuracy aggregate. Returning
+    1.0 here was gameable: the validator suppressing hallucinated
+    citations would *raise* the score, and an agent that learned to
+    emit zero rules would earn a perfect anti-hallucination grade
+    (Sprint 3 review finding). The companion ``legal_element_coverage``
+    metric still flags zero-rules cases as missed coverage, so quality
+    can't degrade silently — this fix only stops empty rows from
+    inflating the precision metric.
     """
     law = _agent_law(run)
     rules = law.get("legal_rules") or []
@@ -96,8 +104,8 @@ def citation_accuracy(run: Any, example: Any | None = None) -> dict[str, Any]:
     if not cited:
         return {
             "key": "citation_accuracy",
-            "score": 1.0,
-            "comment": "No citations to validate.",
+            "score": None,
+            "comment": "No citations to validate — row excluded from aggregate.",
         }
 
     matched = sum(1 for src in cited if src in retrieved)

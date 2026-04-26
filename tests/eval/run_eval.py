@@ -216,6 +216,20 @@ def main() -> int:
         )
         return 2
 
+    # 4.D3.1 floor guard — Sprint 3 review finding.
+    # `baseline-<sha>-stub` is engineered to score 1.0/1.0 and so cannot
+    # trip on real pipeline regressions. Refuse to tag any stub-mode
+    # experiment with a baseline-* prefix; the eval-gate floor must be
+    # set against `--mode graph` to have discrimination power.
+    if args.experiment_prefix.startswith("baseline") and args.mode != "graph":
+        print(
+            f"ERROR: --experiment-prefix={args.experiment_prefix!r} requires --mode graph. "
+            "Stub experiments cannot serve as the regression baseline because they are "
+            "engineered to score 1.0/1.0 (see run_eval.py docstring).",
+            file=sys.stderr,
+        )
+        return 2
+
     from langsmith import Client
     from langsmith.evaluation import evaluate
 
