@@ -61,10 +61,13 @@ SSE_WATCHDOG_SECONDS = 600.0
 # agree on the same 7 LangGraph node IDs.
 from src.pipeline.manifest import (  # noqa: E402
     GATE_AGENTS as _MANIFEST_GATE_AGENTS,
+)
+from src.pipeline.manifest import (
     PIPELINE_AGENT_ORDER,
+)
+from src.pipeline.manifest import (
     normalize_agent_id as _normalize_agent_id,
 )
-
 
 _GATE_PAUSE_STATUSES = {
     CaseStatus.awaiting_review_gate1,
@@ -1496,7 +1499,9 @@ async def process_case(
     current_user: CurrentUser,
 ) -> MessageResponse:
     result = await db.execute(
-        select(Case).where(Case.id == case_id).options(selectinload(Case.documents))
+        select(Case)
+        .where(Case.id == case_id)
+        .options(selectinload(Case.documents), selectinload(Case.parties))
     )
     case = result.scalar_one_or_none()
     if not case:
@@ -1506,6 +1511,24 @@ async def process_case(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Case has no uploaded documents",
+        )
+
+    # Q2.5: fail fast when intake confirmation never completed. Without
+    # parties OR a populated `intake_extraction.fields`, the intake
+    # agent has nothing to ground its output on and the run is
+    # guaranteed to halt — burning a status flip and an outbox row for
+    # nothing. Allow the run if either signal is present; Q2.3b will
+    # bridge `intake_extraction.fields` into CaseState so the agent can
+    # pick up where the judge stopped.
+    extraction = case.intake_extraction if isinstance(case.intake_extraction, dict) else None
+    extraction_fields = (extraction or {}).get("fields") or {}
+    if not case.parties and not extraction_fields:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Intake confirmation incomplete: complete the intake review "
+                "before processing"
+            ),
         )
 
     flip = await db.execute(
