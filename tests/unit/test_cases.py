@@ -427,6 +427,48 @@ class TestProcessCase:
         assert resp.status_code == 202
 
 
+class TestCancelCase:
+    async def test_cancel_case_404_when_case_belongs_to_other_judge(self):
+        """Cross-judge cancel is hidden as 404 — judge A cannot cancel judge B's case.
+
+        Mirrors the no-enumeration shape used by `/respond`, `/advance`, `/rerun`.
+        Without this check, any authenticated judge could cancel any in-flight
+        run by guessing case_ids.
+        """
+        judge_a = _make_user(role=UserRole.judge, email="judge_a@example.com")
+        judge_b = _make_user(role=UserRole.judge, email="judge_b@example.com")
+
+        # Case belongs to judge_b and is in-flight — without the ownership
+        # check the route would have advanced to the 409 status branch.
+        case = _make_case(judge_b.id, status=CaseStatus.processing)
+
+        mock_db = _build_mock_session()
+        mock_db.execute.return_value = _mock_scalar_result(case)
+
+        app = _app_with_overrides(mock_db, judge_a)
+        transport = ASGITransport(app=app)
+
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(f"/api/v1/cases/{case.id}/cancel")
+
+        assert resp.status_code == 404
+        assert resp.json()["detail"] == "Case not found"
+
+    async def test_cancel_case_404_when_case_not_found(self):
+        """Unknown case_id returns 404 — same response as cross-judge."""
+        user = _make_user()
+        mock_db = _build_mock_session()
+        mock_db.execute.return_value = _mock_scalar_result(None)
+
+        app = _app_with_overrides(mock_db, user)
+        transport = ASGITransport(app=app)
+
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(f"/api/v1/cases/{uuid.uuid4()}/cancel")
+
+        assert resp.status_code == 404
+
+
 class TestCors:
     async def test_preflight_allows_vite_origin(self):
         """OPTIONS preflight from the Vite dev origin is permitted."""
