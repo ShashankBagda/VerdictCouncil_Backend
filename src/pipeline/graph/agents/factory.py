@@ -44,7 +44,6 @@ from src.services.pipeline_events import publish_agent_event
 
 logger = logging.getLogger(__name__)
 from src.pipeline.graph.prompt_registry import get_prompt
-from src.pipeline.graph.prompts import AGENT_TOOLS
 from src.pipeline.graph.schemas import (
     AuditOutput,
     EvidenceResearch,
@@ -187,7 +186,17 @@ def _build_phase_input_payload(phase_or_scope: str, state: dict[str, Any]) -> di
     context tight.
     """
     case = state["case"]
-    case_dump = case.model_dump(mode="json") if hasattr(case, "model_dump") else dict(case)
+    # Tolerate three input shapes: Pydantic CaseState (production path),
+    # plain dict (some checkpointer round-trips), and `SimpleNamespace`
+    # (unit-test stubs in test_agent_factory.py).
+    if hasattr(case, "model_dump"):
+        case_dump = case.model_dump(mode="json")
+    elif isinstance(case, dict):
+        case_dump = dict(case)
+    elif hasattr(case, "__dict__"):
+        case_dump = dict(vars(case))
+    else:
+        case_dump = {}
 
     payload: dict[str, Any] = {
         "case_id": case_dump.get("case_id"),
@@ -350,21 +359,17 @@ def _resolve_prompt(phase: str, corrections: str | None = None) -> str:
 
 
 def _build_all_tools(state: dict[str, Any]) -> dict[str, Any]:
-    """Return every legacy tool keyed by name, ignoring `AGENT_TOOLS` scoping.
+    """Return every registered tool keyed by name.
 
-    `make_tools(state, agent_name)` filters by the legacy `AGENT_TOOLS`
-    map, so no single legacy agent name yields the full new-topology
-    tool surface (parse_document + search_precedents +
-    search_domain_guidance). We aggregate by walking every legacy agent
-    and merging — each tool factory closure is identical regardless of
-    which legacy name we asked for.
+    `make_tools(state)` (with `agent_name=None`) returns the full
+    registered set; the new-topology factory then scopes per-phase via
+    `_filter_tools(...)` against `PHASE_TOOL_NAMES` /
+    `RESEARCH_TOOL_NAMES`. This used to walk every entry of the legacy
+    `AGENT_TOOLS` map and union the per-key results — that workaround
+    is gone now that `make_tools` accepts `agent_name=None`.
     """
-    by_name: dict[str, Any] = {}
-    for legacy_agent in AGENT_TOOLS:
-        raw_tools, _meta = make_tools(state, agent_name=legacy_agent)
-        for tool in raw_tools:
-            by_name.setdefault(tool.name, tool)
-    return by_name
+    raw_tools, _meta = make_tools(state)
+    return {tool.name: tool for tool in raw_tools}
 
 
 def _filter_tools(state: dict[str, Any], phase_or_scope: str, allowed: list[str]) -> list[Any]:
