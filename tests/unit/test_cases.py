@@ -312,7 +312,7 @@ class TestProcessCase:
         user = _make_user()
         mock_db = _build_mock_session()
 
-        case = _make_case(user.id, documents=[self._doc()])
+        case = _make_case(user.id, documents=[self._doc()], parties=[MagicMock()])
         mock_db.execute.side_effect = [
             _mock_scalar_result(case),
             _mock_scalar_result(case.id),
@@ -373,7 +373,12 @@ class TestProcessCase:
         user = _make_user()
         mock_db = _build_mock_session()
 
-        case = _make_case(user.id, documents=[self._doc()], status=CaseStatus.ready_for_review)
+        case = _make_case(
+            user.id,
+            documents=[self._doc()],
+            status=CaseStatus.ready_for_review,
+            parties=[MagicMock()],
+        )
         mock_db.execute.side_effect = [
             _mock_scalar_result(case),
             _mock_scalar_result(None),
@@ -393,7 +398,12 @@ class TestProcessCase:
         user = _make_user()
         mock_db = _build_mock_session()
 
-        case = _make_case(user.id, documents=[self._doc()], status=CaseStatus.processing)
+        case = _make_case(
+            user.id,
+            documents=[self._doc()],
+            status=CaseStatus.processing,
+            parties=[MagicMock()],
+        )
         mock_db.execute.side_effect = [
             _mock_scalar_result(case),
             _mock_scalar_result(None),
@@ -412,7 +422,120 @@ class TestProcessCase:
         user = _make_user()
         mock_db = _build_mock_session()
 
-        case = _make_case(user.id, documents=[self._doc()], status=CaseStatus.ready_for_review)
+        case = _make_case(
+            user.id,
+            documents=[self._doc()],
+            status=CaseStatus.ready_for_review,
+            parties=[MagicMock()],
+        )
+        mock_db.execute.side_effect = [
+            _mock_scalar_result(case),
+            _mock_scalar_result(case.id),
+        ]
+
+        app = _app_with_overrides(mock_db, user)
+        transport = ASGITransport(app=app)
+
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(f"/api/v1/cases/{case.id}/process")
+
+        assert resp.status_code == 202
+
+    # ------------------------------------------------------------------ #
+    # Q2.5 — fail-fast 409 when intake confirmation never completed.
+    # ------------------------------------------------------------------ #
+
+    async def test_process_case_409_when_no_parties_and_no_intake_extraction(self):
+        """Case has documents but neither confirmed parties nor a pending
+        extraction → the pipeline is guaranteed to halt at intake. Reject
+        before burning a status flip and an outbox row."""
+        user = _make_user()
+        mock_db = _build_mock_session()
+
+        case = _make_case(
+            user.id,
+            documents=[self._doc()],
+            parties=[],
+            intake_extraction=None,
+        )
+        mock_db.execute.return_value = _mock_scalar_result(case)
+
+        app = _app_with_overrides(mock_db, user)
+        transport = ASGITransport(app=app)
+
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(f"/api/v1/cases/{case.id}/process")
+
+        assert resp.status_code == 409
+        assert "Intake confirmation incomplete" in resp.json()["detail"]
+        mock_db.commit.assert_not_awaited()
+        mock_db.add.assert_not_called()
+
+    async def test_process_case_409_when_intake_extraction_has_empty_fields(self):
+        """An extraction row exists but `fields` is empty — judge never
+        confirmed anything. Same failure mode as no extraction at all."""
+        user = _make_user()
+        mock_db = _build_mock_session()
+
+        case = _make_case(
+            user.id,
+            documents=[self._doc()],
+            parties=[],
+            intake_extraction={"fields": {}, "citations": []},
+        )
+        mock_db.execute.return_value = _mock_scalar_result(case)
+
+        app = _app_with_overrides(mock_db, user)
+        transport = ASGITransport(app=app)
+
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(f"/api/v1/cases/{case.id}/process")
+
+        assert resp.status_code == 409
+        assert "Intake confirmation incomplete" in resp.json()["detail"]
+
+    async def test_process_case_202_when_intake_extraction_has_fields(self):
+        """Parties still empty (judge skipped the confirm UI) but the
+        extractor produced fields. Allow the run — the runner can bridge
+        intake_extraction into CaseState (Q2.3b) so the agent has data."""
+        user = _make_user()
+        mock_db = _build_mock_session()
+
+        case = _make_case(
+            user.id,
+            documents=[self._doc()],
+            parties=[],
+            intake_extraction={
+                "fields": {"parties": [{"name": "Alice"}]},
+                "citations": [],
+            },
+        )
+        mock_db.execute.side_effect = [
+            _mock_scalar_result(case),
+            _mock_scalar_result(case.id),
+        ]
+
+        app = _app_with_overrides(mock_db, user)
+        transport = ASGITransport(app=app)
+
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(f"/api/v1/cases/{case.id}/process")
+
+        assert resp.status_code == 202
+
+    async def test_process_case_202_when_parties_present(self):
+        """Standard happy path — judge confirmed parties via the intake
+        UI. intake_extraction may be None (legacy case) or populated; the
+        guard rail does not care once parties are set."""
+        user = _make_user()
+        mock_db = _build_mock_session()
+
+        case = _make_case(
+            user.id,
+            documents=[self._doc()],
+            parties=[MagicMock()],
+            intake_extraction=None,
+        )
         mock_db.execute.side_effect = [
             _mock_scalar_result(case),
             _mock_scalar_result(case.id),
