@@ -1553,11 +1553,11 @@ async def process_case(
 async def cancel_case_pipeline(
     case_id: UUID,
     db: DBSession,
-    current_user: CurrentUser,
+    current_user: User = require_role(UserRole.judge),
 ) -> MessageResponse:
     result = await db.execute(select(Case).where(Case.id == case_id))
     case = result.scalar_one_or_none()
-    if not case:
+    if case is None or case.created_by != current_user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
 
     if case.status != CaseStatus.processing:
