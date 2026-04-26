@@ -9,6 +9,16 @@ from __future__ import annotations
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _force_json_mode(monkeypatch):
+    """These tests assert JSON-mode behaviour (llm_chunk emission,
+    ainvoke fallback). With Q1.6 default-on, intake hits conversational
+    mode by default. Force JSON mode here so the JSON-path assertions
+    remain valid; conversational behaviour is covered in
+    test_factory_conversational.py."""
+    monkeypatch.setenv("PIPELINE_CONVERSATIONAL_STREAMING_PHASES", "")
+
+
 def test_phase_tool_names_are_explicit_and_least_privilege():
     from src.pipeline.graph.agents import factory
 

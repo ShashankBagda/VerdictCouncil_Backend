@@ -30,8 +30,30 @@ class TestMakePhaseNodeFlagWiring:
     empty → JSON mode preserved. Audit is NEVER conversational
     (architecture decision A3) regardless of flag content."""
 
-    def test_intake_default_flag_off_uses_json_mode(self, monkeypatch):
+    def test_intake_default_uses_conversational_mode(self, monkeypatch):
+        """Q1.6 default-on: env var unset → intake runs conversational
+        out of the box. Operators set the env to `""` to revert."""
         monkeypatch.delenv("PIPELINE_CONVERSATIONAL_STREAMING_PHASES", raising=False)
+
+        from src.pipeline.graph.agents import factory
+
+        captured: dict = {}
+
+        original = factory._make_node
+
+        def _spy(**kwargs):
+            captured.update(kwargs)
+            return original(**kwargs)
+
+        monkeypatch.setattr(factory, "_make_node", _spy)
+        factory.make_phase_node("intake")
+
+        assert captured["conversational"] is True
+
+    def test_intake_explicit_empty_env_var_uses_json_mode(self, monkeypatch):
+        """Documented kill switch — `PIPELINE_CONVERSATIONAL_STREAMING_PHASES=`
+        reverts intake to the legacy JSON-mode path."""
+        monkeypatch.setenv("PIPELINE_CONVERSATIONAL_STREAMING_PHASES", "")
 
         from src.pipeline.graph.agents import factory
 
@@ -154,10 +176,15 @@ def _patch_noop_structuring(monkeypatch, factory_module) -> None:
 
 class TestConversationalFlagDefault:
     @pytest.mark.asyncio
-    async def test_make_phase_node_intake_default_path_unchanged(self, monkeypatch):
-        """Q1.4 must not regress today's behavior. `make_phase_node("intake")`
-        with no flag passed → emits `llm_chunk` events, sets
+    async def test_make_phase_node_intake_json_mode_path(self, monkeypatch):
+        """JSON-mode (legacy) intake path locked behind explicit
+        `PIPELINE_CONVERSATIONAL_STREAMING_PHASES=` (empty) override.
+        Used to be the default; Q1.6 default-on flipped intake to
+        conversational, so we must opt back into JSON mode to test
+        the legacy path. Asserts: emits `llm_chunk` events, sets
         response_format, returns structured output."""
+        monkeypatch.setenv("PIPELINE_CONVERSATIONAL_STREAMING_PHASES", "")
+
         from langchain_core.messages import AIMessageChunk
 
         from src.pipeline.graph.agents import factory
@@ -514,9 +541,12 @@ class TestConversationalFlagOn:
         assert artifacts == []
 
     @pytest.mark.asyncio
-    async def test_default_path_does_not_run_structuring_pass(self, monkeypatch):
+    async def test_json_mode_path_does_not_run_structuring_pass(self, monkeypatch):
         """JSON mode keeps using the agent's bound `structured_response`.
-        No structuring pass call — that path would double-charge OpenAI."""
+        No structuring pass call — that path would double-charge OpenAI.
+        Forces JSON mode via explicit-empty env var override."""
+        monkeypatch.setenv("PIPELINE_CONVERSATIONAL_STREAMING_PHASES", "")
+
         from langchain_core.messages import AIMessageChunk
 
         from src.pipeline.graph.agents import factory
