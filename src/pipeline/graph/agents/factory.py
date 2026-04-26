@@ -22,14 +22,16 @@ the factory works before 1.C3a.3 wires the LangSmith prompt registry.
 from __future__ import annotations
 
 import logging
+import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
 from langchain.agents import create_agent
 from langchain.agents.structured_output import ToolStrategy
-from langchain_core.messages import AIMessageChunk
+from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
 
+from src.pipeline.graph.agents.stream_coalescer import StreamCoalescer
 from src.pipeline.graph.middleware import (
     CaseAwareState,
     audit_tool_call,
@@ -219,17 +221,33 @@ def _make_node(
     allowed_tool_names: list[str],
     schema: type[Any],
     use_strict_response_format: bool,
+    conversational: bool = False,
 ) -> Callable:
-    """Common factory body shared by `make_phase_node` + `make_research_subagent`."""
+    """Common factory body shared by `make_phase_node` + `make_research_subagent`.
+
+    `conversational=True` (Q1.4) builds the agent WITHOUT
+    `response_format` so the model emits prose. The factory then
+    swaps the wire format: prose deltas go through the Q1.1 coalescer
+    → `llm_token` SSE events; tool-call chunks emit as
+    `tool_call_delta` events. Used by Q1.6 to wire intake's
+    conversational mode behind the
+    `PIPELINE_CONVERSATIONAL_STREAMING_PHASES` flag. The audit phase
+    is NEVER conversational (architecture decision A3).
+    """
 
     async def _node(state: dict[str, Any]) -> dict[str, Any]:
         tools = _filter_tools(state, phase_or_scope, allowed_tool_names)
-        # Audit and other non-strict phases use ToolStrategy(Schema) for
-        # deterministic retry on validation errors (SA F-8). The audit phase
-        # itself is the strict-JSON exception (Sprint 0.5 §5 D-4) but its
-        # schema already declares `strict=True` so we still wrap it the same
-        # way for retry semantics.
-        response_format = schema if use_strict_response_format else ToolStrategy(schema)
+        # Conversational mode: NO response_format binding — the model
+        # emits prose, not bound JSON. Q1.5 will run a structuring
+        # pass after the conversational stream completes to produce
+        # the schema-bound artifact. JSON mode (default) keeps the
+        # existing ToolStrategy / strict-response wiring.
+        if conversational:
+            response_format = None
+        elif use_strict_response_format:
+            response_format = schema
+        else:
+            response_format = ToolStrategy(schema)
         # Pull per-phase corrective instructions (judge rerun) if any. The
         # gate-apply node writes these into `state["extra_instructions"]`
         # keyed by phase name when the judge selects "rerun" with notes.
@@ -271,6 +289,29 @@ def _make_node(
         # takes over.
         result: dict[str, Any] = {}
         streaming_started = False
+
+        # Conversational mode bookkeeping: a fresh message_id per
+        # assistant turn (reset whenever a tool message lands so a
+        # new assistant turn gets a new bubble in the UI), and a
+        # coalescer to batch prose deltas into `llm_token` events.
+        message_id: str = uuid.uuid4().hex if conversational else ""
+
+        async def _emit_token(text: str) -> None:
+            await publish_agent_event(
+                case_id,
+                {
+                    "case_id": case_id,
+                    "agent": phase_or_scope,
+                    "phase": phase_or_scope,
+                    "event": "llm_token",
+                    "message_id": message_id,
+                    "delta": text,
+                    "ts": datetime.now(UTC).isoformat(),
+                },
+            )
+
+        coalescer = StreamCoalescer(on_emit=_emit_token) if conversational else None
+
         try:
             async for mode, payload in agent.astream(
                 agent_state,
@@ -279,7 +320,47 @@ def _make_node(
                 streaming_started = True
                 if mode == "messages":
                     msg = payload[0] if isinstance(payload, tuple) else payload
-                    if isinstance(msg, AIMessageChunk):
+                    if conversational:
+                        # New assistant turn after a tool result → flush
+                        # pending prose, mint a fresh message_id so the
+                        # frontend renders distinct bubbles.
+                        if isinstance(msg, ToolMessage | AIMessage):
+                            if coalescer is not None:
+                                await coalescer.flush()
+                            if isinstance(msg, ToolMessage):
+                                message_id = uuid.uuid4().hex
+                        if isinstance(msg, AIMessageChunk):
+                            # Tool-call chunks → `tool_call_delta` events.
+                            for tc in getattr(msg, "tool_call_chunks", None) or []:
+                                args_delta = tc.get("args") or ""
+                                if args_delta or tc.get("name"):
+                                    await publish_agent_event(
+                                        case_id,
+                                        {
+                                            "case_id": case_id,
+                                            "agent": phase_or_scope,
+                                            "phase": phase_or_scope,
+                                            "event": "tool_call_delta",
+                                            "tool_call_id": tc.get("id") or "",
+                                            "name": tc.get("name") or "",
+                                            "args_delta": args_delta,
+                                            "ts": datetime.now(UTC).isoformat(),
+                                        },
+                                    )
+                            # Prose content (string or multi-modal text parts) → coalescer.
+                            content = msg.content
+                            if isinstance(content, str) and content:
+                                if coalescer is not None:
+                                    await coalescer.feed(content)
+                            elif isinstance(content, list):
+                                for part in content:
+                                    if (
+                                        coalescer is not None
+                                        and isinstance(part, dict)
+                                        and part.get("type") == "text"
+                                    ):
+                                        await coalescer.feed(part.get("text") or "")
+                    elif isinstance(msg, AIMessageChunk):
                         text = _chunk_text(msg)
                         if text:
                             await publish_agent_event(
@@ -294,6 +375,9 @@ def _make_node(
                             )
                 elif mode == "values":
                     result = payload
+            # Drain any pending prose at end-of-stream.
+            if coalescer is not None:
+                await coalescer.close()
         except Exception as exc:
             if not streaming_started:
                 logger.exception(
