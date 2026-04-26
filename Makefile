@@ -1,4 +1,4 @@
-.PHONY: install prefetch-sanitizer lint typecheck test migrate reset-db infra-up infra-down dev clean openapi-snapshot openapi-check smoke-contract
+.PHONY: install prefetch-sanitizer lint typecheck test migrate reset-db infra-up infra-down dev clean openapi-snapshot openapi-check sse-schema-snapshot sse-schema-check smoke-contract
 
 install: ## Install dependencies
 	python3.12 -m venv .venv
@@ -50,6 +50,12 @@ openapi-snapshot: ## Regenerate docs/openapi.json from the FastAPI app
 openapi-check: openapi-snapshot ## Fail if docs/openapi.json is out of sync with the app
 	@git diff --exit-code docs/openapi.json \
 		|| (echo "docs/openapi.json is out of date — run 'make openapi-snapshot' and commit the diff"; exit 1)
+
+sse-schema-snapshot: ## Regenerate docs/sse-schema.json from the Pydantic Event union
+	.venv/bin/python -m scripts.export_sse_schema docs/sse-schema.json
+
+sse-schema-check: ## Fail if docs/sse-schema.json drifts from the Pydantic source
+	@.venv/bin/python -m scripts.check_sse_schema docs/sse-schema.json
 
 smoke-contract: ## Hit every frontend-used endpoint against a running API (needs seed)
 	.venv/bin/python -m scripts.smoke_frontend_contract

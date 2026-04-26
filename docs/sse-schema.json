@@ -86,6 +86,18 @@
         "ts": {
           "title": "Ts",
           "type": "string"
+        },
+        "trace_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Trace Id"
         }
       },
       "required": [
@@ -143,12 +155,172 @@
           "format": "date-time",
           "title": "Ts",
           "type": "string"
+        },
+        "trace_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Trace Id"
         }
       },
       "required": [
         "ts"
       ],
       "title": "HeartbeatEvent",
+      "type": "object"
+    },
+    "InterruptEvent": {
+      "description": "Gate-pause interrupt \u2014 judge must respond via /cases/{id}/respond.\n\nEmitted by `publish_interrupt(...)` (Sprint 4 4.A3.7) whenever the\nLangGraph pipeline pauses at a gate. The ``phase_output`` carries\nthe per-gate review payload (intake / research / synthesis / audit\noutput for gates 1-4 respectively). ``audit_summary`` is gate4-only\nand surfaces the optional `recommend_send_back` recommendation\nfrom the auditor (4.A3.14).",
+      "properties": {
+        "kind": {
+          "const": "interrupt",
+          "default": "interrupt",
+          "title": "Kind",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "case_id": {
+          "format": "uuid",
+          "title": "Case Id",
+          "type": "string"
+        },
+        "gate": {
+          "enum": [
+            "gate1",
+            "gate2",
+            "gate3",
+            "gate4"
+          ],
+          "title": "Gate",
+          "type": "string"
+        },
+        "actions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Actions",
+          "type": "array"
+        },
+        "phase_output": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Phase Output"
+        },
+        "audit_summary": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Audit Summary"
+        },
+        "trace_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Trace Id"
+        },
+        "ts": {
+          "format": "date-time",
+          "title": "Ts",
+          "type": "string"
+        }
+      },
+      "required": [
+        "case_id",
+        "gate",
+        "actions",
+        "ts"
+      ],
+      "title": "InterruptEvent",
+      "type": "object"
+    },
+    "NarrationEvent": {
+      "description": "Natural-language summary chunk emitted by an agent after its analysis.",
+      "properties": {
+        "kind": {
+          "const": "narration",
+          "default": "narration",
+          "title": "Kind",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "case_id": {
+          "title": "Case Id",
+          "type": "string"
+        },
+        "agent": {
+          "title": "Agent",
+          "type": "string"
+        },
+        "content": {
+          "title": "Content",
+          "type": "string"
+        },
+        "chunk_index": {
+          "default": 0,
+          "title": "Chunk Index",
+          "type": "integer"
+        },
+        "ts": {
+          "title": "Ts",
+          "type": "string"
+        },
+        "trace_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Trace Id"
+        }
+      },
+      "required": [
+        "case_id",
+        "agent",
+        "content",
+        "ts"
+      ],
+      "title": "NarrationEvent",
       "type": "object"
     },
     "PipelineProgressEvent": {
@@ -239,6 +411,19 @@
           "default": null,
           "description": "Extra payload for terminal events: {'reason': <halt reason>, 'stopped_at': <stage>}.",
           "title": "Detail"
+        },
+        "trace_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "W3C OTEL trace id (32 lowercase hex chars). Sprint 2 2.C1.5; consumers tolerate absence for backward compat.",
+          "title": "Trace Id"
         }
       },
       "required": [
@@ -256,6 +441,8 @@
       "agent": "#/$defs/AgentEvent",
       "auth_expiring": "#/$defs/AuthExpiringEvent",
       "heartbeat": "#/$defs/HeartbeatEvent",
+      "interrupt": "#/$defs/InterruptEvent",
+      "narration": "#/$defs/NarrationEvent",
       "progress": "#/$defs/PipelineProgressEvent"
     },
     "propertyName": "kind"
@@ -266,6 +453,12 @@
     },
     {
       "$ref": "#/$defs/AgentEvent"
+    },
+    {
+      "$ref": "#/$defs/NarrationEvent"
+    },
+    {
+      "$ref": "#/$defs/InterruptEvent"
     },
     {
       "$ref": "#/$defs/HeartbeatEvent"
