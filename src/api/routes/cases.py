@@ -12,7 +12,8 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import selectinload
 
-from src.api.deps import CurrentUser, DBSession, require_role
+from src.api.deps import CurrentUser, CurrentUserForStream, DBSession, require_role
+from src.services.database import async_session
 from src.api.schemas.cases import (
     CaseConfirmRequest,
     CaseCreateRequest,
@@ -1295,8 +1296,7 @@ async def list_pipeline_events(
 async def stream_pipeline_status(
     case_id: UUID,
     request: Request,
-    db: DBSession,
-    current_user: CurrentUser,
+    current_user: CurrentUserForStream,
 ) -> StreamingResponse:
     import jwt as _jwt
 
@@ -1317,30 +1317,37 @@ async def stream_pipeline_status(
             if exp:
                 token_expires_at = datetime.fromtimestamp(exp, UTC)
         except Exception:
-            pass  # auth already validated by CurrentUser; expiry warning is best-effort
+            pass  # auth already validated by CurrentUserForStream; expiry warning is best-effort
 
-    await _load_case_for_export(case_id, db, current_user)
+    # Validate case + capture snapshot inside a short-lived session so the
+    # streaming response below never holds an asyncpg connection. Plain
+    # values only — never let an ORM instance escape the with-block.
+    async with async_session() as session:
+        case = await _load_case_for_export(case_id, session, current_user)
+        snap_status_value = case.status.value if case.status else None
+        snap_gate_state = case.gate_state
+
+    snap_event = {
+        "kind": "progress",
+        "schema_version": 1,
+        "case_id": str(case_id),
+        "agent": "pipeline",
+        "phase": "case.status",
+        "ts": datetime.now(UTC).isoformat(),
+        "detail": {
+            "status": snap_status_value,
+            "gate_state": snap_gate_state,
+        },
+    }
+    snap_payload = f"event: progress\ndata: {json.dumps(snap_event)}\n\n"
 
     async def event_generator():
         # Snapshot-on-connect: emit current case status so a client that
-        # re-subscribes after a gate advance sees the current state immediately,
-        # without waiting for the next Redis event. Uses the already-open
-        # dependency-injected session so tests can mock it cleanly.
-        _snap_case = await db.get(Case, case_id)
-        if _snap_case is not None:
-            snap_event = {
-                "kind": "progress",
-                "schema_version": 1,
-                "case_id": str(case_id),
-                "agent": "pipeline",
-                "phase": "case.status",
-                "ts": datetime.now(UTC).isoformat(),
-                "detail": {
-                    "status": _snap_case.status.value if _snap_case.status else None,
-                    "gate_state": _snap_case.gate_state,
-                },
-            }
-            yield f"event: progress\ndata: {json.dumps(snap_event)}\n\n"
+        # re-subscribes after a gate advance sees the current state
+        # immediately, without waiting for the next Redis event. Built
+        # above from a closed short-lived session — no DB calls run
+        # while streaming, so the request holds no connection.
+        yield snap_payload
 
         # Producer-consumer pattern: a background task owns the subscribe()
         # generator for its full lifetime and pushes payloads onto a queue.

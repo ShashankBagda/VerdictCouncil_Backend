@@ -3,6 +3,7 @@
 import asyncio
 import json
 import uuid
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
@@ -10,7 +11,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from src.api.app import create_app
-from src.api.deps import get_current_user, get_db
+from src.api.deps import get_current_user, get_current_user_for_stream, get_db
 from src.api.schemas.pipeline_events import PipelineProgressEvent
 from src.models.case import Case
 from src.models.user import User, UserRole
@@ -60,7 +61,24 @@ def _app_with_overrides(mock_db, mock_user):
     app = create_app()
     app.dependency_overrides[get_db] = lambda: mock_db
     app.dependency_overrides[get_current_user] = lambda: mock_user
+    # SSE handler authenticates via get_current_user_for_stream and opens
+    # its own short-lived session — override both so tests don't hit Postgres.
+    app.dependency_overrides[get_current_user_for_stream] = lambda: mock_user
     return app
+
+
+def _patch_async_session(monkeypatch, mock_db) -> None:
+    """Make ``cases.async_session()`` return a context manager that yields
+    ``mock_db`` so the SSE handler's short-lived snapshot session uses the
+    test mock instead of opening a real Postgres connection.
+    """
+    from src.api.routes import cases as cases_module
+
+    @asynccontextmanager
+    async def _factory():
+        yield mock_db
+
+    monkeypatch.setattr(cases_module, "async_session", _factory)
 
 
 def _fake_subscribe_factory(events: list[str]):
@@ -119,6 +137,7 @@ class TestStreamPipelineStatus:
             _fake_subscribe_factory(events),
         )
 
+        _patch_async_session(monkeypatch, mock_db)
         app = _app_with_overrides(mock_db, user)
         transport = ASGITransport(app=app)
 
@@ -159,6 +178,7 @@ class TestStreamPipelineStatus:
             _fake_subscribe_factory([]),
         )
 
+        _patch_async_session(monkeypatch, mock_db)
         app = _app_with_overrides(mock_db, user)
         transport = ASGITransport(app=app)
 
@@ -184,6 +204,7 @@ class TestStreamPipelineStatus:
             _fake_subscribe_factory([]),
         )
 
+        _patch_async_session(monkeypatch, mock_db)
         app = _app_with_overrides(mock_db, intruder)
         transport = ASGITransport(app=app)
 
@@ -357,6 +378,7 @@ class TestSSEStreamHeartbeatAndDisconnect:
         # Shrink heartbeat so the test finishes in <1s.
         monkeypatch.setattr(cases_module, "SSE_HEARTBEAT_SECONDS", 0.05)
 
+        _patch_async_session(monkeypatch, mock_db)
         app = _app_with_overrides(mock_db, user)
         transport = ASGITransport(app=app)
 
@@ -396,6 +418,7 @@ class TestSSEStreamHeartbeatAndDisconnect:
         monkeypatch.setattr(cases_module, "SSE_HEARTBEAT_SECONDS", 0.02)
         monkeypatch.setattr(cases_module, "SSE_WATCHDOG_SECONDS", 0.05)
 
+        _patch_async_session(monkeypatch, mock_db)
         app = _app_with_overrides(mock_db, user)
         transport = ASGITransport(app=app)
 
