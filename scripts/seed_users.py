@@ -47,24 +47,56 @@ def seed() -> None:
     engine = create_engine(DATABASE_URL)
     with Session(engine) as session:
         inserted = 0
+        updated = 0
         for user_id, name, email, role, password in DEMO_USERS:
-            existing = session.execute(
-                select(User).where(User.email == email)
-            ).scalar_one_or_none()
-            if existing:
-                continue
-            session.add(
-                User(
-                    id=user_id,
-                    name=name,
-                    email=email,
-                    role=role,
-                    password_hash=_hash(password),
+            # Look up by primary key first — a prior seed (or an older
+            # version of this script) may have inserted the canonical UUID
+            # under a different email, in which case checking by email
+            # alone misses it and the ID-keyed INSERT collides.
+            existing = session.get(User, user_id)
+            if existing is None:
+                # Fall back to the email lookup so we don't double-create
+                # a user that exists under a non-canonical UUID.
+                existing = session.execute(
+                    select(User).where(User.email == email)
+                ).scalar_one_or_none()
+
+            if existing is None:
+                session.add(
+                    User(
+                        id=user_id,
+                        name=name,
+                        email=email,
+                        role=role,
+                        password_hash=_hash(password),
+                    )
                 )
-            )
-            inserted += 1
+                inserted += 1
+                continue
+
+            # Refresh the canonical fields so dev.sh always lands the demo
+            # accounts in a known-good state. Hash is recomputed only when
+            # the password changed, since bcrypt salts make every call
+            # produce a different digest and we don't want to invalidate
+            # an already-correct credential on every dev.sh run.
+            changed = False
+            if existing.email != email:
+                existing.email = email
+                changed = True
+            if existing.name != name:
+                existing.name = name
+                changed = True
+            if existing.role != role:
+                existing.role = role
+                changed = True
+            if not bcrypt.checkpw(password.encode("utf-8"), existing.password_hash.encode("utf-8")):
+                existing.password_hash = _hash(password)
+                changed = True
+            if changed:
+                updated += 1
         session.commit()
-        print(f"Seed users: {inserted} inserted, {len(DEMO_USERS) - inserted} already present.")
+        unchanged = len(DEMO_USERS) - inserted - updated
+        print(f"Seed users: {inserted} inserted, {updated} updated, {unchanged} already current.")
 
 
 if __name__ == "__main__":
