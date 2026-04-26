@@ -35,11 +35,24 @@ from src.shared.case_state import CaseState
 logger = logging.getLogger(__name__)
 
 
-# Bump when CaseState changes in a way that breaks round-trip with older
-# checkpoint rows. Checkpoints persisted at a different version are rejected
-# by `load_case_state` so callers fail loud rather than silently proceeding
-# with a partially-decoded state.
+# Writer stamp — the version `persist_case_state` writes onto every new
+# checkpoint row. Bumped when the CaseState shape changes in a way that
+# requires a new version number.
 CURRENT_SCHEMA_VERSION = 2
+
+# Reader-accept set — checkpoints with `schema_version` outside this set
+# are rejected. Diverges from `CURRENT_SCHEMA_VERSION` during a bake
+# window so a reader-side compatibility shim can ship and roll one full
+# release cycle BEFORE the writer flips. Today's window:
+#   - Q2.3a (this commit) — reader accepts {2, 3}; CaseState default is 2,
+#     so newly-constructed states still serialize as v2.
+#   - Q2.3b (later) — CaseState default flips to 3; reader continues to
+#     accept both so checkpoints written during the rollout co-exist.
+# The writer (`persist_case_state`) does NOT override `schema_version` —
+# it serializes whatever the in-memory CaseState carries. So a v3 row
+# loaded today round-trips back as v3 and `intake_extraction` is
+# preserved (locked in `test_v3_checkpoint_round_trips_through_existing_writer`).
+SUPPORTED_READ_SCHEMA_VERSIONS = frozenset({2, 3})
 
 
 class CheckpointSchemaMismatchError(RuntimeError):
@@ -198,10 +211,11 @@ async def load_case_state(
         )
 
     version = raw["schema_version"]
-    if version != CURRENT_SCHEMA_VERSION:
+    if version not in SUPPORTED_READ_SCHEMA_VERSIONS:
         raise CheckpointSchemaMismatchError(
             f"checkpoint for case_id={case_id} run_id={run_id} has "
-            f"schema_version={version!r}, expected {CURRENT_SCHEMA_VERSION}"
+            f"schema_version={version!r}, expected one of "
+            f"{sorted(SUPPORTED_READ_SCHEMA_VERSIONS)}"
         )
 
     try:

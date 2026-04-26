@@ -17,6 +17,7 @@ import pytest
 
 from src.db.pipeline_state import (
     CURRENT_SCHEMA_VERSION,
+    SUPPORTED_READ_SCHEMA_VERSIONS,
     CheckpointCorruptError,
     CheckpointSchemaMismatchError,
     load_case_state,
@@ -127,6 +128,157 @@ async def test_load_case_state_rejects_version_mismatch():
     session = _ReaderSession(row=(future_payload,))
     with pytest.raises(CheckpointSchemaMismatchError, match="schema_version"):
         await load_case_state(session, case_id=case_id, run_id="future")  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_load_case_state_rejects_unsupported_version_explicitly():
+    """Q2.3a: the reader's accept set is {2, 3} — anything outside (here
+    99) is rejected. Locks the intent in test names so a future change
+    accidentally widening the set is caught."""
+    case_id = uuid4()
+    payload = {
+        "schema_version": 99,
+        "case_id": str(case_id),
+        "run_id": "v99",
+        "status": "pending",
+    }
+
+    session = _ReaderSession(row=(payload,))
+    with pytest.raises(CheckpointSchemaMismatchError):
+        await load_case_state(session, case_id=case_id, run_id="v99")  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_load_case_state_accepts_v3_with_intake_extraction():
+    """Q2.3a: a v3 checkpoint synthesised in test round-trips —
+    schema_version stays 3, intake_extraction survives."""
+    case_id = uuid4()
+    v3_payload = {
+        "schema_version": 3,
+        "case_id": str(case_id),
+        "run_id": "v3",
+        "status": "pending",
+        "intake_extraction": {"fields": {"parties": [{"name": "Alice"}]}},
+    }
+
+    session = _ReaderSession(row=(v3_payload,))
+    loaded = await load_case_state(session, case_id=case_id, run_id="v3")  # type: ignore[arg-type]
+
+    assert loaded is not None
+    assert loaded.schema_version == 3
+    assert loaded.intake_extraction == {"fields": {"parties": [{"name": "Alice"}]}}
+
+
+@pytest.mark.asyncio
+async def test_load_case_state_v2_defaults_intake_extraction_to_none():
+    """Q2.3a: a v2 checkpoint (writer hasn't flipped yet) loads with
+    intake_extraction defaulted to None — old runs aren't broken by
+    the model gaining the field."""
+    case_id = uuid4()
+    v2_payload = {
+        "schema_version": 2,
+        "case_id": str(case_id),
+        "run_id": "v2",
+        "status": "pending",
+    }
+
+    session = _ReaderSession(row=(v2_payload,))
+    loaded = await load_case_state(session, case_id=case_id, run_id="v2")  # type: ignore[arg-type]
+
+    assert loaded is not None
+    assert loaded.schema_version == 2
+    assert loaded.intake_extraction is None
+
+
+@pytest.mark.asyncio
+async def test_v3_checkpoint_round_trips_through_existing_writer():
+    """Q2.3a: a v3 checkpoint loaded → re-serialised by the unchanged
+    writer → loads cleanly. The writer doesn't override
+    `schema_version` (it serializes the field as-is via
+    `model_dump_json`), so a v3 row stays v3 across a load → persist
+    cycle and `intake_extraction` is preserved. This is the property
+    that makes Q2.3a safe to ship before Q2.3b: any in-flight v3 data
+    survives unchanged, even though the model's *default* is still 2."""
+    case_id = uuid4()
+    v3_payload = {
+        "schema_version": 3,
+        "case_id": str(case_id),
+        "run_id": "round-trip",
+        "status": "pending",
+        "intake_extraction": {"fields": {"parties": [{"name": "Bob"}]}},
+    }
+
+    reader = _ReaderSession(row=(v3_payload,))
+    loaded = await load_case_state(reader, case_id=case_id, run_id="round-trip")  # type: ignore[arg-type]
+    assert loaded is not None
+
+    captured: dict[str, Any] = {}
+
+    class _WriterSession:
+        async def execute(self, statement: Any, params: dict[str, Any]) -> None:
+            captured.update(params)
+
+        async def commit(self) -> None:
+            pass
+
+        async def rollback(self) -> None:
+            pass
+
+    await persist_case_state(
+        _WriterSession(),  # type: ignore[arg-type]
+        case_id=case_id,
+        run_id="round-trip",
+        agent_name="intake",
+        state=loaded,
+    )
+
+    decoded = json.loads(captured["state"])
+    assert decoded["schema_version"] == 3  # in-memory field preserved
+    assert decoded["intake_extraction"] == {"fields": {"parties": [{"name": "Bob"}]}}
+
+    re_reader = _ReaderSession(row=(decoded,))
+    reloaded = await load_case_state(re_reader, case_id=case_id, run_id="round-trip")  # type: ignore[arg-type]
+    assert reloaded is not None
+    assert reloaded.schema_version == 3
+    assert reloaded.intake_extraction == {"fields": {"parties": [{"name": "Bob"}]}}
+
+
+@pytest.mark.asyncio
+async def test_new_state_constructed_today_still_stamps_v2():
+    """Q2.3a: the model's default for `schema_version` is unchanged at
+    2, so any *new* CaseState the runner builds today still serializes
+    as a v2 row — Q2.3b is the writer flip."""
+    state = CaseState()
+    captured: dict[str, Any] = {}
+
+    class _WriterSession:
+        async def execute(self, statement: Any, params: dict[str, Any]) -> None:
+            captured.update(params)
+
+        async def commit(self) -> None:
+            pass
+
+        async def rollback(self) -> None:
+            pass
+
+    await persist_case_state(
+        _WriterSession(),  # type: ignore[arg-type]
+        case_id=uuid4(),
+        run_id="new",
+        agent_name="intake",
+        state=state,
+    )
+
+    decoded = json.loads(captured["state"])
+    assert decoded["schema_version"] == CURRENT_SCHEMA_VERSION
+    assert CURRENT_SCHEMA_VERSION == 2  # locked in until Q2.3b
+
+
+def test_supported_read_schema_versions_is_v2_and_v3():
+    """Lock the reader-accept set so a code change that drops v2
+    breaks this test loudly (rather than silently breaking in-flight
+    runs that started pre-bake)."""
+    assert frozenset({2, 3}) == SUPPORTED_READ_SCHEMA_VERSIONS
 
 
 @pytest.mark.asyncio
