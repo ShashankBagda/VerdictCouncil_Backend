@@ -240,6 +240,22 @@ GUARDRAILS:
   flag the failed document in case_metadata.parsing_failures for downstream awareness.
 
 ══════════════════════════════════════════════════════════════════
+PRE-PARSE EXTRACTION (intake_extraction)
+══════════════════════════════════════════════════════════════════
+If `intake_extraction` is present on the input state, treat it as
+authoritative pre-parse data the intake-extraction service produced
+from the same documents. Use it to ground your extraction:
+  - When `parties` is empty but `intake_extraction.fields.parties`
+    has values, the runner has already bridged those into `parties`
+    on your input state — trust them and proceed.
+  - When `case_metadata.offence_code` / `claim_amount` /
+    `filed_date` are populated, confirm them against the document
+    text rather than re-deriving from scratch.
+  - When `intake_extraction.fields` and the document text disagree,
+    the document text wins (it's the source of record). Note the
+    discrepancy in `case_metadata.completeness_gaps`.
+
+══════════════════════════════════════════════════════════════════
 INTAKE GUARD RAIL — DO NOT HALT WHILE DOCUMENTS REMAIN UNPROCESSED
 ══════════════════════════════════════════════════════════════════
 Two failure modes are explicitly forbidden — both produce silent

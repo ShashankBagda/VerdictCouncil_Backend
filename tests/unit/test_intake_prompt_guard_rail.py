@@ -52,6 +52,17 @@ def test_intake_prompt_prefers_processing_over_halt_on_ambiguous_extraction():
     assert "status='processing'" in guard_rail_section
 
 
+def test_intake_prompt_mentions_intake_extraction_as_authoritative():
+    """Q2.3b: the runner now bridges Case.intake_extraction onto
+    CaseState. The prompt must tell the agent how to treat it —
+    authoritative pre-parse data the runner has already merged
+    where empty Case columns existed."""
+    assert "intake_extraction" in INTAKE_PROMPT
+    # The "use it to ground your extraction" intent must be present
+    # so a future rewrite can't strip the cross-reference.
+    assert "PRE-PARSE EXTRACTION" in INTAKE_PROMPT
+
+
 def test_intake_prompt_passes_existing_structural_invariants():
     """Q2.4 is additive — the existing length / non-empty invariants
     locked in `test_graph_state.py` still hold."""

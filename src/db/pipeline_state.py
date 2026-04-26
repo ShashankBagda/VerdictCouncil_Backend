@@ -35,23 +35,17 @@ from src.shared.case_state import CaseState
 logger = logging.getLogger(__name__)
 
 
-# Writer stamp — the version `persist_case_state` writes onto every new
-# checkpoint row. Bumped when the CaseState shape changes in a way that
-# requires a new version number.
-CURRENT_SCHEMA_VERSION = 2
+# Writer stamp — the version newly-constructed CaseStates carry by
+# default. The writer (`persist_case_state`) serializes whatever the
+# in-memory CaseState holds, so anything older still round-trips at
+# its own version.
+CURRENT_SCHEMA_VERSION = 3
 
 # Reader-accept set — checkpoints with `schema_version` outside this set
-# are rejected. Diverges from `CURRENT_SCHEMA_VERSION` during a bake
-# window so a reader-side compatibility shim can ship and roll one full
-# release cycle BEFORE the writer flips. Today's window:
-#   - Q2.3a (this commit) — reader accepts {2, 3}; CaseState default is 2,
-#     so newly-constructed states still serialize as v2.
-#   - Q2.3b (later) — CaseState default flips to 3; reader continues to
-#     accept both so checkpoints written during the rollout co-exist.
-# The writer (`persist_case_state`) does NOT override `schema_version` —
-# it serializes whatever the in-memory CaseState carries. So a v3 row
-# loaded today round-trips back as v3 and `intake_extraction` is
-# preserved (locked in `test_v3_checkpoint_round_trips_through_existing_writer`).
+# are rejected. Kept wider than `CURRENT_SCHEMA_VERSION` so any
+# pre-Q2.3b in-flight v2 row continues to load through the rollout. A
+# follow-up cleanup will narrow this to `{3}` once no v2 rows remain
+# in any environment (manual gate, not automatic).
 SUPPORTED_READ_SCHEMA_VERSIONS = frozenset({2, 3})
 
 
