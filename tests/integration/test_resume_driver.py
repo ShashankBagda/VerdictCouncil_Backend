@@ -21,10 +21,12 @@ from langgraph.types import Command
 
 from src.pipeline.graph.resume import (
     build_resume_payload,
+    cancel_via_halt,
     drive_resume,
     find_pending_interrupt,
     gate_from_pause_node,
     has_pending_interrupt,
+    send_back_to_phase,
 )
 from src.pipeline.graph.schemas import (
     EvidenceResearch,
@@ -212,6 +214,179 @@ async def test_drive_resume_halt_terminates(monkeypatch) -> None:
     assert payload is None
     state = await compiled.aget_state(config)
     assert state.values.get("halt", {}).get("notes") == "withdrawn"
+
+
+# ---------------------------------------------------------------------------
+# cancel_via_halt — Sprint 4 4.A3.9 (saver-halt cancel)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_cancel_via_halt_paused_drives_to_terminal(monkeypatch) -> None:
+    """Cancelling a paused thread routes through the halt resume → terminal."""
+    _patch_factories(monkeypatch)
+    from src.pipeline.graph.builder import build_graph
+
+    compiled = build_graph(checkpointer=InMemorySaver())
+    config = {"configurable": {"thread_id": "thread-cancel-paused"}}
+
+    await _drive_to_gate(compiled, config, "cancel-paused", 1)
+    assert await has_pending_interrupt(compiled, config)
+
+    await cancel_via_halt(compiled, config, reason="judge cancelled mid-flight", by="judge-7")
+
+    state = await compiled.aget_state(config)
+    assert state.next == (), f"Cancel must reach END; got next={state.next!r}"
+    halt = state.values.get("halt") or {}
+    assert halt.get("reason") == "cancelled"
+    assert halt.get("by") == "judge-7"
+    assert halt.get("notes") == "judge cancelled mid-flight"
+
+
+@pytest.mark.asyncio
+async def test_cancel_via_halt_no_pending_interrupt_writes_state(monkeypatch) -> None:
+    """No pending interrupt → write halt to saver; middleware picks it up.
+
+    When the graph is mid-execution in the worker (not paused at a gate),
+    `cancel_via_halt` cannot drive a resume. It writes the halt slot to
+    the saver instead — the cancellation middleware reads `state.halt`
+    on the next supersep boundary and short-circuits.
+    """
+    _patch_factories(monkeypatch)
+    from src.pipeline.graph.builder import build_graph
+
+    compiled = build_graph(checkpointer=InMemorySaver())
+    config = {"configurable": {"thread_id": "thread-cancel-running"}}
+
+    await _drive_to_gate(compiled, config, "cancel-running", 2)
+    # Resolve gate2 advance to reach a no-pending state mid-graph would
+    # require a real worker; the contract we lock here is the saver
+    # write, which is what the middleware reads.
+    await compiled.ainvoke(Command(resume={"action": "halt", "notes": "first"}), config)
+    assert not await has_pending_interrupt(compiled, config)
+
+    # Re-invoke cancel — the helper must not fail when no interrupt is
+    # pending; it overwrites the halt slot atomically.
+    await cancel_via_halt(compiled, config, reason="second cancel", by="judge-9")
+
+    state = await compiled.aget_state(config)
+    halt = state.values.get("halt") or {}
+    assert halt.get("reason") == "cancelled"
+    assert halt.get("by") == "judge-9"
+    assert halt.get("notes") == "second cancel"
+
+
+# ---------------------------------------------------------------------------
+# send_back_to_phase — Sprint 4 4.A3.14 (auditor send-back rewind)
+# ---------------------------------------------------------------------------
+
+
+async def _drive_to_gate4_paused(compiled, config, thread_id: str) -> None:
+    """Advance the stub graph through gate1/2/3 to the gate4 pause."""
+    await compiled.ainvoke(_initial_state(thread_id), config)
+    for _ in range(3):
+        await compiled.ainvoke(Command(resume={"action": "advance"}), config)
+
+
+@pytest.mark.asyncio
+async def test_send_back_to_synthesis_rewinds_thread(monkeypatch) -> None:
+    """Sending back from gate4 to synthesis re-pauses at gate3.
+
+    Acceptance criterion: the rewind moves the head to a checkpoint
+    before synthesis ran; later checkpoints stay visible in
+    aget_state_history. After the rewind the graph re-runs synthesis
+    forward and pauses at gate3 again with the new run.
+    """
+    _patch_factories(monkeypatch)
+    from src.pipeline.graph.builder import build_graph
+
+    compiled = build_graph(checkpointer=InMemorySaver())
+    config = {"configurable": {"thread_id": "thread-sendback-syn"}}
+
+    await _drive_to_gate4_paused(compiled, config, "sendback-syn")
+    pending_before = await find_pending_interrupt(compiled, config)
+    assert pending_before is not None and pending_before[0] == "gate4"
+
+    history_before = [snap async for snap in compiled.aget_state_history(config)]
+    assert len(history_before) > 5, "history should span the full run"
+
+    new_pause = await send_back_to_phase(
+        compiled,
+        config,
+        to_phase="synthesis",
+        notes="redo conclusion 2 with stricter uncertainty handling",
+    )
+
+    assert new_pause == "gate3", (
+        f"After send_back to synthesis the thread must re-pause at gate3; got {new_pause!r}"
+    )
+
+    state = await compiled.aget_state(config)
+    extras = state.values.get("extra_instructions") or {}
+    assert extras.get("synthesis") == "redo conclusion 2 with stricter uncertainty handling", (
+        "Note must land in extra_instructions[target_phase] for the re-run"
+    )
+
+    # Stale gate4 checkpoints remain reachable via history (audit trail).
+    history_after = [snap async for snap in compiled.aget_state_history(config)]
+    assert len(history_after) > len(history_before), (
+        "Send-back must extend history with new fork checkpoints, not drop the stale ones"
+    )
+
+
+@pytest.mark.asyncio
+async def test_send_back_to_research_rewinds_to_pre_research(monkeypatch) -> None:
+    """Send-back to research re-pauses at gate2 after the fan-out re-runs."""
+    _patch_factories(monkeypatch)
+    from src.pipeline.graph.builder import build_graph
+
+    compiled = build_graph(checkpointer=InMemorySaver())
+    config = {"configurable": {"thread_id": "thread-sendback-research"}}
+
+    await _drive_to_gate4_paused(compiled, config, "sendback-research")
+
+    new_pause = await send_back_to_phase(
+        compiled, config, to_phase="research", notes="re-do witnesses"
+    )
+
+    assert new_pause == "gate2"
+    state = await compiled.aget_state(config)
+    extras = state.values.get("extra_instructions") or {}
+    assert extras.get("research") == "re-do witnesses"
+
+
+@pytest.mark.asyncio
+async def test_send_back_rejects_audit_target(monkeypatch) -> None:
+    """Sending back to `audit` is a rerun-audit, not a rewind — reject it."""
+    _patch_factories(monkeypatch)
+    from src.pipeline.graph.builder import build_graph
+
+    compiled = build_graph(checkpointer=InMemorySaver())
+    config = {"configurable": {"thread_id": "thread-sendback-bad"}}
+
+    await _drive_to_gate4_paused(compiled, config, "sendback-bad")
+
+    with pytest.raises(ValueError, match="audit"):
+        await send_back_to_phase(compiled, config, to_phase="audit")  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_send_back_no_history_match_raises(monkeypatch) -> None:
+    """If no checkpoint matches the target phase entry, fail loudly.
+
+    Calling send_back on a fresh thread (no checkpoints past entry)
+    should not silently succeed — it indicates a programming error,
+    not a recoverable state.
+    """
+    _patch_factories(monkeypatch)
+    from src.pipeline.graph.builder import build_graph
+
+    compiled = build_graph(checkpointer=InMemorySaver())
+    config = {"configurable": {"thread_id": "thread-sendback-empty"}}
+
+    # Nothing has run on this thread.
+    with pytest.raises(RuntimeError, match="checkpoint"):
+        await send_back_to_phase(compiled, config, to_phase="synthesis")
 
 
 @pytest.mark.asyncio

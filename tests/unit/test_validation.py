@@ -100,3 +100,66 @@ def test_audit_output_unknown_field_raises_validation_error() -> None:
             status="passed",
             unauthorized="rogue",  # type: ignore[call-arg]
         )
+
+
+def test_audit_output_accepts_recommend_send_back() -> None:
+    """4.A3.14 — `recommend_send_back` is an optional structured recommendation.
+
+    The auditor sets this when it spots an issue the judge should act on
+    by rewinding to a past phase. The gate4 review panel surfaces it as
+    a 'Send back to ▼' dropdown.
+    """
+    out = AuditOutput(
+        fairness_check={  # type: ignore[arg-type]
+            "critical_issues_found": True,
+            "audit_passed": False,
+            "issues": ["uncertainty flag on conclusion 2"],
+            "recommendations": [],
+        },
+        status="ready_for_review",
+        recommend_send_back={  # type: ignore[arg-type]
+            "to_phase": "synthesis",
+            "reason": "uncertainty flag on conclusion 2",
+        },
+    )
+    assert out.recommend_send_back is not None
+    assert out.recommend_send_back.to_phase == "synthesis"
+    assert out.recommend_send_back.reason == "uncertainty flag on conclusion 2"
+
+
+def test_audit_output_recommend_send_back_rejects_audit_phase() -> None:
+    """`audit` is excluded from rewind targets — sending back to audit is
+    a rerun-audit, not a rewind."""
+    with pytest.raises(ValidationError):
+        AuditOutput(
+            fairness_check={  # type: ignore[arg-type]
+                "critical_issues_found": False,
+                "audit_passed": True,
+                "issues": [],
+                "recommendations": [],
+            },
+            status="ready_for_review",
+            recommend_send_back={  # type: ignore[arg-type]
+                "to_phase": "audit",
+                "reason": "self-rewind",
+            },
+        )
+
+
+def test_audit_output_recommend_send_back_rejects_extra_fields() -> None:
+    """SendBackRecommendation enforces `extra='forbid'` (Sprint 0.5 §5 D-4)."""
+    with pytest.raises(ValidationError):
+        AuditOutput(
+            fairness_check={  # type: ignore[arg-type]
+                "critical_issues_found": False,
+                "audit_passed": True,
+                "issues": [],
+                "recommendations": [],
+            },
+            status="ready_for_review",
+            recommend_send_back={  # type: ignore[arg-type]
+                "to_phase": "synthesis",
+                "reason": "test",
+                "stowaway": "rejected",
+            },
+        )

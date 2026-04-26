@@ -126,6 +126,162 @@ async def find_pending_interrupt(
 ResumeOutcome = Literal["interrupt", "terminal"]
 
 
+#: Phase → the gate that pauses *after* it. The send-back mechanic
+#: rewinds the thread to that gate's interrupted checkpoint and issues
+#: a ``Command(resume={"action": "rerun"})`` so the gate-apply node
+#: re-runs the target phase. We can't fork at the phase entry node
+#: directly because LangGraph replays resolved interrupts on the new
+#: branch, blowing past the gate's pause without firing.
+_PHASE_FOLLOWING_GATE: dict[str, str] = {
+    "intake": "gate1",
+    "research": "gate2",
+    "synthesis": "gate3",
+}
+
+
+async def send_back_to_phase(
+    graph: CompiledStateGraph[Any],
+    config: dict[str, Any],
+    *,
+    to_phase: str,
+    notes: str | None = None,
+) -> str | None:
+    """Rewind the LangGraph thread to a past phase's gate pause and rerun.
+
+    Sprint 4 4.A3.14 — the auditor `recommend_send_back` mechanic.
+
+    Walks ``aget_state_history`` newest-first to find the most recent
+    interrupted checkpoint at the gate that pauses immediately after
+    ``to_phase`` (e.g. ``gate3`` for ``to_phase="synthesis"``). Forks
+    from there via ``aupdate_state(past_config, ...)`` to inject
+    ``extra_instructions[target_phase] = notes``, then invokes
+    ``Command(resume={"action": "rerun"})`` so the gate-apply node
+    routes to the rerun target — which by topology is the target phase
+    itself. The phase re-runs with the new instructions and the gate
+    pauses fresh on the new branch.
+
+    Why this path rather than forking at the phase entry: LangGraph
+    replays previously-resolved interrupts on a fork, so forking at
+    e.g. ``next=('synthesis',)`` runs synthesis but blows through
+    gate3_pause's already-resolved interrupt to gate4 / END without
+    pausing. Forking at the gate-pause checkpoint and sending a fresh
+    ``Command(resume=...)`` makes the gate's interrupt fire again
+    naturally.
+
+    Later (post-rewind, pre-fork) checkpoints stay accessible via
+    ``aget_state_history`` for the audit trail — the rewind extends
+    history rather than truncating it.
+
+    Returns the gate name where the rewound run paused (e.g. ``"gate3"``
+    after a ``send_back`` to synthesis), or ``None`` if no interrupt is
+    pending after the rerun.
+
+    Raises:
+        ValueError: ``to_phase`` is not in ``{intake, research,
+            synthesis}``. ``audit`` is excluded — sending back to audit
+            is a rerun-audit, not a rewind; use ``should_rerun=True`` +
+            ``target_phase="audit"`` for that.
+        RuntimeError: no checkpoint in the thread's history has the
+            following gate's pause interrupted. Means the thread either
+            never reached the target phase's gate or has no history
+            (programming error — fail loudly rather than silently).
+    """
+    if to_phase not in _PHASE_FOLLOWING_GATE:
+        raise ValueError(
+            f"send_back: to_phase must be one of {sorted(_PHASE_FOLLOWING_GATE)}; "
+            f"got {to_phase!r} (audit is excluded — use rerun for that)"
+        )
+
+    target_gate = _PHASE_FOLLOWING_GATE[to_phase]
+    target_pause_node = f"{target_gate}_pause"
+    runnable_config = cast(RunnableConfig, config)
+
+    # Newest-first walk; the first matching pause-checkpoint is the
+    # most recent execution of the gate, which is what we want as the
+    # rewind point.
+    target_config: RunnableConfig | None = None
+    async for snap in graph.aget_state_history(runnable_config):
+        if any(task.name == target_pause_node and task.interrupts for task in snap.tasks):
+            target_config = snap.config
+            break
+
+    if target_config is None:
+        raise RuntimeError(
+            f"send_back: no interrupted checkpoint at {target_pause_node!r} in "
+            f"thread {config.get('configurable', {}).get('thread_id')!r} — "
+            f"the thread either never reached phase {to_phase!r} or has no "
+            f"history."
+        )
+
+    # Fork: write extra_instructions on the past checkpoint. update_state
+    # returns a new config pointing at the fork's head.
+    update_payload: dict[str, Any] = {}
+    if notes:
+        update_payload["extra_instructions"] = {to_phase: notes}
+    if update_payload:
+        forked_config = await graph.aupdate_state(target_config, update_payload)
+    else:
+        forked_config = target_config
+
+    # Resume the forked checkpoint with action=rerun. The gate's apply
+    # node routes to its rerun_target (the target phase). The phase
+    # re-runs and the gate pauses fresh on the new branch.
+    await graph.ainvoke(Command(resume={"action": "rerun"}), forked_config)
+
+    pending = await find_pending_interrupt(graph, config)
+    return pending[0] if pending is not None else None
+
+
+async def cancel_via_halt(
+    graph: CompiledStateGraph[Any],
+    config: dict[str, Any],
+    *,
+    reason: str | None = None,
+    by: str | None = None,
+) -> None:
+    """Cancel a run via the saver-halt path (Sprint 4 4.A3.9).
+
+    Two cases the helper covers:
+
+    - **Paused at a gate** — drives ``Command(resume={"action": "halt"})``
+      so the gate-apply node populates the `halt` slot and routes to
+      `terminal` in one super-step.
+    - **Mid-execution in a worker** — no pending interrupt is available,
+      so the helper writes the `halt` slot directly via
+      :meth:`aupdate_state`. The cancellation middleware reads `state.halt`
+      on the next super-step boundary and short-circuits the agent loop
+      with `Command(goto="end")`.
+
+    Either way the durable signal lives in the saver, not in Redis. The
+    legacy Redis cancel-flag (`set_cancel_flag` / `check_cancel_flag`)
+    remains in `services/pipeline_events.py` for the legacy
+    `_run_case_pipeline` run-end status detection only — the agent loop
+    no longer consults it (4.A3.9 acceptance: "Redis cancel-flag code
+    path retired or neutralized").
+
+    The halt payload always uses ``reason="cancelled"`` so downstream
+    consumers can distinguish a judge cancellation from a judge halt
+    (which uses ``reason="judge_halt"`` in the gate-apply node).
+    """
+    halt_payload: dict[str, Any] = {"reason": "cancelled"}
+    if by:
+        halt_payload["by"] = by
+    if reason:
+        halt_payload["notes"] = reason
+
+    if await has_pending_interrupt(graph, config):
+        resume_payload: dict[str, Any] = {"action": "halt"}
+        if reason:
+            resume_payload["notes"] = reason
+        await graph.ainvoke(Command(resume=resume_payload), cast(RunnableConfig, config))
+        # The gate-apply node sets halt.reason="judge_halt"; overwrite to
+        # "cancelled" + carry the `by` field, which judge_halt does not.
+        await graph.aupdate_state(cast(RunnableConfig, config), {"halt": halt_payload})
+        return
+
+    await graph.aupdate_state(cast(RunnableConfig, config), {"halt": halt_payload})
+
+
 async def drive_resume(
     graph: CompiledStateGraph[Any],
     config: dict[str, Any],

@@ -102,16 +102,19 @@ pause (`_run_gate_via_resume`). In-flight pre-cutover jobs without
 `resume_action` keep working through the
 `_run_gate_via_legacy` fallback in `src/workers/tasks.py`.
 
+### Cutover follow-ups shipped on `feat/sprint4-a3-cutover-followups`
+
+| Task | Description | Status |
+|---|---|---|
+| 4.A3.9 | Cancellation via `graph.update_state(halt=...)` instead of Redis flag | **Shipped** — `cancel_via_halt` helper in `pipeline/graph/resume.py`, middleware reads `state.halt` (not Redis), `/cases/{id}/cancel` writes halt to saver. Redis cancel-flag stays for the legacy `_run_case_pipeline` run-end status detection only |
+| 4.A3.14 | Auditor `send_back` mechanic | **Shipped** — `AuditOutput.recommend_send_back` field added, `send_back_to_phase` rewinds the LangGraph thread via gate-pause checkpoint fork + `Command(resume=rerun)` (LangGraph replays resolved interrupts on phase-entry forks, so we fork at the following gate's pause instead). `POST /respond` with `action=send_back` returns 202 with the new pause gate |
+| /advance + /rerun → /respond thin-wrapper conversion | Cosmetic refactor of legacy endpoints | **Shipped** — both legacy endpoints now enqueue `resume_action`-shaped payloads, mapping gate→phase + agent→subagent. Legacy `instructions` slot preserved for any in-flight pre-cutover job |
+
 ### Still deferred
 
 | Task | Description | Status |
 |---|---|---|
-| 4.A3.9 | Cancellation via `graph.update_state(halt=...)` instead of Redis flag | Deferred — the Redis cancel-flag path still works; refactor is a code-cleanliness item, not a correctness one |
-| 4.A3.13 | Manual gate-flow smoke against the cutover worker | Deferred to follow-up branch — needs a real Postgres + Redis stack |
-| 4.A3.14 | Auditor `send_back` mechanic | Deferred — `/respond` still returns 501 for `action=send_back`. Needs `get_state_history` + `update_state` rewind primitive |
-| /advance + /rerun → /respond thin-wrapper conversion | Cosmetic refactor of legacy endpoints | Deferred — `_run_gate_via_legacy` keeps the legacy endpoints fully functional, so this is pure cleanup |
-
-Suggested follow-up branch name: `feat/sprint4-a3-cutover-followups`.
+| 4.A3.13 | Manual gate-flow smoke against the cutover worker | Deferred — needs a real Postgres + Redis stack |
 
 ---
 

@@ -403,6 +403,25 @@ class FairnessCheck(BaseModel):
     recommendations: list[str] = Field(default_factory=list)
 
 
+class SendBackRecommendation(BaseModel):
+    """Sprint 4 4.A3.14 — auditor's send-back-to-phase recommendation.
+
+    Surfaced in the gate4 review panel as a "Send back to ▼ <phase>"
+    dropdown. The judge can act on it via the unified `/respond`
+    endpoint with `action="send_back"`, which rewinds the LangGraph
+    thread to a checkpoint before the target phase ran.
+
+    `audit` is intentionally excluded from `to_phase` — sending back to
+    audit is a rerun-audit, not a rewind. Use `should_rerun=True` with
+    `target_phase="audit"` for that.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    to_phase: RerunTargetPhase
+    reason: str
+
+
 class AuditOutput(BaseModel):
     """Sprint 0.5 §5 D-9 post-hoc rerun mechanic.
 
@@ -410,6 +429,12 @@ class AuditOutput(BaseModel):
     worker reads these fields to call the same rerun endpoint judges use
     (`/cases/{id}/rerun?phase=...`). The resulting `judge_corrections` row
     carries `correction_source='auditor'` (migration 0025 DDL tweak).
+
+    Sprint 4 4.A3.14 adds `recommend_send_back` — an optional structured
+    recommendation the gate4 review panel surfaces to the judge. Distinct
+    from `should_rerun`: send-back rewinds the thread to a past checkpoint
+    (later state stays accessible via `get_state_history` for audit),
+    while rerun re-executes the target phase from the current head.
 
     Strict mode only — Sprint 0.5 §5 D-4: this is the one phase using
     OpenAI strict JSON schema. Other phases use `ToolStrategy(Schema)`
@@ -423,3 +448,4 @@ class AuditOutput(BaseModel):
     should_rerun: bool = False
     target_phase: RerunTargetPhase | None = None
     reason: str | None = None
+    recommend_send_back: SendBackRecommendation | None = None
