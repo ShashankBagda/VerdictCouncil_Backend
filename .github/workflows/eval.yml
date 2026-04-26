@@ -55,6 +55,10 @@ jobs:
           echo "name=verdict-council-eval-${SHA:0:7}-stub" >> "$GITHUB_OUTPUT"
 
       - name: Run eval (stub mode)
+        # Per-step budget: a hung LangSmith call shouldn't burn the whole
+        # 10-min job timeout — leave room for the comparison + PR comment
+        # steps to still run.
+        timeout-minutes: 6
         run: |
           python tests/eval/run_eval.py \
             --mode stub \
@@ -66,11 +70,14 @@ jobs:
         with:
           script: |
             const labels = (context.payload.pull_request?.labels || []).map(l => l.name);
-            return labels.includes('eval/skip-regression');
-          result-encoding: string
+            // Set an explicit '1'/'0' output so downstream `if:` clauses
+            // compare against a literal string rather than the brittle
+            // 'true'/'false' boolean stringification of `return`.
+            core.setOutput('skip', labels.includes('eval/skip-regression') ? '1' : '0');
 
       - name: Compare to baseline
-        if: steps.label_check.outputs.result == 'false'
+        if: steps.label_check.outputs.skip != '1'
+        timeout-minutes: 2
         run: |
           if [ -z "${EVAL_BASELINE_EXPERIMENT:-}" ]; then
             echo "::warning::EVAL_BASELINE_EXPERIMENT repo variable is unset; gate is in observe-only mode."
@@ -89,7 +96,7 @@ jobs:
           fi
 
       - name: Note skip
-        if: steps.label_check.outputs.result == 'true'
+        if: steps.label_check.outputs.skip == '1'
         run: |
           echo "::notice::eval/skip-regression label present — comparison gate skipped (4.D3.3)."
           echo "## Eval Δ skipped" > eval-delta.md
