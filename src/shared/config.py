@@ -95,20 +95,30 @@ class Settings(BaseSettings):
 
     @property
     def pipeline_conversational_streaming_phases(self) -> list[str]:
-        """Q1.3 — phases enrolled in conversational streaming
+        """Q1.6 default-on — phases enrolled in conversational streaming
         (`llm_token`, `tool_call_delta`). Read fresh from
         `PIPELINE_CONVERSATIONAL_STREAMING_PHASES` (comma-separated)
         each access so a hot env-var flip doesn't require a process
-        restart. Default empty → off everywhere, no behaviour change.
-        Q1.4 reads this when building each phase node; Q1.13 expands
-        to `intake,triage` after the rollout. The audit phase is
-        NEVER enrolled (architecture decision A3 — strict-correctness
-        path stays JSON-only).
+        restart.
+
+        Default is `intake` (the phase Q1.6 wired up) — the streaming
+        UX is the new default. Set the env var explicitly to override:
+          - `PIPELINE_CONVERSATIONAL_STREAMING_PHASES=` (empty) →
+            disable for all phases (legacy JSON-mode everywhere).
+          - `PIPELINE_CONVERSATIONAL_STREAMING_PHASES=intake,triage`
+            → enrol additional phases (Q1.13's target).
+
+        D4 (the master-sequence fidelity gate) is being run by hand
+        per `tasks/q1.6-fidelity-gate-deferral-2026-04-26.md` since
+        the automated harness (Q1.6b) is deferred. The audit phase
+        is NEVER enrolled (architecture decision A3 —
+        strict-correctness path stays JSON-only); the `make_phase_node`
+        hard-exclusion enforces this regardless of env-var content.
 
         Implemented as a property reading `os.environ` directly to
         sidestep pydantic-settings' JSON-decode-first behaviour for
         `list[str]` fields."""
-        raw = os.environ.get("PIPELINE_CONVERSATIONAL_STREAMING_PHASES", "")
+        raw = os.environ.get("PIPELINE_CONVERSATIONAL_STREAMING_PHASES", "intake")
         return [p.strip() for p in raw.split(",") if p.strip()]
 
     # OpenAI Models

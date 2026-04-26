@@ -130,12 +130,23 @@ class TestEventUnionDiscriminator:
 
 
 class TestConversationalStreamingFlag:
-    """Single feature flag wired into Settings — the same env var Q1.4
-    will read when deciding whether to enable conversational mode for
-    a phase. Default empty → off everywhere."""
+    """Single feature flag wired into Settings — the same env var the
+    factory reads when deciding whether to enable conversational mode
+    for a phase. Default enrols `intake` — the streaming UX is the
+    new default. Set the env var explicitly to override."""
 
-    def test_default_flag_is_empty_list(self, monkeypatch):
+    def test_default_flag_enrols_intake(self, monkeypatch):
+        """Q1.6 default-on: with the env var unset, intake gets the
+        conversational treatment without any operator action."""
         monkeypatch.delenv("PIPELINE_CONVERSATIONAL_STREAMING_PHASES", raising=False)
+        s = Settings(_env_file=None)
+        assert s.pipeline_conversational_streaming_phases == ["intake"]
+
+    def test_explicit_empty_env_var_disables_all_phases(self, monkeypatch):
+        """Operators can still revert to legacy JSON-mode by setting
+        `PIPELINE_CONVERSATIONAL_STREAMING_PHASES=` explicitly. The
+        empty string is the documented kill switch."""
+        monkeypatch.setenv("PIPELINE_CONVERSATIONAL_STREAMING_PHASES", "")
         s = Settings(_env_file=None)
         assert s.pipeline_conversational_streaming_phases == []
 

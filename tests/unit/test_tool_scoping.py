@@ -17,6 +17,16 @@ import pytest
 pytestmark = pytest.mark.asyncio
 
 
+@pytest.fixture(autouse=True)
+def _force_json_mode(monkeypatch):
+    """These tests assert factory tool-scoping policy via a stub agent
+    that only implements `ainvoke`. With Q1.6 default-on, intake hits
+    the conversational `astream` path which the stub doesn't speak.
+    Force JSON mode so the stub remains valid — the tool-scoping
+    assertions are independent of streaming wire shape."""
+    monkeypatch.setenv("PIPELINE_CONVERSATIONAL_STREAMING_PHASES", "")
+
+
 class _StubCase:
     case_id = "11111111-1111-1111-1111-111111111111"
     domain_vector_store_id = "vs-stub"
