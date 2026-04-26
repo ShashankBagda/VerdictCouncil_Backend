@@ -23,6 +23,116 @@ from __future__ import annotations
 import pytest
 
 
+class TestMakePhaseNodeFlagWiring:
+    """Q1.6a: `make_phase_node("intake")` reads
+    `settings.pipeline_conversational_streaming_phases` and passes
+    `conversational=True` only when 'intake' is in the list. Default
+    empty → JSON mode preserved. Audit is NEVER conversational
+    (architecture decision A3) regardless of flag content."""
+
+    def test_intake_default_flag_off_uses_json_mode(self, monkeypatch):
+        monkeypatch.delenv("PIPELINE_CONVERSATIONAL_STREAMING_PHASES", raising=False)
+
+        from src.pipeline.graph.agents import factory
+
+        captured: dict = {}
+
+        original = factory._make_node
+
+        def _spy(**kwargs):
+            captured.update(kwargs)
+            return original(**kwargs)
+
+        monkeypatch.setattr(factory, "_make_node", _spy)
+        factory.make_phase_node("intake")
+
+        assert captured["conversational"] is False
+
+    def test_intake_with_flag_on_uses_conversational_mode(self, monkeypatch):
+        monkeypatch.setenv("PIPELINE_CONVERSATIONAL_STREAMING_PHASES", "intake")
+
+        from src.pipeline.graph.agents import factory
+
+        captured: dict = {}
+
+        original = factory._make_node
+
+        def _spy(**kwargs):
+            captured.update(kwargs)
+            return original(**kwargs)
+
+        monkeypatch.setattr(factory, "_make_node", _spy)
+        factory.make_phase_node("intake")
+
+        assert captured["conversational"] is True
+
+    def test_other_enrolled_phases_get_conversational_mode(self, monkeypatch):
+        """Q1.13 expands the flag to triage etc. The membership check is
+        per-phase, so any non-audit phase in the list flips on."""
+        monkeypatch.setenv("PIPELINE_CONVERSATIONAL_STREAMING_PHASES", "intake,synthesis")
+
+        from src.pipeline.graph.agents import factory
+
+        captured_per_phase: dict = {}
+
+        original = factory._make_node
+
+        def _spy(**kwargs):
+            captured_per_phase[kwargs["phase_or_scope"]] = kwargs.get("conversational", False)
+            return original(**kwargs)
+
+        monkeypatch.setattr(factory, "_make_node", _spy)
+        factory.make_phase_node("intake")
+        factory.make_phase_node("synthesis")
+
+        assert captured_per_phase["intake"] is True
+        assert captured_per_phase["synthesis"] is True
+
+    def test_audit_is_never_conversational(self, monkeypatch):
+        """Architecture decision A3 — audit's strict-correctness path
+        stays JSON-only. Even if an operator sets `audit` in the flag,
+        the factory hard-refuses."""
+        monkeypatch.setenv(
+            "PIPELINE_CONVERSATIONAL_STREAMING_PHASES", "intake,audit,synthesis"
+        )
+
+        from src.pipeline.graph.agents import factory
+
+        captured_per_phase: dict = {}
+
+        original = factory._make_node
+
+        def _spy(**kwargs):
+            captured_per_phase[kwargs["phase_or_scope"]] = kwargs.get("conversational", False)
+            return original(**kwargs)
+
+        monkeypatch.setattr(factory, "_make_node", _spy)
+        factory.make_phase_node("intake")
+        factory.make_phase_node("audit")
+
+        assert captured_per_phase["intake"] is True
+        assert captured_per_phase["audit"] is False
+
+    def test_unenrolled_phase_stays_json_mode(self, monkeypatch):
+        """Phase not in the list → JSON mode regardless of flag content."""
+        monkeypatch.setenv("PIPELINE_CONVERSATIONAL_STREAMING_PHASES", "intake")
+
+        from src.pipeline.graph.agents import factory
+
+        captured: dict = {}
+
+        original = factory._make_node
+
+        def _spy(**kwargs):
+            captured.update(kwargs)
+            return original(**kwargs)
+
+        monkeypatch.setattr(factory, "_make_node", _spy)
+        factory.make_phase_node("synthesis")
+
+        assert captured["conversational"] is False
+
+
 def _patch_noop_structuring(monkeypatch, factory_module) -> None:
     """Mock `_init_structuring_model` to a no-op so tests that focus
     on streaming wire shape don't need to set up the structuring

@@ -63,6 +63,19 @@ def test_intake_prompt_mentions_intake_extraction_as_authoritative():
     assert "PRE-PARSE EXTRACTION" in INTAKE_PROMPT
 
 
+def test_intake_prompt_has_conversational_mode_section():
+    """Q1.6a: intake gains a "WHEN IN CONVERSATIONAL MODE" section
+    that tells the agent to emit prose first when the runner invokes
+    it via the conversational path. JSON-mode path still uses the
+    same schema and MISSING FIELD PROTOCOL — the new section is
+    additive."""
+    assert "WHEN IN CONVERSATIONAL MODE" in INTAKE_PROMPT
+    # Anchor on the load-bearing instructions: prose, tool calls, summary.
+    section = INTAKE_PROMPT.split("WHEN IN CONVERSATIONAL MODE", 1)[1]
+    assert "prose" in section.lower()
+    assert "summary" in section.lower()
+
+
 def test_intake_prompt_passes_existing_structural_invariants():
     """Q2.4 is additive — the existing length / non-empty invariants
     locked in `test_graph_state.py` still hold."""
