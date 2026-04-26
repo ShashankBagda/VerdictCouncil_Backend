@@ -33,6 +33,8 @@ class MetricsStore:
         self._case_gauges: dict[str, int] = defaultdict(int)
         # gauge: {case_id: cost_usd} — Sprint 4 4.C4.5
         self._case_cost_usd: dict[str, float] = {}
+        # counter: {phase: count} — Q1.1 stream publish backpressure drops
+        self._stream_publish_dropped: dict[str, int] = defaultdict(int)
 
     def inc_request(self, method: str, path: str, status: int) -> None:
         with self._lock:
@@ -62,6 +64,20 @@ class MetricsStore:
         """Sprint 4 4.C4.5 — `verdict_council_case_cost_usd` gauge per case."""
         with self._lock:
             self._case_cost_usd[case_id] = cost_usd
+
+    def inc_stream_publish_dropped(self, phase: str) -> None:
+        """Q1.1 — `pipeline_stream_publish_dropped_total{phase=...}`. Counts
+        events the fire-and-forget publisher dropped because its bounded
+        queue was full. Read by /metrics; no alert rule wired in this PR
+        (per Q-H — observability first, paging later)."""
+        with self._lock:
+            self._stream_publish_dropped[phase] += 1
+
+    def get_stream_publish_dropped(self, phase: str) -> int:
+        """Read the per-phase drop counter (used by tests; the /metrics
+        endpoint reads via `render`)."""
+        with self._lock:
+            return self._stream_publish_dropped.get(phase, 0)
 
     def render(self) -> str:
         """Render all metrics in Prometheus text exposition format."""
@@ -114,6 +130,18 @@ class MetricsStore:
                 lines.append("# TYPE verdict_council_case_cost_usd gauge")
                 for case_id, cost in sorted(self._case_cost_usd.items()):
                     lines.append(f'verdict_council_case_cost_usd{{case_id="{case_id}"}} {cost:.6f}')
+
+            # pipeline_stream_publish_dropped_total — Q1.1
+            if self._stream_publish_dropped:
+                lines.append(
+                    "# HELP pipeline_stream_publish_dropped_total "
+                    "Stream events dropped by the fire-and-forget publisher."
+                )
+                lines.append("# TYPE pipeline_stream_publish_dropped_total counter")
+                for phase, count in sorted(self._stream_publish_dropped.items()):
+                    lines.append(
+                        f'pipeline_stream_publish_dropped_total{{phase="{phase}"}} {count}'
+                    )
 
         lines.append("")  # trailing newline
         return "\n".join(lines)
