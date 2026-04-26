@@ -45,7 +45,9 @@ def _retrieved_source_ids(run: Any) -> set[str]:
 
     Two surfaces, in priority order:
     1. ``run.outputs["retrieved_source_ids"]`` — populated by the agent
-       factory's source-id extractor (Sprint 3 3.B.5 wiring).
+       factory's source-id extractor (Sprint 3 3.B.5 wiring). Current
+       shape is dict-keyed by scope/phase (``{"law": ["…"], …}``); older
+       persisted runs may carry a flat ``list[str]``.
     2. ``run.outputs["audit"]["source_ids"]`` — the audit middleware's
        JSONB stash (3.B.3).
     Falls back to an empty set so a missing surface scores 0, not crash.
@@ -55,6 +57,8 @@ def _retrieved_source_ids(run: Any) -> set[str]:
     outputs = getattr(run, "outputs", None) or {}
     explicit = outputs.get("retrieved_source_ids")
     if explicit:
+        if isinstance(explicit, dict):
+            return {src for sources in explicit.values() for src in sources or []}
         return set(explicit)
     audit = outputs.get("audit") or {}
     return set(audit.get("source_ids") or [])

@@ -66,21 +66,24 @@ def _merge_research_parts(
     return {**base, **update}
 
 
-def _merge_source_ids(base: list[str], update: list[str]) -> list[str]:
-    """Reducer for `retrieved_source_ids` — order-preserving union (Sprint 3 3.B.5).
+def _merge_source_ids(
+    base: dict[str, list[str]],
+    update: dict[str, list[str]],
+) -> dict[str, list[str]]:
+    """Reducer for `retrieved_source_ids` — dict-keyed by scope/phase (Sprint 3 3.B.5).
 
-    Each parallel research subagent contributes the citation source_ids it
-    retrieved via tool calls; the join node consumes the accumulated set
-    to validate self-reported supporting_sources on every cited rule and
-    precedent. We dedupe so a rerun of one scope doesn't double-count.
+    Each phase or research-scope agent contributes a list of citation
+    source_ids it retrieved via tool calls, keyed by its own
+    scope/phase name (`law`, `evidence`, `intake`, `synthesis`, …).
+    Re-running a single scope (judge-driven /rerun) overwrites that
+    key — stale source_ids cannot accumulate across runs and the
+    research_join validator's supported-citation check stays tight.
+
+    Mirrors the dict-by-scope contract on `research_parts`: each scope
+    owns its slot, so a rerun resets the scope without leaking
+    stale data into other parallel branches.
     """
-    seen = set(base)
-    merged = list(base)
-    for src in update:
-        if src not in seen:
-            seen.add(src)
-            merged.append(src)
-    return merged
+    return {**base, **update}
 
 
 def _merge_case(base: CaseState, update: CaseState | Overwrite[CaseState]) -> CaseState:
@@ -168,10 +171,12 @@ class GraphState(TypedDict):
     research_parts: Annotated[dict[str, ResearchPart], _merge_research_parts]
 
     # Citation source_ids retrieved by every tool call across the run
-    # (Sprint 3 3.B.5). Order-preserving union reducer — research subagents
-    # contribute the source_ids they pulled; research_join consumes the
-    # full set when validating self-reported supporting_sources.
-    retrieved_source_ids: Annotated[list[str], _merge_source_ids]
+    # (Sprint 3 3.B.5). Dict-keyed by scope/phase so a judge-driven
+    # rerun of a single scope overwrites only that scope's source_ids
+    # without orphaning stale entries the validator would otherwise
+    # accept. Research_join flattens dict.values() before passing to
+    # the validator's set-membership check.
+    retrieved_source_ids: Annotated[dict[str, list[str]], _merge_source_ids]
 
     # Output of `research_join_node` (1.A1.5). Default LWW semantics — the
     # join writes once per pipeline run and a re-entered join overwrites.

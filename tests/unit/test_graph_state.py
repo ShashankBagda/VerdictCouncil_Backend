@@ -307,18 +307,34 @@ class TestPromptConstants:
 
 class TestMergeSourceIds:
     def test_empty_base_returns_update(self):
-        assert _merge_source_ids([], ["a", "b"]) == ["a", "b"]
+        assert _merge_source_ids({}, {"law": ["a", "b"]}) == {"law": ["a", "b"]}
 
     def test_empty_update_keeps_base(self):
-        assert _merge_source_ids(["a", "b"], []) == ["a", "b"]
+        assert _merge_source_ids({"law": ["a", "b"]}, {}) == {"law": ["a", "b"]}
 
-    def test_concatenates_unique_entries(self):
-        assert _merge_source_ids(["a"], ["b", "c"]) == ["a", "b", "c"]
+    def test_disjoint_scopes_merge(self):
+        merged = _merge_source_ids({"law": ["a"]}, {"evidence": ["b", "c"]})
+        assert merged == {"law": ["a"], "evidence": ["b", "c"]}
 
-    def test_dedupes_overlap_preserving_first_occurrence(self):
-        assert _merge_source_ids(["a", "b"], ["b", "c", "a"]) == ["a", "b", "c"]
+    def test_rerun_of_scope_overwrites_stale_source_ids(self):
+        """Sprint 3 3.B.5 review finding — rerun must reset, not union.
+
+        Without dict-keyed reset, a stale source_id from a prior law
+        run would still validate citations after the law subagent was
+        rerun, letting a fabricated citation slip past
+        ``output_validator.validate_law_citations``.
+        """
+        original = {"law": ["law-old-1", "law-old-2"], "evidence": ["e-1"]}
+        rerun_law_only = {"law": ["law-new-1"]}
+
+        merged = _merge_source_ids(original, rerun_law_only)
+
+        # Only the rerun scope is overwritten; other scopes stay intact.
+        assert merged == {"law": ["law-new-1"], "evidence": ["e-1"]}
+        assert "law-old-1" not in merged["law"]
+        assert "law-old-2" not in merged["law"]
 
     def test_idempotent_on_repeated_merge(self):
-        once = _merge_source_ids(["a"], ["b"])
-        twice = _merge_source_ids(once, ["a", "b"])
-        assert twice == ["a", "b"]
+        once = _merge_source_ids({}, {"law": ["a"]})
+        twice = _merge_source_ids(once, {"law": ["a"]})
+        assert twice == {"law": ["a"]}
