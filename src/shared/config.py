@@ -1,3 +1,5 @@
+import os
+
 from pydantic_settings import BaseSettings
 
 
@@ -90,6 +92,24 @@ class Settings(BaseSettings):
     # Sprint 5 task 5.DEP.6). Default keeps existing local + tests
     # working unchanged.
     graph_runtime: str = "in_process"
+
+    @property
+    def pipeline_conversational_streaming_phases(self) -> list[str]:
+        """Q1.3 — phases enrolled in conversational streaming
+        (`llm_token`, `tool_call_delta`). Read fresh from
+        `PIPELINE_CONVERSATIONAL_STREAMING_PHASES` (comma-separated)
+        each access so a hot env-var flip doesn't require a process
+        restart. Default empty → off everywhere, no behaviour change.
+        Q1.4 reads this when building each phase node; Q1.13 expands
+        to `intake,triage` after the rollout. The audit phase is
+        NEVER enrolled (architecture decision A3 — strict-correctness
+        path stays JSON-only).
+
+        Implemented as a property reading `os.environ` directly to
+        sidestep pydantic-settings' JSON-decode-first behaviour for
+        `list[str]` fields."""
+        raw = os.environ.get("PIPELINE_CONVERSATIONAL_STREAMING_PHASES", "")
+        return [p.strip() for p in raw.split(",") if p.strip()]
 
     # OpenAI Models
     openai_vector_store_id: str = ""

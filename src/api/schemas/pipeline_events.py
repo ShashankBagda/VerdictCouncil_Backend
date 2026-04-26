@@ -15,7 +15,7 @@ Generate the JSON Schema doc with::
 """
 
 from datetime import datetime
-from typing import Annotated, Any, Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -109,6 +109,54 @@ class AgentFailedEvent(BaseModel):
     trace_id: str | None = None
 
 
+class LlmTokenEvent(BaseModel):
+    """Q1.3 — coalesced prose delta during conversational streaming.
+
+    Emitted only when the agent's phase is enrolled in
+    `PIPELINE_CONVERSATIONAL_STREAMING_PHASES` (Q1.4 wires this).
+    Decoupled from `pipeline_events` table persistence (decision A4 /
+    Risk #2): the per-token row insert would explode write volume.
+    The existing `llm_response` event still tee-writes one
+    consolidated row at message-end."""
+
+    kind: Literal["agent"] = "agent"
+    schema_version: Literal[1] = 1
+    case_id: str
+    agent: str
+    phase: str = Field(
+        ..., description="Phase identity (intake / triage / …) — enables flag-based gating."
+    )
+    event: Literal["llm_token"]
+    message_id: str = Field(
+        ..., description="Stable id per assistant message; consumers concatenate by this key."
+    )
+    delta: str = Field(..., description="Coalesced prose chunk (post-StreamCoalescer batch).")
+    ts: str
+    trace_id: str | None = None
+
+
+class ToolCallDeltaEvent(BaseModel):
+    """Q1.3 — partial tool-call args streaming during conversational mode.
+
+    Same gating + persistence policy as `LlmTokenEvent`. Frontend
+    renders these into the inline `<ToolCallChip>` (Q1.9) so the user
+    sees args forming as the model emits them."""
+
+    kind: Literal["agent"] = "agent"
+    schema_version: Literal[1] = 1
+    case_id: str
+    agent: str
+    phase: str
+    event: Literal["tool_call_delta"]
+    tool_call_id: str
+    name: str = Field(..., description="Tool name (e.g. parse_document).")
+    args_delta: str = Field(
+        ..., description="Partial JSON for tool args; concatenate across deltas to assemble."
+    )
+    ts: str
+    trace_id: str | None = None
+
+
 class NarrationEvent(BaseModel):
     """Natural-language summary chunk emitted by an agent after its analysis."""
 
@@ -161,16 +209,20 @@ class AuthExpiringEvent(BaseModel):
     expires_at: datetime
 
 
-#: Discriminated union of all SSE event shapes on both streaming endpoints.
-#: `AgentEvent` and `AgentFailedEvent` share `kind="agent"` — narrow further
-#: on the `event` field at consumer side.
-Event = Annotated[
+#: Union of all SSE event shapes on both streaming endpoints.
+#: Multiple event classes share `kind="agent"` (`AgentEvent`,
+#: `AgentFailedEvent`, `LlmTokenEvent`, `ToolCallDeltaEvent`) so a
+#: single `kind` discriminator can no longer disambiguate. Pydantic
+#: validates left-to-right; consumers narrow further on the `event`
+#: field literal at the call site.
+Event = (
     PipelineProgressEvent
     | AgentEvent
     | AgentFailedEvent
+    | LlmTokenEvent
+    | ToolCallDeltaEvent
     | NarrationEvent
     | InterruptEvent
     | HeartbeatEvent
-    | AuthExpiringEvent,
-    Field(discriminator="kind"),
-]
+    | AuthExpiringEvent
+)
