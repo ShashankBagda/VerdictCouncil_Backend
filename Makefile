@@ -32,7 +32,7 @@ migrate: ## Run database migrations
 reset-db: ## Wipe and recreate schema from models, then stamp alembic to head
 	.venv/bin/python -m scripts.reset_db
 
-infra-up: ## Start local infrastructure (PostgreSQL, Redis, MLflow)
+infra-up: ## Start local infrastructure (PostgreSQL, Redis)
 	docker compose -f docker-compose.infra.yml up -d
 
 infra-down: ## Stop local infrastructure

@@ -239,32 +239,6 @@
           "default": null,
           "description": "Extra payload for terminal events: {'reason': <halt reason>, 'stopped_at': <stage>}.",
           "title": "Detail"
-        },
-        "mlflow_run_id": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "MLflow run UUID for the nested agent run. Populated on the `completed` phase when MLflow tracing is enabled.",
-          "title": "Mlflow Run Id"
-        },
-        "mlflow_experiment_id": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "MLflow experiment id owning `mlflow_run_id`. Needed to build the MLflow UI URL because the path includes /experiments/<id>/runs/<run_id>.",
-          "title": "Mlflow Experiment Id"
         }
       },
       "required": [
