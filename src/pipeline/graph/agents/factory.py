@@ -123,6 +123,17 @@ def _resolve_model(phase_or_scope: str) -> str:
     return "gpt-5"
 
 
+def _init_structuring_model(phase_or_scope: str):
+    """Q1.5 — instantiate the model client for the conversational-mode
+    structuring pass. Uses the same model tier as the conversational
+    agent so the structured artifact stays consistent with the prose
+    reasoning. Imported lazily so the rest of the factory stays
+    import-light when the streaming path is off."""
+    from langchain.chat_models import init_chat_model
+
+    return init_chat_model(_resolve_model(phase_or_scope), model_provider="openai")
+
+
 def _chunk_text(chunk: AIMessageChunk) -> str:
     """Extract a text delta from a streaming AIMessageChunk.
 
@@ -407,6 +418,42 @@ def _make_node(
                     },
                 )
                 raise
+
+        # Q1.5 — conversational mode runs a non-streaming structuring
+        # pass against the same message history the conversational
+        # stream produced. Failure has no fallback (Q1.2 policy
+        # already covers this — would-be silent default to None hides
+        # bugs). On success: the artifact lands at
+        # `result["structured_response"]` exactly like the JSON-mode
+        # path and a single `structured_artifact` SSE event is emitted
+        # for the frontend's result panel render.
+        if conversational:
+            messages_history = result.get("messages") or []
+            structuring_model = _init_structuring_model(phase_or_scope)
+            structured_artifact = await structuring_model.with_structured_output(
+                schema, strict=True
+            ).ainvoke(messages_history)
+            result["structured_response"] = structured_artifact
+            if structured_artifact is not None:
+                # Normalize artifact to a dict for the wire format
+                # (Pydantic models, dicts, etc).
+                if hasattr(structured_artifact, "model_dump"):
+                    artifact_payload = structured_artifact.model_dump()
+                elif isinstance(structured_artifact, dict):
+                    artifact_payload = structured_artifact
+                else:
+                    artifact_payload = dict(structured_artifact)
+                await publish_agent_event(
+                    case_id,
+                    {
+                        "case_id": case_id,
+                        "agent": phase_or_scope,
+                        "phase": phase_or_scope,
+                        "event": "structured_artifact",
+                        "artifact": artifact_payload,
+                        "ts": datetime.now(UTC).isoformat(),
+                    },
+                )
 
         structured = result.get("structured_response")
         update: dict[str, Any] = {f"{phase_or_scope}_output": structured}

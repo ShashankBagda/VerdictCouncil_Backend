@@ -23,6 +23,25 @@ from __future__ import annotations
 import pytest
 
 
+def _patch_noop_structuring(monkeypatch, factory_module) -> None:
+    """Mock `_init_structuring_model` to a no-op so tests that focus
+    on streaming wire shape don't need to set up the structuring
+    pass. The Q1.5-specific tests still patch it explicitly to
+    exercise the artifact emission path."""
+
+    class _StructuredModel:
+        async def ainvoke(self, _messages):
+            return None
+
+    class _StructuringModel:
+        def with_structured_output(self, _schema, strict=False):  # noqa: ARG002
+            return _StructuredModel()
+
+    monkeypatch.setattr(
+        factory_module, "_init_structuring_model", lambda *_a, **_k: _StructuringModel()
+    )
+
+
 class TestConversationalFlagDefault:
     @pytest.mark.asyncio
     async def test_make_phase_node_intake_default_path_unchanged(self, monkeypatch):
@@ -96,6 +115,7 @@ class TestConversationalFlagOn:
             published.append({"case_id": case_id, **event})
 
         monkeypatch.setattr(factory, "publish_agent_event", _fake_publish)
+        _patch_noop_structuring(monkeypatch, factory)
 
         captured_kwargs: dict = {}
 
@@ -163,6 +183,7 @@ class TestConversationalFlagOn:
             published.append({"case_id": case_id, **event})
 
         monkeypatch.setattr(factory, "publish_agent_event", _fake_publish)
+        _patch_noop_structuring(monkeypatch, factory)
 
         class _FakeAgent:
             def astream(self, *_args, **_kwargs):
@@ -240,6 +261,194 @@ class TestConversationalFlagOn:
         assert tokens, "expected prose llm_token events alongside tool_call_delta"
 
     @pytest.mark.asyncio
+    async def test_conversational_runs_structuring_pass_after_stream(self, monkeypatch):
+        """Q1.5: after the conversational `astream` loop ends, the
+        factory runs `model.with_structured_output(schema, strict=True)
+        .ainvoke(messages)` to produce the schema-bound artifact.
+        Result lands in `result["structured_response"]` exactly like
+        the JSON-mode path."""
+        from langchain_core.messages import AIMessageChunk
+
+        from src.pipeline.graph.agents import factory
+
+        published: list[dict] = []
+
+        async def _fake_publish(case_id, event):
+            published.append({"case_id": case_id, **event})
+
+        monkeypatch.setattr(factory, "publish_agent_event", _fake_publish)
+
+        history_seen: list = []
+
+        class _StructuredModel:
+            async def ainvoke(self, messages):
+                history_seen.extend(messages)
+                return {"jurisdiction": "sct", "domain": "small_claims"}
+
+        class _StructuringModel:
+            def with_structured_output(self, schema, strict=False):
+                assert strict is True, "structuring pass must use strict=True"
+                assert schema is dict, "structuring pass must use the phase schema"
+                return _StructuredModel()
+
+        monkeypatch.setattr(
+            factory, "_init_structuring_model", lambda *_a, **_k: _StructuringModel()
+        )
+
+        class _FakeAgent:
+            def astream(self, *_args, **_kwargs):
+                async def _gen():
+                    yield ("messages", (AIMessageChunk(content="Reasoning."), {}))
+                    yield (
+                        "values",
+                        {
+                            "messages": [
+                                {"role": "user", "content": "extract"},
+                                {"role": "assistant", "content": "Reasoning."},
+                            ],
+                            "structured_response": None,
+                        },
+                    )
+                return _gen()
+
+            async def ainvoke(self, *_args, **_kwargs):
+                raise AssertionError("ainvoke must not be called")
+
+        monkeypatch.setattr(factory, "create_agent", lambda **_kw: _FakeAgent())
+        monkeypatch.setattr(factory, "_resolve_prompt", lambda *_a, **_k: "stub")
+        monkeypatch.setattr(factory, "_filter_tools", lambda *_a, **_k: [])
+
+        node = factory._make_node(
+            phase_or_scope="intake",
+            allowed_tool_names=[],
+            schema=dict,
+            use_strict_response_format=False,
+            conversational=True,
+        )
+
+        from types import SimpleNamespace
+
+        state = {"case": SimpleNamespace(case_id="case-xyz"), "extra_instructions": {}}
+        result = await node(state)
+
+        # Structured artifact lives at the existing key.
+        assert result["intake_output"] == {"jurisdiction": "sct", "domain": "small_claims"}
+        # Structuring pass saw the same message history the conversational stream produced.
+        assert len(history_seen) == 2
+
+        # `structured_artifact` SSE event emitted with the artifact JSON.
+        artifacts = [e for e in published if e.get("event") == "structured_artifact"]
+        assert len(artifacts) == 1
+        assert artifacts[0]["artifact"] == {"jurisdiction": "sct", "domain": "small_claims"}
+        assert artifacts[0]["phase"] == "intake"
+
+    @pytest.mark.asyncio
+    async def test_structuring_pass_failure_raises(self, monkeypatch):
+        """Structuring pass failure has no fallback — Q1.2's
+        agent_failed policy already covers this; the structured
+        response must not silently default to None."""
+        from langchain_core.messages import AIMessageChunk
+
+        from src.pipeline.graph.agents import factory
+
+        published: list[dict] = []
+
+        async def _fake_publish(case_id, event):
+            published.append({"case_id": case_id, **event})
+
+        monkeypatch.setattr(factory, "publish_agent_event", _fake_publish)
+
+        class _StructuredModel:
+            async def ainvoke(self, messages):
+                raise ValueError("schema validation failed")
+
+        class _StructuringModel:
+            def with_structured_output(self, schema, strict=False):
+                return _StructuredModel()
+
+        monkeypatch.setattr(
+            factory, "_init_structuring_model", lambda *_a, **_k: _StructuringModel()
+        )
+
+        class _FakeAgent:
+            def astream(self, *_args, **_kwargs):
+                async def _gen():
+                    yield ("messages", (AIMessageChunk(content="x"), {}))
+                    yield ("values", {"messages": [], "structured_response": None})
+                return _gen()
+
+            async def ainvoke(self, *_args, **_kwargs):
+                raise AssertionError("ainvoke must not be called")
+
+        monkeypatch.setattr(factory, "create_agent", lambda **_kw: _FakeAgent())
+        monkeypatch.setattr(factory, "_resolve_prompt", lambda *_a, **_k: "stub")
+        monkeypatch.setattr(factory, "_filter_tools", lambda *_a, **_k: [])
+
+        node = factory._make_node(
+            phase_or_scope="intake",
+            allowed_tool_names=[],
+            schema=dict,
+            use_strict_response_format=False,
+            conversational=True,
+        )
+
+        from types import SimpleNamespace
+
+        state = {"case": SimpleNamespace(case_id="case-xyz"), "extra_instructions": {}}
+
+        with pytest.raises(ValueError, match="schema validation failed"):
+            await node(state)
+
+        # No structured_artifact emitted on failure.
+        artifacts = [e for e in published if e.get("event") == "structured_artifact"]
+        assert artifacts == []
+
+    @pytest.mark.asyncio
+    async def test_default_path_does_not_run_structuring_pass(self, monkeypatch):
+        """JSON mode keeps using the agent's bound `structured_response`.
+        No structuring pass call — that path would double-charge OpenAI."""
+        from langchain_core.messages import AIMessageChunk
+
+        from src.pipeline.graph.agents import factory
+
+        async def _fake_publish(_cid, _ev):
+            pass
+
+        monkeypatch.setattr(factory, "publish_agent_event", _fake_publish)
+
+        struct_called = {"count": 0}
+
+        def _init(*_a, **_k):
+            struct_called["count"] += 1
+            raise AssertionError("structuring pass must not run in JSON mode")
+
+        monkeypatch.setattr(factory, "_init_structuring_model", _init)
+
+        class _FakeAgent:
+            def astream(self, *_args, **_kwargs):
+                async def _gen():
+                    yield ("messages", (AIMessageChunk(content="x"), {}))
+                    yield ("values", {"structured_response": {"jurisdiction": "sct"}})
+                return _gen()
+
+            async def ainvoke(self, *_args, **_kwargs):
+                raise AssertionError("ainvoke must not be called")
+
+        monkeypatch.setattr(factory, "create_agent", lambda **_kw: _FakeAgent())
+        monkeypatch.setattr(factory, "_resolve_prompt", lambda *_a, **_k: "stub")
+        monkeypatch.setattr(factory, "_filter_tools", lambda *_a, **_k: [])
+
+        node = factory.make_phase_node("intake")
+
+        from types import SimpleNamespace
+
+        state = {"case": SimpleNamespace(case_id="case-xyz"), "extra_instructions": {}}
+        result = await node(state)
+
+        assert result == {"intake_output": {"jurisdiction": "sct"}}
+        assert struct_called["count"] == 0
+
+    @pytest.mark.asyncio
     async def test_conversational_message_id_changes_across_assistant_turns(
         self, monkeypatch
     ):
@@ -256,6 +465,7 @@ class TestConversationalFlagOn:
             published.append({"case_id": case_id, **event})
 
         monkeypatch.setattr(factory, "publish_agent_event", _fake_publish)
+        _patch_noop_structuring(monkeypatch, factory)
 
         class _FakeAgent:
             def astream(self, *_args, **_kwargs):
