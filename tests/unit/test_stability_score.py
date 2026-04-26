@@ -335,9 +335,7 @@ async def test_compute_stability_score_runs_n_forks_and_classifies(monkeypatch) 
     assert result["classification"] == "highly_sensitive"
 
     held_types = [d["modification_type"] for d in result["details"] if d["verdict_held"]]
-    flipped_types = [
-        d["modification_type"] for d in result["details"] if not d["verdict_held"]
-    ]
+    flipped_types = [d["modification_type"] for d in result["details"] if not d["verdict_held"]]
     assert sorted(held_types) == ["fact_toggle", "fact_toggle"]
     assert sorted(flipped_types) == ["evidence_exclusion", "evidence_exclusion"]
 
