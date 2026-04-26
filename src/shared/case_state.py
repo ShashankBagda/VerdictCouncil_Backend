@@ -95,8 +95,11 @@ class AuditEntry(BaseModel):
 class CaseState(BaseModel):
     # Schema version — incremented when the CaseState shape changes in a way
     # that breaks round-trip with older checkpoints. The reader in
-    # `src/db/pipeline_state.py` compares this against CURRENT_SCHEMA_VERSION
-    # and fails loud on mismatch rather than silently defaulting.
+    # `src/db/pipeline_state.py` accepts versions in
+    # `SUPPORTED_READ_SCHEMA_VERSIONS` and the writer stamps
+    # `CURRENT_SCHEMA_VERSION`. The two diverge intentionally during a
+    # bake window (Q2.3a → Q2.3b) so a reader-side compat ships and rolls
+    # before the writer flips.
     schema_version: int = 2
 
     # Identity & Status
@@ -108,6 +111,13 @@ class CaseState(BaseModel):
     status: CaseStatusEnum = CaseStatusEnum.pending
     parties: list[dict[str, Any]] = Field(default_factory=list)
     case_metadata: dict[str, Any] = Field(default_factory=dict)
+
+    # Q2.3a: pre-pipeline intake extraction (Case.intake_extraction column),
+    # bridged into CaseState so the runner and the agents see the same
+    # judge-confirmed fields. None on v2 checkpoints (writer hasn't been
+    # flipped to v3 yet); Q2.3b will start populating this from
+    # `Case.intake_extraction` and bump `schema_version` to 3.
+    intake_extraction: dict[str, Any] | None = None
 
     # Documents (written by Case Processing)
     raw_documents: list[dict[str, Any]] = Field(default_factory=list)
