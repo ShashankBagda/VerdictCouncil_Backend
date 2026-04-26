@@ -112,7 +112,7 @@ def _make_subagent(scope: str, source_ids: list[str], *, law: LawResearch | None
     async def _node(_state: dict[str, Any]) -> dict[str, Any]:
         update: dict[str, Any] = {"research_parts": {scope: _stub_part(scope, law=law)}}
         if source_ids:
-            update["retrieved_source_ids"] = source_ids
+            update["retrieved_source_ids"] = {scope: list(source_ids)}
         return update
 
     _node.__name__ = f"stub_research_{scope}"
@@ -152,7 +152,7 @@ def _initial_state() -> GraphState:
         "halt": None,
         "research_parts": {},
         "research_output": None,
-        "retrieved_source_ids": [],
+        "retrieved_source_ids": {},
         "is_resume": False,
         "start_agent": None,
     }

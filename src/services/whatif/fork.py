@@ -282,7 +282,7 @@ async def create_whatif_fork(
         "pending_action": None,
         "is_resume": True,
         "start_agent": None,
-        "retrieved_source_ids": orig_values.get("retrieved_source_ids") or [],
+        "retrieved_source_ids": orig_values.get("retrieved_source_ids") or {},
     }
 
     await graph.aupdate_state(fork_config, seed_payload, as_node=_seed_node(modifications))

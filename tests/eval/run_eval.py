@@ -79,7 +79,7 @@ def stub_adapter(inputs: dict[str, Any]) -> dict[str, Any]:
     ]
     return {
         "research": {"law": {"legal_rules": rules, "precedents": []}},
-        "retrieved_source_ids": ["stub:000"],
+        "retrieved_source_ids": {"law": ["stub:000"]},
     }
 
 
@@ -91,7 +91,7 @@ def failing_stub_adapter(_inputs: dict[str, Any]) -> dict[str, Any]:
     """
     return {
         "research": {"law": {"legal_rules": [], "precedents": []}},
-        "retrieved_source_ids": [],
+        "retrieved_source_ids": {},
     }
 
 
@@ -130,7 +130,7 @@ async def graph_adapter(inputs: dict[str, Any]) -> dict[str, Any]:
         "halt": None,
         "research_parts": {},
         "research_output": None,
-        "retrieved_source_ids": [],
+        "retrieved_source_ids": {},
         "intake_output": None,
         "synthesis_output": None,
         "audit_output": None,
@@ -145,7 +145,7 @@ async def graph_adapter(inputs: dict[str, Any]) -> dict[str, Any]:
     research_dict = research.model_dump() if research is not None else None
     return {
         "research": {"law": (research_dict or {}).get("law")},
-        "retrieved_source_ids": result.get("retrieved_source_ids") or [],
+        "retrieved_source_ids": result.get("retrieved_source_ids") or {},
     }
 
 

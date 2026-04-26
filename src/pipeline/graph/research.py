@@ -82,7 +82,10 @@ def research_join_node(state: dict[str, Any]) -> dict[str, Any]:
     parts: dict[str, ResearchPart] = state.get("research_parts") or {}
     merged = ResearchOutput.from_parts(parts)
     if merged.law is not None:
-        retrieved = state.get("retrieved_source_ids") or []
+        # Dict-by-scope reducer keeps source_ids partitioned per scope; the
+        # validator only needs membership across the whole run, so flatten.
+        retrieved_by_scope = state.get("retrieved_source_ids") or {}
+        retrieved = [src for sources in retrieved_by_scope.values() for src in sources]
         validated_law = validate_law_citations(merged.law, retrieved)
         merged = merged.model_copy(update={"law": validated_law})
     elif "law" in parts:
@@ -116,10 +119,12 @@ def make_research_node(scope: str) -> Callable:
         part = ResearchPart(scope=scope, **{scope: structured})
         update: dict[str, Any] = {"research_parts": {scope: part}}
         # Sprint 3 3.B.5 — fan citation source_ids up to the join so it
-        # can validate self-reported supporting_sources.
+        # can validate self-reported supporting_sources. Dict-keyed by
+        # scope so a judge-driven /rerun of this scope alone overwrites
+        # this slot without leaking stale source_ids forward.
         source_ids = result.get("retrieved_source_ids") or []
         if source_ids:
-            update["retrieved_source_ids"] = list(source_ids)
+            update["retrieved_source_ids"] = {scope: list(source_ids)}
         return update
 
     _node.__name__ = f"research_{scope}_node"

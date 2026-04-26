@@ -214,9 +214,11 @@ def _make_node(
         # Sprint 3 3.B.5 — surface citation source_ids from this agent's
         # tool-message chain so the research_join validator can verify
         # self-reported supporting_sources without re-querying the audit log.
+        # Dict-keyed by phase/scope so a judge-driven /rerun of this slot
+        # alone overwrites cleanly without leaking stale source_ids.
         source_ids = _extract_source_ids_from_messages(result.get("messages") or [])
         if source_ids:
-            update["retrieved_source_ids"] = source_ids
+            update["retrieved_source_ids"] = {phase_or_scope: source_ids}
         return update
 
     _node.__name__ = f"phase_node_{phase_or_scope}"
