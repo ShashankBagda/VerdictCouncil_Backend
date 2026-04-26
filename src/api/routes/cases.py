@@ -197,6 +197,82 @@ async def _hydrate_raw_documents(db, documents: list[Document]) -> list[dict[str
     return entries
 
 
+# ---------------------------------------------------------------------------
+# Q2.3b — bridge Case.intake_extraction into CaseState.
+# ---------------------------------------------------------------------------
+#
+# Per Q-B (option A): the bridge fills only EMPTY Case columns. When
+# the judge confirmed values via the intake UI, those columns win — the
+# extractor's proposal is treated as a fallback, not an override.
+# `intake_extraction` itself is always carried onto CaseState (so
+# downstream agents see what the extractor produced even when Case
+# columns hold the authoritative values).
+
+# Metadata fields the bridge knows how to merge from
+# `intake_extraction.fields` into `CaseState.case_metadata`.
+_BRIDGED_METADATA_FIELDS: tuple[str, ...] = (
+    "title",
+    "description",
+    "filed_date",
+    "claim_amount",
+    "consent_to_higher_claim_limit",
+    "offence_code",
+)
+
+
+def _build_initial_state_overrides(case: Case) -> dict[str, Any]:
+    """Build the `parties` / `case_metadata` / `intake_extraction`
+    portion of CaseState's constructor kwargs, with the Q2.3b bridge
+    applied.
+
+    Returned shape mirrors the keys the runner passes to `CaseState(...)`
+    — the runner can splat this dict alongside its own additions
+    (case_id, domain, raw_documents, …).
+    """
+    extraction = case.intake_extraction if isinstance(case.intake_extraction, dict) else None
+    extraction_fields = (extraction or {}).get("fields") if extraction else None
+    if not isinstance(extraction_fields, dict):
+        extraction_fields = {}
+
+    parties: list[dict[str, Any]]
+    if case.parties:
+        parties = [
+            {
+                "name": party.name,
+                "role": party.role.value,
+                "contact_info": party.contact_info,
+            }
+            for party in case.parties
+        ]
+    else:
+        proposed = extraction_fields.get("parties") or []
+        parties = [
+            {
+                "name": p.get("name"),
+                "role": p.get("role"),
+                "contact_info": p.get("contact_info"),
+            }
+            for p in proposed
+            if isinstance(p, dict)
+        ]
+
+    case_metadata: dict[str, Any] = {}
+    for field in _BRIDGED_METADATA_FIELDS:
+        case_value = getattr(case, field, None)
+        if field == "filed_date" and case_value is not None:
+            case_value = case_value.isoformat()
+        if case_value:
+            case_metadata[field] = case_value
+        else:
+            case_metadata[field] = extraction_fields.get(field)
+
+    return {
+        "parties": parties,
+        "case_metadata": case_metadata,
+        "intake_extraction": extraction,
+    }
+
+
 def _log_intake_phase_start(
     *,
     case_id: UUID,
@@ -1418,23 +1494,8 @@ async def _run_case_pipeline(case_id: UUID, *, trace_id: str | None = None) -> N
             case_id=str(case.id),
             domain=case.domain.value if case.domain else None,
             domain_vector_store_id=domain_vector_store_id,
-            parties=[
-                {
-                    "name": party.name,
-                    "role": party.role.value,
-                    "contact_info": party.contact_info,
-                }
-                for party in case.parties
-            ],
-            case_metadata={
-                "title": case.title,
-                "description": case.description,
-                "filed_date": case.filed_date.isoformat() if case.filed_date else None,
-                "claim_amount": case.claim_amount,
-                "consent_to_higher_claim_limit": case.consent_to_higher_claim_limit,
-                "offence_code": case.offence_code,
-            },
             raw_documents=raw_documents,
+            **_build_initial_state_overrides(case),
         )
 
     try:

@@ -244,10 +244,10 @@ async def test_v3_checkpoint_round_trips_through_existing_writer():
 
 
 @pytest.mark.asyncio
-async def test_new_state_constructed_today_still_stamps_v2():
-    """Q2.3a: the model's default for `schema_version` is unchanged at
-    2, so any *new* CaseState the runner builds today still serializes
-    as a v2 row — Q2.3b is the writer flip."""
+async def test_new_state_constructed_today_stamps_v3():
+    """Q2.3b: the model default flipped to 3 so newly-constructed
+    CaseStates serialize as v3 rows. Reader still accepts {2, 3} so
+    any pre-flip in-flight checkpoints continue to load."""
     state = CaseState()
     captured: dict[str, Any] = {}
 
@@ -271,7 +271,7 @@ async def test_new_state_constructed_today_still_stamps_v2():
 
     decoded = json.loads(captured["state"])
     assert decoded["schema_version"] == CURRENT_SCHEMA_VERSION
-    assert CURRENT_SCHEMA_VERSION == 2  # locked in until Q2.3b
+    assert CURRENT_SCHEMA_VERSION == 3  # Q2.3b flip
 
 
 def test_supported_read_schema_versions_is_v2_and_v3():
