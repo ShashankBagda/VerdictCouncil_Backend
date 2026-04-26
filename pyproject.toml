@@ -88,6 +88,41 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 markers = [
     "integration: marks tests requiring live infrastructure (LLM, broker, Redis) — skipped in CI",
+    "eval: marks LLM evaluation tests — skipped in CI",
+    "requires_openai: marks tests requiring a real OpenAI API key",
+]
+
+[tool.coverage.run]
+source = ["src"]
+omit = [
+    # Alembic migrations — auto-generated DDL, not application logic
+    "alembic/*",
+    "alembic/versions/*",
+    # Utility scripts — not part of the importable package
+    "scripts/*",
+    # Package init files with no logic
+    "src/__init__.py",
+    "src/*/. __init__.py",
+    # Template files (Jinja / HTML)
+    "src/templates/*",
+]
+
+[tool.coverage.report]
+skip_empty = true
+exclude_lines = [
+    # Standard pragma
+    "pragma: no cover",
+    # Type-checking-only imports never execute at runtime
+    "if TYPE_CHECKING:",
+    # Script guards
+    "if __name__ == .__main__.:",
+    # Abstract method bodies
+    "@(abc\\.)?abstractmethod",
+    "raise NotImplementedError",
+    # Protocol / stub ellipsis bodies
+    "\\.\\.\\.",
+    # Unreachable defensive guards
+    "raise AssertionError",
 ]
 
 [dependency-groups]
