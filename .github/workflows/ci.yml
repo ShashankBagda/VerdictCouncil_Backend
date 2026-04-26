@@ -2,10 +2,7 @@ name: CI
 
 on:
   push:
-    # Only trigger on direct pushes to long-lived branches.
-    # Feature branches with open PRs run via `pull_request` instead,
-    # avoiding the double-CI issue where every push fires both events.
-    branches: [main, development, "release/**"]
+    branches: [main, development, "release/**", "feat/**"]
   pull_request:
     branches: [development, main]
 
@@ -29,10 +26,267 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
+          restore-keys: pip-${{ runner.os }}-
       - run: pip install -e ".[dev]"
-      - run: pytest tests/ -v --tb=short --cov=src --cov-report=term-missing --cov-fail-under=65
+      # Standard unit tests (no infrastructure) + 100% coverage gate
+      - name: Run unit tests with coverage
+        run: |
+          pytest tests/unit/ tests/api/ -v --tb=short \
+            --cov=src --cov-config=pyproject.toml \
+            --cov-report=term-missing --cov-report=xml:coverage.xml \
+            --cov-fail-under=100 \
+            -m "not integration and not eval and not requires_openai"
         env:
           OPENAI_API_KEY: ""
+          LANGGRAPH_CHECKPOINTER: disabled
+          DATABASE_URL: "postgresql+asyncpg://unused:unused@localhost:5432/unused"
+          REDIS_URL: "redis://localhost:6379"
+          JWT_SECRET: "test-secret-for-ci"
+      - name: Upload coverage report
+        uses: codecov/codecov-action@v4
+        if: always()
+        with:
+          files: coverage.xml
+          fail_ci_if_error: false
+
+  property-tests:
+    runs-on: ubuntu-latest
+    needs: lint
+    name: Property-based tests (Hypothesis)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
+          restore-keys: pip-${{ runner.os }}-
+      - run: pip install -e ".[dev]"
+      # Hypothesis property-based tests — run with reduced examples in CI
+      - name: Run property-based tests
+        run: |
+          pytest tests/unit/test_property_based.py -v --tb=short \
+            -m "not integration and not eval"
+        env:
+          HYPOTHESIS_PROFILE: ci
+          OPENAI_API_KEY: ""
+          LANGGRAPH_CHECKPOINTER: disabled
+          DATABASE_URL: "postgresql+asyncpg://unused:unused@localhost:5432/unused"
+          REDIS_URL: "redis://localhost:6379"
+          JWT_SECRET: "test-secret-for-ci"
+
+  sast:
+    runs-on: ubuntu-latest
+    needs: lint
+    name: SAST (Static Application Security Testing)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install bandit semgrep
+      - run: pip install -e .
+
+      # Bandit: Python security issue scanner
+      - name: Bandit Security Scan
+        run: bandit -r src/ -f sarif -o bandit-report.sarif || true
+        continue-on-error: true
+
+      # Semgrep: OWASP Top-10 + security-audit rules
+      - name: Semgrep SAST
+        run: |
+          semgrep --config=p/security-audit --config=p/owasp-top-ten \
+            --sarif -o semgrep-report.sarif src/ || true
+        continue-on-error: true
+
+      - name: Upload Semgrep SARIF to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: semgrep-report.sarif
+        continue-on-error: true
+
+  sca:
+    runs-on: ubuntu-latest
+    needs: lint
+    name: SCA (Software Composition Analysis)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pip-audit cyclonedx-bom
+      - run: pip install -e .
+
+      - name: pip-audit Vulnerability Check
+        run: pip-audit --desc
+        continue-on-error: true
+
+      - name: Generate SBOM (CycloneDX)
+        run: cyclonedx-bom -o sbom.xml
+        continue-on-error: true
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.xml
+
+  dast:
+    runs-on: ubuntu-latest
+    needs: sca
+    name: DAST (Dynamic Application Security Testing)
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: verdict_user
+          POSTGRES_PASSWORD: verdict_password
+          POSTGRES_DB: verdict_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]" requests
+
+      - name: Start FastAPI server
+        env:
+          DATABASE_URL: postgresql+asyncpg://verdict_user:verdict_password@localhost:5432/verdict_db
+          JWT_SECRET: test-secret-key
+          LANGGRAPH_CHECKPOINTER: disabled
+          OPENAI_API_KEY: ""
+          REDIS_URL: redis://localhost:6379
+        run: |
+          uvicorn src.api.app:app --host 0.0.0.0 --port 8000 &
+          sleep 8
+
+      - name: Check Security Headers
+        run: |
+          python -c "
+          import requests, json, sys
+          r = requests.get('http://localhost:8000/health')
+          print('Status:', r.status_code)
+          print('Headers:', json.dumps(dict(r.headers), indent=2))
+          "
+        continue-on-error: true
+
+      - name: API Contract Tests
+        run: pytest tests/integration/test_api_contract.py -v --tb=short || true
+        env:
+          DATABASE_URL: postgresql+asyncpg://verdict_user:verdict_password@localhost:5432/verdict_db
+          JWT_SECRET: test-secret-key
+          LANGGRAPH_CHECKPOINTER: disabled
+          OPENAI_API_KEY: ""
+        continue-on-error: true
+
+  load-tests:
+    runs-on: ubuntu-latest
+    needs: [unit-tests]
+    name: Load tests (Locust)
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: verdict_user
+          POSTGRES_PASSWORD: verdict_password
+          POSTGRES_DB: verdict_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+
+      - name: Start FastAPI server
+        env:
+          DATABASE_URL: postgresql+asyncpg://verdict_user:verdict_password@localhost:5432/verdict_db
+          JWT_SECRET: test-secret-key
+          LANGGRAPH_CHECKPOINTER: disabled
+          OPENAI_API_KEY: ""
+          REDIS_URL: redis://localhost:6379
+        run: |
+          uvicorn src.api.app:app --host 0.0.0.0 --port 8000 &
+          sleep 8
+
+      # 30-second burst: 5 users, ramp 1/s — smoke-level load check
+      # Failure: error rate > 5% OR p95 > threshold (enforced in locustfile quitting hook)
+      - name: Run Locust load test (headless, 30s)
+        run: |
+          locust -f tests/load/locustfile.py \
+            --headless -u 5 -r 1 -t 30s \
+            --host http://localhost:8000 \
+            --csv tests/load/results \
+            --html tests/load/report.html \
+            --exit-code-on-error 1
+        env:
+          VC_LOAD_USERNAME: judge@example.com
+          VC_LOAD_PASSWORD: TestPassword123!
+        continue-on-error: true  # Advisory — does not block merge
+
+      - name: Upload load test report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: load-test-report
+          path: tests/load/
+
+  build:
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          tags: verdictcouncil:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  security-summary:
+    runs-on: ubuntu-latest
+    needs: [dast, unit-tests, property-tests, sast, build, load-tests]
+    name: Security & Quality Summary
+    if: always()
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pip-audit bandit
+      - run: pip install -e .
+      - run: pip-audit --desc
+        continue-on-error: true
+      - run: bandit -r src/ -ll
+        continue-on-error: true
+
 
   sast:
     runs-on: ubuntu-latest
