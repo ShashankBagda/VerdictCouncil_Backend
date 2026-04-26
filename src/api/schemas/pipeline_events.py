@@ -135,6 +135,25 @@ class LlmTokenEvent(BaseModel):
     trace_id: str | None = None
 
 
+class StructuredArtifactEvent(BaseModel):
+    """Q1.5 — schema-bound artifact emitted at end of conversational
+    streaming. ONE event per phase (not per token), so the
+    `pipeline_events` table tee-write is safe and gives the frontend
+    a single render trigger for the result panel."""
+
+    kind: Literal["agent"] = "agent"
+    schema_version: Literal[1] = 1
+    case_id: str
+    agent: str
+    phase: str
+    event: Literal["structured_artifact"]
+    artifact: dict[str, Any] = Field(
+        ..., description="The schema-bound output (per-phase shape, see PHASE_SCHEMAS)."
+    )
+    ts: str
+    trace_id: str | None = None
+
+
 class ToolCallDeltaEvent(BaseModel):
     """Q1.3 — partial tool-call args streaming during conversational mode.
 
@@ -221,6 +240,7 @@ Event = (
     | AgentFailedEvent
     | LlmTokenEvent
     | ToolCallDeltaEvent
+    | StructuredArtifactEvent
     | NarrationEvent
     | InterruptEvent
     | HeartbeatEvent
