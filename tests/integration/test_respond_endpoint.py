@@ -118,9 +118,7 @@ async def test_respond_409_when_case_not_paused() -> None:
 async def test_respond_409_advance_at_gate4() -> None:
     """Gate4 advance is invalid — judge must record a decision instead."""
     app.dependency_overrides[get_current_user] = _make_auth_override()
-    app.dependency_overrides[get_db] = _override_db(
-        _make_db_case(CaseStatus.awaiting_review_gate4)
-    )
+    app.dependency_overrides[get_db] = _override_db(_make_db_case(CaseStatus.awaiting_review_gate4))
 
     async with _client() as c:
         r = await c.post(f"/api/v1/cases/{CASE_ID}/respond", json={"action": "advance"})

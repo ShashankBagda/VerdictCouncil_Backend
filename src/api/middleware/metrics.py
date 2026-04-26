@@ -113,9 +113,7 @@ class MetricsStore:
                 )
                 lines.append("# TYPE verdict_council_case_cost_usd gauge")
                 for case_id, cost in sorted(self._case_cost_usd.items()):
-                    lines.append(
-                        f'verdict_council_case_cost_usd{{case_id="{case_id}"}} {cost:.6f}'
-                    )
+                    lines.append(f'verdict_council_case_cost_usd{{case_id="{case_id}"}} {cost:.6f}')
 
         lines.append("")  # trailing newline
         return "\n".join(lines)

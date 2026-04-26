@@ -91,35 +91,27 @@ work lands.
 
 ---
 
-## Worker-side runtime cutover (deferred from this branch)
+## Worker-side runtime cutover
 
-The backend `841ae4c` ships the Sprint 4 A3 contract layer (gate
-pause payload, `InterruptEvent`, `publish_interrupt()`, unified
-`POST /cases/{id}/respond` endpoint, `ResumePayload`) but **the
-worker still routes via the legacy `runner.run_gate(...)` path**.
-Specifically:
+**Status: shipped on `feat/sprint4-a3-runtime-cutover` (Sprint 4
+4.A3.5 + 4.A3.6 + 4.A3.7 + parts of 4.A3.10–12).** Jobs from
+`/respond` now drive `Command(resume=...)` against the
+saver-checkpointed thread; `publish_interrupt()` fires from both the
+initial gate1 pause (`_run_case_pipeline`) and every subsequent gate
+pause (`_run_gate_via_resume`). In-flight pre-cutover jobs without
+`resume_action` keep working through the
+`_run_gate_via_legacy` fallback in `src/workers/tasks.py`.
 
-- `run_gate_job` in `src/workers/tasks.py` does not consume the new
-  `resume_action` / `phase` / `subagent` / `field_corrections` keys
-  the `/respond` endpoint enqueues.
-- `publish_interrupt()` is defined and tested but never called from
-  any production path — the legacy `PipelineProgressEvent(phase=
-  "awaiting_review")` is still what the worker emits at gate pause.
-- The graph never receives `Command(resume=...)` end-to-end through
-  the API → worker → graph round-trip.
+### Still deferred
 
-Tasks parked behind this gap:
+| Task | Description | Status |
+|---|---|---|
+| 4.A3.9 | Cancellation via `graph.update_state(halt=...)` instead of Redis flag | Deferred — the Redis cancel-flag path still works; refactor is a code-cleanliness item, not a correctness one |
+| 4.A3.13 | Manual gate-flow smoke against the cutover worker | Deferred to follow-up branch — needs a real Postgres + Redis stack |
+| 4.A3.14 | Auditor `send_back` mechanic | Deferred — `/respond` still returns 501 for `action=send_back`. Needs `get_state_history` + `update_state` rewind primitive |
+| /advance + /rerun → /respond thin-wrapper conversion | Cosmetic refactor of legacy endpoints | Deferred — `_run_gate_via_legacy` keeps the legacy endpoints fully functional, so this is pure cleanup |
 
-| Task | Description |
-|---|---|
-| 4.A3.5 | `/advance` becomes thin wrapper over `/respond` |
-| 4.A3.6 | `/rerun` phase-level (BE side; FE rerun UI also needs update) |
-| 4.A3.9 | Cancellation via `graph.update_state(halt=...)` instead of Redis flag |
-| 4.A3.10–12 | Three integration tests that exercise the full round-trip |
-| 4.A3.13 | Manual gate-flow smoke (depends on 4.A3.10–12) |
-| 4.A3.14 | Auditor `send_back` mechanic (`/respond` returns 501 today) |
-
-Suggested follow-up branch name: `feat/sprint4-a3-runtime-cutover`.
+Suggested follow-up branch name: `feat/sprint4-a3-cutover-followups`.
 
 ---
 

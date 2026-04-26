@@ -42,7 +42,9 @@ router = APIRouter()
 
 
 async def _run_whatif_scenario(
-    scenario_id: uuid.UUID, *, trace_id: str | None = None  # noqa: ARG001
+    scenario_id: uuid.UUID,
+    *,
+    trace_id: str | None = None,  # noqa: ARG001
 ) -> None:
     """Background task that executes the what-if scenario.
 
@@ -151,7 +153,9 @@ async def _run_whatif_scenario(
 
 
 async def _run_stability_computation(
-    stability_id: uuid.UUID, *, trace_id: str | None = None  # noqa: ARG001
+    stability_id: uuid.UUID,
+    *,
+    trace_id: str | None = None,  # noqa: ARG001
 ) -> None:
     """Background task that computes the stability score.
 

@@ -79,9 +79,7 @@ async def test_gate_run_reads_prior_state_via_aget_state_and_skips_pipeline_stat
         status=CaseStatusEnum.awaiting_review_gate1,
         case_metadata={"prior": "gate1 result"},
     )
-    final_state = seeded_state.model_copy(
-        update={"status": CaseStatusEnum.awaiting_review_gate2}
-    )
+    final_state = seeded_state.model_copy(update={"status": CaseStatusEnum.awaiting_review_gate2})
 
     aget_state_calls: list = []
 

@@ -98,9 +98,7 @@ class GraphPipelineRunner:
             start_agent=start_agent,
         )
 
-    async def _invoke(
-        self, initial_state: GraphState, *, trace_id: str | None = None
-    ) -> CaseState:
+    async def _invoke(self, initial_state: GraphState, *, trace_id: str | None = None) -> CaseState:
         """Drive the compiled graph via streaming and return the final CaseState.
 
         Threads `thread_id = case_id` into the LangGraph config so the
@@ -161,9 +159,7 @@ class GraphPipelineRunner:
     # Public surface (matches PipelineRunner)
     # ------------------------------------------------------------------
 
-    async def run(
-        self, case_state: CaseState, *, trace_id: str | None = None
-    ) -> CaseState:
+    async def run(self, case_state: CaseState, *, trace_id: str | None = None) -> CaseState:
         """Run gate 1 for a new case submission.
 
         Matches `PipelineRunner.run(case_state)` — only gate 1 executes;

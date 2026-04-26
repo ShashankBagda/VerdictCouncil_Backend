@@ -33,7 +33,6 @@ from src.pipeline.graph.nodes.gates import (
 )
 from src.shared.case_state import CaseState
 
-
 # ---------------------------------------------------------------------------
 # 4.A3.3 — pause payload enrichment
 # ---------------------------------------------------------------------------
@@ -47,12 +46,14 @@ def _capture_interrupt_payload(state: dict, gate: str) -> dict:
         captured.append(value)
         raise GraphInterrupt((Interrupt(value=value, id=f"{gate}-test"),))
 
-    with mock.patch(
-        "src.pipeline.graph.nodes.gates.interrupt",
-        side_effect=fake_interrupt,
+    with (
+        mock.patch(
+            "src.pipeline.graph.nodes.gates.interrupt",
+            side_effect=fake_interrupt,
+        ),
+        pytest.raises(GraphInterrupt),
     ):
-        with pytest.raises(GraphInterrupt):
-            pause(state)
+        pause(state)
 
     assert captured, "interrupt() did not fire"
     return captured[0]

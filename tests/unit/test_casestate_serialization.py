@@ -36,9 +36,7 @@ from src.shared.case_state import (
 # a standalone process so process-scoped env mutations don't bleed into
 # the rest of the test suite.
 
-FIXTURES_DIR = (
-    Path(__file__).resolve().parent.parent / "fixtures" / "serialization_edge_cases"
-)
+FIXTURES_DIR = Path(__file__).resolve().parent.parent / "fixtures" / "serialization_edge_cases"
 
 # LangGraph's future-default strict-msgpack mode requires an explicit
 # allowlist for project-defined types. Pre-registering them here also
@@ -65,9 +63,7 @@ def _fixture_paths() -> list[Path]:
 
 def test_fixture_directory_contains_edge_cases() -> None:
     paths = _fixture_paths()
-    assert len(paths) >= 5, (
-        f"expected ≥5 edge-case fixtures, found {len(paths)} in {FIXTURES_DIR}"
-    )
+    assert len(paths) >= 5, f"expected ≥5 edge-case fixtures, found {len(paths)} in {FIXTURES_DIR}"
 
 
 @pytest.mark.parametrize("fixture_path", _fixture_paths(), ids=lambda p: p.stem)

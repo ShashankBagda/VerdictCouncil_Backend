@@ -42,7 +42,5 @@ def test_request_emits_otel_span(span_exporter: InMemorySpanExporter) -> None:
     assert spans, "FastAPIInstrumentor should emit at least one span per request"
     # FastAPI instrumentor emits an HTTP server span; its kind is SERVER and
     # it carries http.* attributes regardless of route resolution.
-    server_spans = [
-        s for s in spans if s.attributes and s.attributes.get("http.method") == "GET"
-    ]
+    server_spans = [s for s in spans if s.attributes and s.attributes.get("http.method") == "GET"]
     assert server_spans, f"expected http server span; got {[s.name for s in spans]}"

@@ -58,9 +58,7 @@ def test_get_prices_returns_defensive_copy() -> None:
     snapshot = get_prices()
     snapshot["fake-model"] = {"input": Decimal("1.0")}
 
-    assert "fake-model" not in get_prices(), (
-        "get_prices() must return a defensive copy"
-    )
+    assert "fake-model" not in get_prices(), "get_prices() must return a defensive copy"
 
 
 def test_known_models_match_yaml_table() -> None:
