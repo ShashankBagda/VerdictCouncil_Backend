@@ -90,6 +90,25 @@ class AgentEvent(BaseModel):
     trace_id: str | None = None
 
 
+class AgentFailedEvent(BaseModel):
+    """Q1.2 — terminal failure of an agent's stream after at least one
+    chunk was emitted. Frontend consumers render this as a red error
+    card; no retry happens at the SSE layer. Only the error CLASS is
+    carried — the original message may contain prompt PII and is
+    explicitly suppressed."""
+
+    kind: Literal["agent"] = "agent"
+    schema_version: Literal[1] = 1
+    case_id: str
+    agent: str
+    event: Literal["agent_failed"]
+    error_class: str = Field(
+        ..., description="Python exception class name. NO error message — PII risk."
+    )
+    ts: str
+    trace_id: str | None = None
+
+
 class NarrationEvent(BaseModel):
     """Natural-language summary chunk emitted by an agent after its analysis."""
 
@@ -143,9 +162,12 @@ class AuthExpiringEvent(BaseModel):
 
 
 #: Discriminated union of all SSE event shapes on both streaming endpoints.
+#: `AgentEvent` and `AgentFailedEvent` share `kind="agent"` — narrow further
+#: on the `event` field at consumer side.
 Event = Annotated[
     PipelineProgressEvent
     | AgentEvent
+    | AgentFailedEvent
     | NarrationEvent
     | InterruptEvent
     | HeartbeatEvent

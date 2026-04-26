@@ -260,12 +260,23 @@ def _make_node(
         #     and accumulated messages.
         # Tool calls are still emitted by the wrap_tool_call middleware
         # (`sse_tool_emitter`), so the per-tool wire format is unchanged.
+        #
+        # Q1.2 / Risk #1: once any observable side-effect has happened
+        # (first message chunk OR first values payload), the broad
+        # `except Exception → ainvoke` fallback is unsafe — it would
+        # re-execute tools and double-charge OpenAI. `streaming_started`
+        # gates the fallback: pre-chunk failures still get the safe
+        # ainvoke retry; post-chunk failures emit `agent_failed` SSE
+        # and propagate so the orchestrator's existing failure handling
+        # takes over.
         result: dict[str, Any] = {}
+        streaming_started = False
         try:
             async for mode, payload in agent.astream(
                 agent_state,
                 stream_mode=["values", "messages"],
             ):
+                streaming_started = True
                 if mode == "messages":
                     msg = payload[0] if isinstance(payload, tuple) else payload
                     if isinstance(msg, AIMessageChunk):
@@ -283,13 +294,35 @@ def _make_node(
                             )
                 elif mode == "values":
                     result = payload
-        except Exception:
-            logger.exception(
-                "astream failed for phase=%s case=%s; falling back to ainvoke",
-                phase_or_scope,
-                case_id,
-            )
-            result = await agent.ainvoke(agent_state)
+        except Exception as exc:
+            if not streaming_started:
+                logger.exception(
+                    "astream failed before any chunk for phase=%s case=%s; "
+                    "falling back to ainvoke (streaming_started=False, safe)",
+                    phase_or_scope,
+                    case_id,
+                )
+                result = await agent.ainvoke(agent_state)
+            else:
+                logger.exception(
+                    "astream failed AFTER first chunk for phase=%s case=%s "
+                    "(streaming_started=True); emitting agent_failed and re-raising "
+                    "— ainvoke retry would double-execute tools",
+                    phase_or_scope,
+                    case_id,
+                )
+                # Error CLASS only — never the message (may carry PII from prompts).
+                await publish_agent_event(
+                    case_id,
+                    {
+                        "case_id": case_id,
+                        "agent": phase_or_scope,
+                        "event": "agent_failed",
+                        "error_class": type(exc).__name__,
+                        "ts": datetime.now(UTC).isoformat(),
+                    },
+                )
+                raise
 
         structured = result.get("structured_response")
         update: dict[str, Any] = {f"{phase_or_scope}_output": structured}
