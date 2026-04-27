@@ -360,11 +360,46 @@ class ResearchOutput(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class ArgumentPosition(BaseModel):
+QuestionType = Literal[
+    "factual_clarification",
+    "evidence_gap",
+    "credibility_probe",
+    "legal_interpretation",
+]
+
+
+class SuggestedQuestion(BaseModel):
+    """One judicial question targeted at a specific argument weakness.
+
+    Emitted by the synthesis agent via the `generate_questions` tool and
+    persisted on the parent `Argument` row's JSONB `suggested_questions`
+    column so the dossier "Suggested Questions" tab can render them.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    question: str = Field(min_length=1)
+    rationale: str | None = None
+    question_type: QuestionType
+    targets_weakness: str | None = None
+
+
+class Argument(BaseModel):
+    """One IRAC argument for a single side, with its weaknesses and probes.
+
+    Replaces the legacy single-`ArgumentPosition` shape so each side can
+    carry multiple issues / charges. The persistence layer writes one
+    `argument` table row per item in this list.
+    """
+
     model_config = ConfigDict(extra="forbid")
     party: Literal["claimant", "respondent"]
-    position: str
+    title: str = Field(min_length=1)
+    text: str = Field(min_length=1)
+    legal_basis: str = Field(min_length=1)
     supporting_refs: list[SourceRef] = Field(default_factory=list)
+    weaknesses: conlist(str, min_length=1)
+    strength_score: int | None = Field(default=None, ge=0, le=100)
+    suggested_questions: list[SuggestedQuestion] = Field(default_factory=list)
 
 
 class ContestedPoint(BaseModel):
@@ -376,9 +411,9 @@ class ContestedPoint(BaseModel):
 
 class ArgumentSet(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    claimant_position: ArgumentPosition
-    respondent_position: ArgumentPosition
-    contested_points: conlist(ContestedPoint, min_length=0)
+    claimant_arguments: conlist(Argument, min_length=1)
+    respondent_arguments: conlist(Argument, min_length=1)
+    contested_points: list[ContestedPoint] = Field(default_factory=list)
     counter_arguments: list[str] = Field(default_factory=list)
 
 
@@ -408,8 +443,13 @@ class SynthesisOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     arguments: ArgumentSet
-    preliminary_conclusion: str = Field(min_length=1)
-    confidence: ConfidenceLevel
+    # `preliminary_conclusion` is intentionally nullable: the synthesis
+    # prompt forbids the agent from emitting a verdict (Judge's role,
+    # auditor enforces). When the agent obeys it sets this to None and
+    # the dossier "Hearing Analysis" panel renders the reasoning_chain
+    # without a verdict line.
+    preliminary_conclusion: str | None = None
+    confidence: ConfidenceLevel | None = None
     reasoning_chain: conlist(ReasoningStep, min_length=1)
     uncertainty_flags: list[UncertaintyFlag] = Field(default_factory=list)
 

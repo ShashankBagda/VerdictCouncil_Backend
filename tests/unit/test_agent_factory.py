@@ -24,7 +24,9 @@ def test_phase_tool_names_are_explicit_and_least_privilege():
 
     assert factory.PHASE_TOOL_NAMES == {
         "intake": ["parse_document"],
-        "synthesis": ["search_precedents"],
+        # synthesis owns argument construction + per-argument
+        # suggested-questions probe; both tools are required.
+        "synthesis": ["search_precedents", "generate_questions"],
         "audit": [],
     }
 
@@ -388,6 +390,7 @@ class TestNodeStreamsLlmChunks:
                 async def _gen():
                     for item in chunks:
                         yield item
+
                 return _gen()
 
             async def ainvoke(self, *_args, **_kwargs):
@@ -460,6 +463,7 @@ class TestStreamingStartedFallbackPolicy:
                 async def _gen():
                     yield ("messages", (AIMessageChunk(content="streaming…"), {}))
                     raise RuntimeError("upstream blew up after first chunk")
+
                 return _gen()
 
             async def ainvoke(self, *_args, **_kwargs):
@@ -515,6 +519,7 @@ class TestStreamingStartedFallbackPolicy:
                     if False:
                         yield  # pragma: no cover (make this an async generator)
                     raise RuntimeError("astream init failed")
+
                 return _gen()
 
             async def ainvoke(self, *_args, **_kwargs):
@@ -561,6 +566,7 @@ class TestStreamingStartedFallbackPolicy:
                 async def _gen():
                     yield ("values", {"messages": [{"role": "tool"}], "structured_response": None})
                     raise RuntimeError("post-tool failure")
+
                 return _gen()
 
             async def ainvoke(self, *_args, **_kwargs):

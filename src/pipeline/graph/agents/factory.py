@@ -40,9 +40,6 @@ from src.pipeline.graph.middleware import (
     sse_tool_emitter,
     token_usage_emitter,
 )
-from src.services.pipeline_events import publish_agent_event
-
-logger = logging.getLogger(__name__)
 from src.pipeline.graph.prompt_registry import get_prompt
 from src.pipeline.graph.schemas import (
     AuditOutput,
@@ -54,6 +51,9 @@ from src.pipeline.graph.schemas import (
     WitnessesResearch,
 )
 from src.pipeline.graph.tools import make_tools
+from src.services.pipeline_events import publish_agent_event
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Tool scoping policy (codex P2-7) — explicit dicts, not `tools=ALL_TOOLS`.
@@ -61,7 +61,11 @@ from src.pipeline.graph.tools import make_tools
 
 PHASE_TOOL_NAMES: dict[str, list[str]] = {
     "intake": ["parse_document"],
-    "synthesis": ["search_precedents"],
+    # synthesis owns argument construction *and* the per-argument
+    # suggested-questions probe. `generate_questions` produces the
+    # judicial questions that populate the dossier "Suggested Questions"
+    # tab — without it the agent has no way to emit them.
+    "synthesis": ["search_precedents", "generate_questions"],
     "audit": [],
 }
 
@@ -247,16 +251,39 @@ def _dump_or_passthrough(value: Any) -> Any:
     return value
 
 
+def _argument_to_dict(argument: Any) -> dict[str, Any]:
+    """Project one Argument schema instance onto the persistence shape.
+
+    The Argument DB row reads `legal_basis`, `supporting_evidence`,
+    `weaknesses`, `suggested_questions`. The frontend's
+    `normalizeArgumentsResource` additionally surfaces `title`, `text`,
+    and `strength_score` — keep them on the dict so they round-trip
+    through the `argument` table's JSONB columns.
+    """
+    return {
+        "title": getattr(argument, "title", None),
+        "text": getattr(argument, "text", None),
+        "legal_basis": getattr(argument, "legal_basis", None),
+        "supporting_evidence": [
+            _dump_or_passthrough(ref) for ref in getattr(argument, "supporting_refs", []) or []
+        ],
+        "weaknesses": list(getattr(argument, "weaknesses", []) or []),
+        "strength_score": getattr(argument, "strength_score", None),
+        "suggested_questions": [
+            _dump_or_passthrough(q) for q in getattr(argument, "suggested_questions", []) or []
+        ],
+    }
+
+
 def _mirror_synthesis_to_case(synthesis_output: Any, case: Any) -> Any | None:
     """Project SynthesisOutput onto `case.arguments` + `case.hearing_analysis`.
 
     The persistence layer (`_insert_arguments`, `_insert_hearing_analysis`)
     reads from these CaseState fields; without the mirror the Gate 3
     panel surfaces nothing despite the agent producing real output.
-    Field names are reshaped to match the persistence contract:
-    `arguments` becomes a `{side: [{legal_basis, supporting_evidence}]}`
-    dict keyed by `ArgumentSide`; `hearing_analysis` carries the chain,
-    flags, conclusion, and a confidence-bucket midpoint score.
+    Each side carries a list of Argument items (IRAC + weaknesses +
+    suggested_questions); `hearing_analysis` carries the chain, flags,
+    conclusion, and a confidence-bucket midpoint score.
     """
     from src.shared.case_state import HearingAnalysis as SharedHearingAnalysis
 
@@ -264,21 +291,13 @@ def _mirror_synthesis_to_case(synthesis_output: Any, case: Any) -> Any | None:
     case_arguments: dict[str, Any] = {}
     if arg_set is not None:
         for attr, side_key in (
-            ("claimant_position", "claimant"),
-            ("respondent_position", "respondent"),
+            ("claimant_arguments", "claimant"),
+            ("respondent_arguments", "respondent"),
         ):
-            position = getattr(arg_set, attr, None)
-            if position is None:
+            arguments = getattr(arg_set, attr, None) or []
+            if not arguments:
                 continue
-            case_arguments[side_key] = [
-                {
-                    "legal_basis": getattr(position, "position", None),
-                    "supporting_evidence": [
-                        _dump_or_passthrough(ref)
-                        for ref in getattr(position, "supporting_refs", []) or []
-                    ],
-                }
-            ]
+            case_arguments[side_key] = [_argument_to_dict(a) for a in arguments]
         if getattr(arg_set, "counter_arguments", None):
             case_arguments["counter_arguments"] = list(arg_set.counter_arguments)
         if getattr(arg_set, "contested_points", None):
@@ -294,8 +313,7 @@ def _mirror_synthesis_to_case(synthesis_output: Any, case: Any) -> Any | None:
         preliminary_conclusion=getattr(synthesis_output, "preliminary_conclusion", None),
         confidence_score=_CONFIDENCE_LEVEL_TO_SCORE.get(confidence_str),
         reasoning_chain=[
-            _dump_or_passthrough(s)
-            for s in getattr(synthesis_output, "reasoning_chain", []) or []
+            _dump_or_passthrough(s) for s in getattr(synthesis_output, "reasoning_chain", []) or []
         ],
         uncertainty_flags=[
             _dump_or_passthrough(u)

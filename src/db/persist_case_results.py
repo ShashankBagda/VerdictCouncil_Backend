@@ -280,7 +280,9 @@ def _insert_witnesses(db: AsyncSession, case_id: UUID, state: CaseState) -> None
         # legacy column is a 0-100 int. Pull `.value` and rescale when the new shape arrives,
         # otherwise fall through to the flat `credibility_score` field.
         credibility_raw = item.get("credibility")
-        if isinstance(credibility_raw, dict) and isinstance(credibility_raw.get("value"), (int, float)):
+        if isinstance(credibility_raw, dict) and isinstance(
+            credibility_raw.get("value"), (int, float)
+        ):
             credibility = int(round(float(credibility_raw["value"]) * 100))
         else:
             cs = item.get("credibility_score")
@@ -368,7 +370,12 @@ def _insert_arguments(db: AsyncSession, case_id: UUID, state: CaseState) -> None
         for item in values:
             if not isinstance(item, dict):
                 continue
-            legal_basis = (item.get("legal_basis") or item.get("claim") or "").strip()
+            # Prefer the new IRAC fields, fall back to the legacy
+            # `claim`/`legal_basis` shape so cases produced before the
+            # synthesis schema restructure still persist.
+            legal_basis = (
+                item.get("legal_basis") or item.get("text") or item.get("claim") or ""
+            ).strip()
             if not legal_basis:
                 continue
             db.add(
@@ -377,10 +384,24 @@ def _insert_arguments(db: AsyncSession, case_id: UUID, state: CaseState) -> None
                     side=side_enum,
                     legal_basis=legal_basis,
                     supporting_evidence=_as_jsonb(item.get("supporting_evidence")),
-                    weaknesses=item.get("weaknesses"),
+                    # `weaknesses` is a Text column. The new schema emits
+                    # a list of strings (one per weakness); join with
+                    # newlines so the frontend's plain-string render
+                    # still reads cleanly.
+                    weaknesses=_weaknesses_to_text(item.get("weaknesses")),
                     suggested_questions=_as_jsonb(item.get("suggested_questions")),
                 )
             )
+
+
+def _weaknesses_to_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, list):
+        joined = "\n".join(str(v).strip() for v in value if str(v).strip())
+        return joined or None
+    text = str(value).strip()
+    return text or None
 
 
 def _insert_hearing_analysis(db: AsyncSession, case_id: UUID, state: CaseState) -> None:
