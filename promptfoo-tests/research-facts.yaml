@@ -15,7 +15,22 @@ prompts:
 defaultTest:
   options:
     transform: "output.replace(/^```(?:json)?\\n?|```$/g, '').trim()"
+    # Pinned grader for llm-rubric stability across runs.
+    provider: openai:chat:gpt-4.1-mini
   assert:
+    # Budget gates — fail if a single test exceeds these.
+    - type: cost
+      threshold: 0.10
+    - type: latency
+      threshold: 45000
+    - type: llm-rubric
+      threshold: 0.8
+      value: |
+        Examine the `facts` list in the model output.
+                Pass criterion: every fact's `source` field must match a real
+                document filename present in the case_input.raw_documents list, OR
+                be the name of a party listed in case_input.parties. No invented
+                sources, no facts grounded in documents that don't exist.
     - type: is-json
       value:
         type: object

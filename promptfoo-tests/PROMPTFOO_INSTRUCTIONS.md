@@ -98,6 +98,21 @@ Or — if the underlying golden-case JSONs grow `expected.<phase>` ground-truth
 blocks for downstream phases — replace the hand-authored fixtures with
 generation from those.
 
+## What this suite covers
+
+Per the standard eval taxonomy:
+
+- **Accuracy / structural correctness**: deterministic JS assertions per phase test the prompt's declared output shape on golden inputs.
+- **Groundedness**: one `llm-rubric` per phase checks that outputs cite concrete case details / real Singapore statutes / parties from the source — not fabricated content. Pinned grader (`openai:chat:gpt-4.1-mini`) at threshold 0.8.
+- **Cost & latency**: every test asserts `cost ≤ $0.10` and `latency ≤ 45s` (90s for synthesis). Tracked in the per-test result and surfaced in the Job Summary.
+- **Quality gate**: `baseline.json` carries per-suite minimum pass-rates. The CI workflow's threshold-gate step fails the matrix job if a suite drops below its threshold. Setting threshold to 0.0 keeps a known-failing suite *visible* (Job Summary still shows the failures) without *blocking* the workflow — useful when the failure is a real prompt-violation finding waiting on a fix.
+
+## What this suite does NOT cover (yet)
+
+- **Security / red-team** — no prompt-injection probes, no jailbreak datasets, no PII detection, no policy-violation assertions. Promptfoo has a `redteam` subcommand and dedicated providers; would live in a separate workflow.
+- **RAG retrieval quality** — the pipeline uses PAIR API + per-judge vector stores via `precedent_search` / `knowledge_base/search` endpoints, but this suite drives the model directly with hand-authored fixtures and never touches retrieval. A retrieval-quality dataset (queries → expected docs/citations) would be needed first.
+- **Cross-run regression deltas** — the threshold gate compares to a static `baseline.json`, not to the previous run. `eval.yml` (LangSmith) carries that.
+
 ## Notes vs Lecturer's Reference
 
 Diverged from the lecturer's pattern only where the codebase forced it:

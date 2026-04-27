@@ -15,7 +15,23 @@ prompts:
 defaultTest:
   options:
     transform: "output.replace(/^```(?:json)?\\n?|```$/g, '').trim()"
+    # Pinned grader for llm-rubric stability across runs.
+    provider: openai:chat:gpt-4.1-mini
   assert:
+    # Budget gates — fail if a single test exceeds these.
+    - type: cost
+      threshold: 0.10
+    - type: latency
+      threshold: 45000
+    - type: llm-rubric
+      threshold: 0.8
+      value: |
+        Examine the `legal_rules` list in the model output.
+                Pass criterion: every `legal_rules[i].statute_name` must be a real
+                Singapore statute (Road Traffic Act, Penal Code, Small Claims
+                Tribunals Act, Evidence Act, or similar real SG legislation). No
+                fabricated or non-Singapore statute names. Acronyms like RTA, PC
+                are acceptable when the full name appears in `verbatim_text`.
     - type: is-json
       value:
         type: object

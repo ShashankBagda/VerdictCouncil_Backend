@@ -118,9 +118,32 @@ jobs:
             fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join('\n') + '\n');
           "
 
-      - name: Fail job if eval failed
-        if: steps.eval.outcome != 'success'
-        run: exit 1
+      - name: Threshold gate
+        if: always() && hashFiles(format('promptfoo-tests/{0}-results.json', matrix.suite)) != ''
+        working-directory: promptfoo-tests
+        env:
+          SUITE: ${{ matrix.suite }}
+        run: |
+          node -e "
+            const fs = require('fs');
+            const suite = process.env.SUITE;
+            const r = JSON.parse(fs.readFileSync(suite + '-results.json', 'utf8'));
+            const baseline = JSON.parse(fs.readFileSync('baseline.json', 'utf8'));
+            const threshold = baseline.thresholds?.[suite];
+            if (threshold === undefined) {
+              console.error('::error::No threshold set in baseline.json for suite ' + suite);
+              process.exit(1);
+            }
+            const tests = r.results?.results ?? [];
+            const passes = tests.filter(t => t.success).length;
+            const rate = tests.length === 0 ? 0 : passes / tests.length;
+            const summary = suite + ': pass-rate ' + (rate*100).toFixed(1) + '% (' + passes + '/' + tests.length + '), threshold ' + (threshold*100).toFixed(1) + '%';
+            if (rate + 1e-9 < threshold) {
+              console.error('::error::' + summary + ' — BELOW THRESHOLD');
+              process.exit(1);
+            }
+            console.log('::notice::' + summary + ' — pass');
+          "
 
       - name: Upload eval report
         if: always()

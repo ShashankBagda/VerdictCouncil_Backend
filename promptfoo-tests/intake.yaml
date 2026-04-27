@@ -15,7 +15,29 @@ prompts:
 defaultTest:
   options:
     transform: "output.replace(/^```(?:json)?\\n?|```$/g, '').trim()"
+    # Pinned grader for llm-rubric stability across runs.
+    provider: openai:chat:gpt-4.1-mini
   assert:
+    # Budget gates — fail if a single test exceeds these.
+    - type: cost
+      threshold: 0.10
+    - type: latency
+      threshold: 45000
+    # Groundedness rubric — every routing_factor.rationale must cite a
+    # concrete case detail (a specific document filename, party name,
+    # amount, or specific allegation), not a generic phrase like
+    # "multiple documents" or "review required".
+    - type: llm-rubric
+      threshold: 0.8
+      value: |
+        Examine the `routing_decision.routing_factors` list in the model output.
+        Pass criterion: every `routing_factors[i].rationale` must reference at
+        least one CONCRETE detail visible in the case input — a specific
+        document filename, a named party, a specific amount, an offence code,
+        or a specific allegation text. Generic phrases like "multiple
+        documents", "review needed", "moderate complexity" alone are NOT
+        concrete; they must be paired with at least one specific reference.
+        Fail if any rationale is purely generic.
     - type: is-json
       value:
         type: object
