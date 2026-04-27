@@ -228,18 +228,6 @@ class _SearchDomainGuidanceInput(BaseModel):
     )
 
 
-class _AskJudgeInput(BaseModel):
-    question: str = Field(
-        description=(
-            "A single-sentence question for the presiding Judge. Use this for "
-            "calibration calls only the Judge can make — framing weight, "
-            "interpretive priorities, escalation thresholds — NOT for "
-            "confirmation, restatement, or facts already on raw_documents / "
-            "intake_extraction / upstream phase outputs."
-        )
-    )
-
-
 # ---------------------------------------------------------------------------
 # Tool factory
 # ---------------------------------------------------------------------------
@@ -458,73 +446,6 @@ def make_tools(
         return _format_results_for_llm(results), artifact
 
     all_tools["search_domain_guidance"] = search_domain_guidance_tool
-
-    # ------------------------------------------------------------------
-    # ask_judge  (Q1.11 chat-steering — agent-initiated question to Judge)
-    # ------------------------------------------------------------------
-    # case_id is captured at tool-registration time. The closure value is
-    # stable for the life of this make_tools invocation, which matches the
-    # life of one agent run — exactly what we need to attribute the SSE
-    # event correctly.
-    _ask_judge_case_id = str(state["case"].case_id) if state.get("case") else ""
-
-    @tool("ask_judge", args_schema=_AskJudgeInput)
-    async def ask_judge_tool(question: str) -> str:
-        """Pause the pipeline and ask the presiding Judge a calibration question.
-
-        The synthesis prompt MANDATES at least one call per phase run —
-        every gate-3 review must carry a substantive Judge-only question
-        so the gate review surface stays meaningful. The graph pauses
-        until the Judge replies via the workspace chat panel; the reply
-        is returned as this tool's result so you can incorporate it
-        into your reasoning chain.
-
-        Ask about: framing weight, interpretive priorities between two
-        legally tenable readings, escalation thresholds, sentencing-band
-        emphasis. Do NOT ask: for confirmation, for restatement, for
-        facts already in upstream state.
-        """
-        import uuid as _uuid
-        from datetime import UTC as _UTC, datetime as _datetime
-
-        from langgraph.types import interrupt as _interrupt
-
-        from src.services.pipeline_events import publish_agent_event
-
-        # Mint our own id rather than relying on LangGraph's internal interrupt
-        # numbering — this id rides on the SSE event and the /respond resume
-        # payload, letting the API reject stale double-sends with a 409.
-        interrupt_id = _uuid.uuid4().hex
-
-        # Surface the question to the frontend before we pause. The
-        # `agent` field is hard-coded for v1 because synthesis is the only
-        # phase wired with `ask_judge` (PHASE_TOOL_NAMES["synthesis"]).
-        # If/when other phases get the tool, plumb phase_or_scope through
-        # make_tools so this attribution stays accurate.
-        await publish_agent_event(
-            _ask_judge_case_id,
-            {
-                "kind": "interrupt",
-                "case_id": _ask_judge_case_id,
-                "agent": "synthesis",
-                "question": question,
-                "interrupt_id": interrupt_id,
-                "ts": _datetime.now(_UTC).isoformat(),
-            },
-        )
-
-        reply = _interrupt(
-            {
-                "kind": "ask_judge",
-                "question": question,
-                "interrupt_id": interrupt_id,
-            }
-        )
-        if isinstance(reply, dict):
-            return str(reply.get("text") or "")
-        return str(reply or "")
-
-    all_tools["ask_judge"] = ask_judge_tool
 
     # ------------------------------------------------------------------
     # Filter to the agent's allowed subset

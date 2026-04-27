@@ -24,7 +24,7 @@ def test_phase_tool_names_are_explicit_and_least_privilege():
 
     assert factory.PHASE_TOOL_NAMES == {
         "intake": ["parse_document"],
-        "synthesis": ["search_precedents", "ask_judge"],
+        "synthesis": ["search_precedents"],
         "audit": [],
     }
 

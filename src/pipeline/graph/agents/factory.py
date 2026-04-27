@@ -37,7 +37,6 @@ from src.pipeline.graph.middleware import (
     CaseAwareState,
     audit_tool_call,
     cancel_check,
-    enforce_synthesis_ask_judge,
     sse_tool_emitter,
     token_usage_emitter,
 )
@@ -62,11 +61,7 @@ from src.pipeline.graph.tools import make_tools
 
 PHASE_TOOL_NAMES: dict[str, list[str]] = {
     "intake": ["parse_document"],
-    # Q1.11 chat-steering: synthesis is the v1 surface for `ask_judge` —
-    # the gate3 review only carries weight when synthesis surfaces a
-    # genuine calibration call. The synthesis prompt mandates ≥1
-    # ask_judge call per run to guarantee the chat surface fires.
-    "synthesis": ["search_precedents", "ask_judge"],
+    "synthesis": ["search_precedents"],
     "audit": [],
 }
 
@@ -118,7 +113,6 @@ PHASE_MIDDLEWARE: list[Any] = [
     sse_tool_emitter,
     audit_tool_call,
     token_usage_emitter,
-    enforce_synthesis_ask_judge,
 ]
 
 

@@ -25,15 +25,11 @@ from src.pipeline.graph.middleware.sse_bridge import (
     token_usage_emitter,
 )
 from src.pipeline.graph.middleware.state import CaseAwareState
-from src.pipeline.graph.middleware.tool_choice_policy import (
-    enforce_synthesis_ask_judge,
-)
 
 __all__ = [
     "CaseAwareState",
     "audit_tool_call",
     "cancel_check",
-    "enforce_synthesis_ask_judge",
     "sse_tool_emitter",
     "token_usage_emitter",
 ]
