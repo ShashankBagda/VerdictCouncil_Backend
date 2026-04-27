@@ -13,7 +13,6 @@ from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import selectinload
 
 from src.api.deps import CurrentUser, CurrentUserForStream, DBSession, require_role
-from src.services.database import async_session
 from src.api.schemas.cases import (
     CaseConfirmRequest,
     CaseCreateRequest,
@@ -42,6 +41,7 @@ from src.models.case import (
 from src.models.pipeline_event import PipelineEvent
 from src.models.user import User, UserRole
 from src.services.case_report_data import build_case_report_data
+from src.services.database import async_session
 from src.services.document_parse import parse_and_persist_document
 from src.services.hearing_pack import assemble_pack
 from src.services.pdf_export import render_case_report_pdf
@@ -1350,7 +1350,7 @@ async def stream_pipeline_status(
     snap_chat_payload: str | None = None
     try:
         from src.pipeline.graph.resume import find_pending_chat_interrupt
-        from src.pipeline.graph.runner import GraphPipelineRunner as _GPR
+        from src.pipeline.graph.runner import GraphPipelineRunner as _GPR  # noqa: N814
 
         _runner = _GPR()
         if _runner._graph is not None:
@@ -2167,7 +2167,8 @@ async def _handle_message_resume(
     # `ainvoke(Command(resume=...))` has nothing to resume against.
     # `add_messages` (the reducer on judge_messages) appends.
     async def _drive_resume() -> None:
-        from datetime import UTC as _UTC, datetime as _datetime
+        from datetime import UTC as _UTC
+        from datetime import datetime as _datetime
 
         from src.api.schemas.pipeline_events import PipelineProgressEvent
         from src.db.persist_case_results import persist_case_results
@@ -2178,6 +2179,8 @@ async def _handle_message_resume(
         from src.services.database import async_session
         from src.services.pipeline_events import (
             publish_interrupt as _publish_interrupt,
+        )
+        from src.services.pipeline_events import (
             publish_progress as _publish_progress,
         )
         from src.shared.case_state import CaseStatusEnum as _CaseStatusEnum

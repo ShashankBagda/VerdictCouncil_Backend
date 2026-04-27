@@ -22,7 +22,6 @@ import pytest
 
 from src.shared.retry import MaxRetriesError, retry_with_backoff
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -174,7 +173,6 @@ class TestRedisFaultInjection:
     @pytest.mark.asyncio
     async def test_circuit_breaker_opens_after_failure_threshold(self):
         """CircuitBreaker must transition to OPEN after enough recorded failures."""
-        import redis.asyncio as redis_module
 
         from src.shared.circuit_breaker import CircuitBreaker, CircuitState
 
@@ -243,7 +241,6 @@ class TestDatabaseFaultInjection:
     @pytest.mark.asyncio
     async def test_rate_limit_middleware_survives_lock_contention(self):
         """RateLimitMiddleware must handle lock contention without deadlock."""
-        import threading
 
         from src.api.middleware.rate_limit import RateLimitMiddleware
 
@@ -340,7 +337,6 @@ class TestSSEPublisherCrash:
     @pytest.mark.asyncio
     async def test_subscribe_case_terminates_on_publish_error(self):
         """subscribe_case generator must terminate cleanly if Redis publish errors."""
-        import redis.asyncio as redis_module
 
         from src.services.pipeline_events import subscribe_case
 

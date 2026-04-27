@@ -77,6 +77,15 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "src/pipeline/graph/prompts.py" = ["E501"]  # prompt strings intentionally exceed line limit
+# Pydantic schema validators carry long, deliberately verbatim error messages.
+"src/api/schemas/resume.py" = ["E501"]
+# Persistence aliases include long explanatory comments correlating enum names.
+"src/db/persist_case_results.py" = ["E501"]
+# Test fixtures contain long adversarial strings (prompt injection, load probes,
+# property-based bad inputs); preserving them verbatim aids reviewer trust.
+"tests/load/locustfile.py" = ["E501"]
+"tests/unit/test_property_based.py" = ["E501"]
+"tests/unit/test_sanitization.py" = ["E501"]
 
 [tool.mypy]
 python_version = "3.12"

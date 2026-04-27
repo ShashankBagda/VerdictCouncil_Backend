@@ -33,7 +33,6 @@ from src.pipeline.graph.research import (
 )
 from src.pipeline.graph.resume import build_resume_payload
 
-
 # ---------------------------------------------------------------------------
 # Resume payload — subagent must be threaded even when notes is empty
 # ---------------------------------------------------------------------------

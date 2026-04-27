@@ -22,9 +22,10 @@ from __future__ import annotations
 import os
 
 import pytest
-from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
+
+from alembic import command
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("INTEGRATION_TESTS") != "1",

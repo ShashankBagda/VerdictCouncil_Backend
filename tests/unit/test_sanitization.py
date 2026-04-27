@@ -5,6 +5,7 @@ import pytest
 from src.shared.sanitization import (
     SanitizationResult,
     _classify_sync,
+    detect_injection,
     sanitize_document_content,
     sanitize_text,
     sanitize_user_input,

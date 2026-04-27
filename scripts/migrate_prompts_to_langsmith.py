@@ -66,8 +66,16 @@ def _load_local(filename: str) -> str:
 
 
 def _build_template(content: str) -> ChatPromptTemplate:
-    """Wrap raw markdown as a single system-message ChatPromptTemplate."""
-    return ChatPromptTemplate.from_messages([("system", content)])
+    """Wrap raw markdown as a single system-message ChatPromptTemplate.
+
+    Uses `template_format="mustache"` so JSON examples in the prompt body
+    (`{ "field": ... }`) are not parsed as f-string placeholders. The
+    runtime pulls the prompt text back via `template.messages[0].prompt.template`
+    so the format choice is invisible to consumers.
+    """
+    return ChatPromptTemplate.from_messages(
+        [("system", content)], template_format="mustache"
+    )
 
 
 def _remote_content(client: Client, identifier: str) -> str | None:

@@ -46,7 +46,6 @@ import os
 import random
 import string
 import time
-from typing import Any
 
 from locust import HttpUser, TaskSet, between, events, task
 

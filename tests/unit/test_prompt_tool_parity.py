@@ -19,17 +19,14 @@ retired in the topology rewrite") are intentionally NOT flagged here.
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
 from src.pipeline.graph.agents.factory import (
+    _TOOL_ALIASES,
     PHASE_TOOL_NAMES,
     RESEARCH_TOOL_NAMES,
-    _TOOL_ALIASES,
 )
 from src.pipeline.graph.prompt_registry import PHASE_TO_PROMPT_ID, get_prompt
-
 
 # Map factory phase/scope keys → registry phase keys so the test reads
 # the same prompt the factory does. PHASE_TOOL_NAMES uses bare phase

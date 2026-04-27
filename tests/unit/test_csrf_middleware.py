@@ -20,7 +20,6 @@ import secrets
 
 import pytest
 from fastapi import FastAPI
-from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 
 from src.api.middleware.csrf import (
@@ -30,7 +29,6 @@ from src.api.middleware.csrf import (
     _tokens_match,
     generate_csrf_token,
 )
-
 
 # ---------------------------------------------------------------------------
 # Minimal FastAPI app for testing the middleware

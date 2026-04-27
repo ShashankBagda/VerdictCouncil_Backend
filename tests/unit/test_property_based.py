@@ -22,8 +22,8 @@ from __future__ import annotations
 
 import string
 
-import pytest
-from hypothesis import HealthCheck, given, settings as h_settings
+from hypothesis import HealthCheck, given
+from hypothesis import settings as h_settings
 from hypothesis import strategies as st
 
 from src.api.middleware.csrf import generate_csrf_token

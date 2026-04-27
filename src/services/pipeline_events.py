@@ -31,7 +31,9 @@ def _json_safe(value):
     once with a permissive coercion is cheaper and safer than letting
     SQLAlchemy's JSONB serializer blow up at commit time.
     """
-    from datetime import date, datetime as _dt, time as _time
+    from datetime import date
+    from datetime import datetime as _dt
+    from datetime import time as _time
     from uuid import UUID
 
     if value is None or isinstance(value, (bool, int, float, str)):
