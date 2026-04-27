@@ -39,8 +39,8 @@ class WeakEvidenceItem(BaseModel):
     id: UUID
     evidence_type: EvidenceType
     strength: EvidenceStrength | None = None
-    admissibility_flags: dict[str, Any] | None = None
-    linked_claims: dict[str, Any] | None = None
+    admissibility_flags: dict[str, Any] | list[Any] | None = None
+    linked_claims: dict[str, Any] | list[Any] | None = None
 
     model_config = {"from_attributes": True}
 
