@@ -60,14 +60,9 @@ jobs:
           key: pip-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
           restore-keys: pip-${{ runner.os }}-
       - run: pip install -e ".[dev]"
-      # Unit tests + coverage. Both the test suite and the coverage gate
-      # are currently non-blocking: there are 17 unrelated assertion
-      # drifts across 9 files (test_cases, test_chaos_resilience,
-      # test_csrf_middleware, test_graph_tools, test_persist_case_results,
-      # test_prompt_migration, test_research_partial_output,
-      # test_sanitization, test_stability_score) and the cov-fail-under
-      # is set at 100% while real coverage is ~68%. TODO: dedicated test
-      # sweep — fix each failure properly and tighten the cov gate.
+      # Standard unit tests (no infrastructure). All 17 prior drift
+      # failures were realigned with current production behavior in
+      # d5e37e9 — the suite is back to a hard gate.
       - name: Run unit tests with coverage
         run: |
           pytest tests/unit/ tests/api/ -v --tb=short \
@@ -75,7 +70,6 @@ jobs:
             --cov-report=term-missing --cov-report=xml:coverage.xml \
             --cov-fail-under=60 \
             -m "not integration and not eval and not requires_openai"
-        continue-on-error: true
         env:
           OPENAI_API_KEY: ""
           LANGGRAPH_CHECKPOINTER: disabled
