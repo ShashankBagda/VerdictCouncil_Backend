@@ -28,33 +28,28 @@ from pathlib import Path
 
 
 def _experiment_scores(client, name: str) -> dict[str, float]:
-    """Return ``{scorer_name: mean_score}`` for the named experiment."""
-    rows = list(client.list_examples_for_experiment(experiment_name=name))
-    if not rows:
-        # Fallback: aggregate evaluation results directly. The two
-        # call shapes vary slightly across langsmith client versions.
-        runs = list(client.list_runs(project_name=name))
-        scores: dict[str, list[float]] = {}
-        for run in runs:
-            for fb in getattr(run, "feedback_stats", None) or []:
-                key = getattr(fb, "key", None) or getattr(fb, "name", None)
-                value = getattr(fb, "score", None) or getattr(fb, "value", None)
-                if key and isinstance(value, (int, float)):
-                    scores.setdefault(key, []).append(float(value))
-        return {k: sum(v) / len(v) for k, v in scores.items() if v}
+    """Return ``{scorer_name: mean_score}`` for the named experiment.
 
-    aggregated: dict[str, list[float]] = {}
-    for row in rows:
-        if isinstance(row, dict):
-            feedback = row.get("feedback", []) or []
-        else:
-            feedback = getattr(row, "feedback", None) or []
-        for fb in feedback:
-            key = fb.get("key") if isinstance(fb, dict) else getattr(fb, "key", None)
-            score = fb.get("score") if isinstance(fb, dict) else getattr(fb, "score", None)
-            if key and isinstance(score, (int, float)):
-                aggregated.setdefault(key, []).append(float(score))
-    return {k: sum(v) / len(v) for k, v in aggregated.items() if v}
+    Uses ``Client.get_experiment_results`` (langsmith ≥0.4.32), whose
+    ``feedback_stats`` is a ``{scorer_name: {"n": int, "avg": float, ...}}``
+    aggregate served straight from the project session — no per-row fan-out.
+    """
+    results = client.get_experiment_results(name=name)
+    feedback_stats = (
+        results.get("feedback_stats") if isinstance(results, dict)
+        else getattr(results, "feedback_stats", None)
+    ) or {}
+
+    scores: dict[str, float] = {}
+    for scorer, stats in feedback_stats.items():
+        if not isinstance(stats, dict):
+            continue
+        avg = stats.get("avg")
+        if avg is None:
+            avg = stats.get("mean")
+        if isinstance(avg, (int, float)):
+            scores[scorer] = float(avg)
+    return scores
 
 
 def _format_delta_table(
