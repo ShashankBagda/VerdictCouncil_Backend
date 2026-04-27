@@ -452,7 +452,7 @@ To exercise a what-if run end-to-end in dev:
 3. `POST /api/v1/what-if` with `{case_id, modification_type, modification_payload}`.
 4. Watch the SSE stream or poll `GET /api/v1/what-if/{scenario_id}`.
 
-Seed data (three sample traffic cases, two sample SCT cases, plus pre-loaded domain KB documents) is created by `python -m scripts.seed_data`, which `dev.sh` runs automatically.
+`dev.sh` runs `python -m scripts.seed_users` automatically to create the demo login accounts (judge + admin). The rich demo fixtures (one traffic-violation case — *PP v Ahmad bin Ismail* — and one SCT case, with full pipeline output and pre-loaded domain KB documents) are created by `python -m scripts.fix_demo_data`, which is **not** run automatically — invoke it manually after the stack is up if you want them.
 
 ---
 

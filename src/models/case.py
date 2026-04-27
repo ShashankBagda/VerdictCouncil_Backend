@@ -248,6 +248,13 @@ class Document(UUIDPrimaryKeyMixin, Base):
         Enum(DocumentKind), nullable=False, server_default=DocumentKind.other.value
     )
     pages: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # Q2.1: cached parse_document output (`text`, `pages`, `tables`)
+    # populated at upload time by the `document_parse` worker. The runner
+    # reads this on hydration to pre-fill `CaseState.raw_documents` so
+    # the agent never needs to call its tool just to read its own files.
+    # NULL means the worker hasn't run yet (or failed) — runner falls
+    # back to a live `parse_document` call.
+    parsed_text: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     uploaded_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id")
     )

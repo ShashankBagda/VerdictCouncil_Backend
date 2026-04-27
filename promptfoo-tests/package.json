@@ -1,0 +1,18 @@
+{
+  "name": "verdictcouncil-promptfoo-tests",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Promptfoo evals for VerdictCouncil phase prompts (lecturer-style, deterministic only)",
+  "scripts": {
+    "eval": "npm run eval:intake && npm run eval:research-evidence && npm run eval:research-facts && npm run eval:research-law && npm run eval:research-witnesses && npm run eval:synthesis && npm run eval:audit",
+    "eval:intake": "npx promptfoo@latest eval -c intake.yaml --no-cache",
+    "eval:research-evidence": "npx promptfoo@latest eval -c research-evidence.yaml --no-cache",
+    "eval:research-facts": "npx promptfoo@latest eval -c research-facts.yaml --no-cache",
+    "eval:research-law": "npx promptfoo@latest eval -c research-law.yaml --no-cache",
+    "eval:research-witnesses": "npx promptfoo@latest eval -c research-witnesses.yaml --no-cache",
+    "eval:synthesis": "npx promptfoo@latest eval -c synthesis.yaml --no-cache",
+    "eval:audit": "npx promptfoo@latest eval -c audit.yaml --no-cache",
+    "validate": "npx promptfoo@latest validate -c intake.yaml && npx promptfoo@latest validate -c research-evidence.yaml && npx promptfoo@latest validate -c research-facts.yaml && npx promptfoo@latest validate -c research-law.yaml && npx promptfoo@latest validate -c research-witnesses.yaml && npx promptfoo@latest validate -c synthesis.yaml && npx promptfoo@latest validate -c audit.yaml",
+    "view": "npx promptfoo@latest view"
+  }
+}

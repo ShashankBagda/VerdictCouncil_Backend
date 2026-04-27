@@ -11,7 +11,7 @@ from src.pipeline.graph.prompts import (
     GATE_AGENTS,
     MODEL_TIER_MAP,
 )
-from src.pipeline.graph.state import _merge_case
+from src.pipeline.graph.state import _merge_case, _merge_source_ids
 from src.shared.case_state import (
     AuditEntry,
     CaseState,
@@ -298,3 +298,76 @@ class TestPromptConstants:
 
     def test_complexity_routing_has_no_tools(self):
         assert AGENT_TOOLS["complexity-routing"] == []
+
+
+# ---------------------------------------------------------------------------
+# _merge_source_ids — Sprint 3 3.B.5
+# ---------------------------------------------------------------------------
+
+
+class TestMergeSourceIds:
+    def test_empty_base_returns_update(self):
+        assert _merge_source_ids({}, {"law": ["a", "b"]}) == {"law": ["a", "b"]}
+
+    def test_empty_update_keeps_base(self):
+        assert _merge_source_ids({"law": ["a", "b"]}, {}) == {"law": ["a", "b"]}
+
+    def test_disjoint_scopes_merge(self):
+        merged = _merge_source_ids({"law": ["a"]}, {"evidence": ["b", "c"]})
+        assert merged == {"law": ["a"], "evidence": ["b", "c"]}
+
+    def test_rerun_of_scope_overwrites_stale_source_ids(self):
+        """Sprint 3 3.B.5 review finding — rerun must reset, not union.
+
+        Without dict-keyed reset, a stale source_id from a prior law
+        run would still validate citations after the law subagent was
+        rerun, letting a fabricated citation slip past
+        ``output_validator.validate_law_citations``.
+        """
+        original = {"law": ["law-old-1", "law-old-2"], "evidence": ["e-1"]}
+        rerun_law_only = {"law": ["law-new-1"]}
+
+        merged = _merge_source_ids(original, rerun_law_only)
+
+        # Only the rerun scope is overwritten; other scopes stay intact.
+        assert merged == {"law": ["law-new-1"], "evidence": ["e-1"]}
+        assert "law-old-1" not in merged["law"]
+        assert "law-old-2" not in merged["law"]
+
+    def test_idempotent_on_repeated_merge(self):
+        once = _merge_source_ids({}, {"law": ["a"]})
+        twice = _merge_source_ids(once, {"law": ["a"]})
+        assert twice == {"law": ["a"]}
+
+
+# ---------------------------------------------------------------------------
+# GraphState — schema invariants (Q1.11 chat-steering)
+# ---------------------------------------------------------------------------
+
+
+class TestGraphStateSchema:
+    """Lock the judge_messages slot down — drift here would silently break
+    the chat-steering surface (agents could not surface questions and the
+    /respond message handler would have nowhere to write replies)."""
+
+    def test_judge_messages_slot_uses_add_messages_reducer(self):
+        from typing import get_args, get_type_hints
+
+        from langchain_core.messages import BaseMessage
+
+        from src.pipeline.graph.state import GraphState
+
+        hints = get_type_hints(GraphState, include_extras=True)
+        annotated = hints["judge_messages"]
+        list_type, reducer = get_args(annotated)
+        assert list_type == list[BaseMessage]
+        assert callable(reducer)
+        # `add_messages` is wrapped by langgraph; the wrapper has this name.
+        assert reducer.__name__ in {"add_messages", "_add_messages"}
+
+    def test_initial_state_seeds_judge_messages_empty(self):
+        from src.pipeline.graph.runner import GraphPipelineRunner
+
+        runner = GraphPipelineRunner()
+        state = runner._build_initial_state(case=_base(), run_id="r1")
+        assert state["judge_messages"] == []

@@ -87,8 +87,11 @@ make infra-up
 # 3. Run migrations
 make migrate
 
-# 4. (Optional) Seed demo users and sample cases
-.venv/bin/python -m scripts.seed_data
+# 4. (Optional) Seed demo login accounts (judge + admin)
+.venv/bin/python -m scripts.seed_users
+
+# 5. (Optional) Rich demo fixtures (PP v Ahmad + sample SCT case)
+.venv/bin/python -m scripts.fix_demo_data
 ```
 
 `make install` is idempotent; re-run after `pyproject.toml` changes.
@@ -306,7 +309,7 @@ If the host's Postgres is always running, stop it (`brew services stop postgresq
 make reset-db
 ```
 
-`reset-db` drops every model table, recreates from SQLAlchemy metadata, and stamps Alembic to `head`. Demo data is lost; run `python -m scripts.seed_data` afterwards.
+`reset-db` drops every model table, recreates from SQLAlchemy metadata, and stamps Alembic to `head`. Demo data is lost; afterwards run `python -m scripts.seed_users` to recreate the judge + admin login accounts, and (optionally) `python -m scripts.fix_demo_data` to restore the rich demo case fixtures.
 
 ### `llm-guard` / DeBERTa-v3 prefetch fails
 
@@ -337,7 +340,8 @@ $EDITOR .env                        # set OPENAI_API_KEY etc.
 make install                        # first time only
 make infra-up
 make migrate
-python -m scripts.seed_data         # optional: demo data
+python -m scripts.seed_users        # demo login accounts (judge + admin)
+python -m scripts.fix_demo_data     # optional: rich demo case fixtures
 make dev                            # api on :8001 + arq worker
 
 # stop: Ctrl-C in the `make dev` window, then

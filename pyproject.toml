@@ -8,10 +8,12 @@ version = "0.1.0"
 description = "Multi-agent AI judicial decision-support system"
 requires-python = ">=3.12"
 dependencies = [
-    "langgraph>=0.2.0",
-    "langchain-core>=0.3.0",
-    "langchain-openai>=0.2.0",
-    "langgraph-checkpoint-postgres>=2.0.0",
+    "langchain>=1.0,<2.0",
+    "langchain-core>=1.0,<2.0",
+    "langgraph>=1.0,<2.0",
+    "langchain-openai>=1.0,<2.0",
+    "langgraph-checkpoint-postgres>=3.0,<4.0",
+    "langsmith>=0.3.0",
     "deepdiff>=8.0.0",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.34.0",
@@ -28,7 +30,8 @@ dependencies = [
     "passlib[bcrypt]>=1.7.4",
     "python-multipart>=0.0.18",
     "arq~=0.26.3",
-    "mlflow>=2.18,<3",
+    "opentelemetry-instrumentation-fastapi>=0.50b0",
+    "opentelemetry-exporter-otlp>=1.29.0",
     # Layer-2 prompt-injection classifier for RAG corpus sanitization at ingest.
     # Wraps protectai/deberta-v3-base-prompt-injection-v2 (Apache-2.0, 95%+ recall).
     # See docs/security/rag-corpus-sanitization.md for architecture notes and citations.
@@ -49,6 +52,12 @@ dev = [
     "httpx",  # for FastAPI test client
     "factory-boy>=3.3.0",
     "pypdf>=4.0.0",  # for PDF export tests
+    # Property-based / fuzz testing
+    "hypothesis>=6.130.0",
+    # Load / performance testing
+    "locust>=2.32.0",
+    # Mutation testing
+    "mutmut>=2.4.0",
 ]
 
 [tool.setuptools.packages.find]
@@ -84,13 +93,42 @@ ignore_missing_imports = true
 testpaths = ["tests"]
 asyncio_mode = "auto"
 markers = [
-    "integration: marks tests requiring live infrastructure (LLM, broker, Redis) — skipped in CI",
+    "integration: marks tests requiring live infrastructure (LLM, Postgres, Redis) — skipped in CI",
 ]
 
 [dependency-groups]
 dev = [
+    "langgraph-cli[inmem]>=0.4.24",
     "pytest>=9.0.3",
     "pytest-asyncio>=1.3.0",
     "pytest-cov>=7.1.0",
     "pytest-mock>=3.15.1",
 ]
+
+# ---------------------------------------------------------------------------
+# Mutation testing (mutmut)
+# ---------------------------------------------------------------------------
+# Usage:
+#   mutmut run --paths-to-mutate src/ --tests-dir tests/unit/
+#   mutmut results
+#   mutmut html
+#
+# Target kill score: ≥ 80% (surviving mutants indicate test blind spots).
+# Run locally or in a dedicated slow CI job — full run takes ~30 min.
+# ---------------------------------------------------------------------------
+[tool.mutmut]
+paths_to_mutate = "src/"
+tests_dir = "tests/unit/"
+runner = "python -m pytest -x -q --no-header --tb=no"
+# Do not mutate pure auto-generated code or template strings
+dict_synonyms = ""
+
+# ---------------------------------------------------------------------------
+# Hypothesis settings (property-based testing)
+# ---------------------------------------------------------------------------
+# Profile "ci" is activated by setting HYPOTHESIS_PROFILE=ci in the CI env.
+# Uses fewer examples to keep CI fast; local runs use the default (200).
+[tool.hypothesis]
+# Default max_examples for all @given tests when no per-test @settings applied
+max_examples = 200
+

@@ -1,0 +1,155 @@
+name: Deploy
+
+# Build the backend Docker image, push to DigitalOcean Container Registry,
+# Trivy-scan, then apply the kustomize overlay to the matching DOKS cluster,
+# render runtime secrets, run Alembic migrations, and roll both Deployments
+# (api-service and arq-worker — same image, different command).
+#
+# Branch determines the target environment:
+#   development → staging   (DOKS staging cluster, namespace verdictcouncil-staging)
+#   main        → production (DOKS production cluster, namespace verdictcouncil)
+#
+# Image tagging:
+#   staging:    rc-<short-sha>      (rolling tag: staging-latest)
+#   production: <git-describe tag>  (rolling tag: latest)
+#
+# Required GitHub Action secrets:
+#   DIGITALOCEAN_ACCESS_TOKEN, DOCR_REGISTRY
+#   DOKS_STAGING_CLUSTER_ID, DOKS_PRODUCTION_CLUSTER_ID
+#   OPENAI_API_KEY, OPENAI_VECTOR_STORE_ID, LANGSMITH_API_KEY (optional)
+#   STAGING_DATABASE_URL,  DATABASE_URL
+#   STAGING_REDIS_URL,     REDIS_URL
+#   STAGING_JWT_SECRET,    JWT_SECRET
+#   STAGING_FRONTEND_ORIGINS, FRONTEND_ORIGINS
+#
+# Replaces the previous separate staging-deploy.yml + production-deploy.yml.
+
+on:
+  push:
+    branches: [development, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # GitHub Environment selection — supplies env-scoped protection rules,
+    # required reviewers (production), and per-env-scoped secrets if you
+    # later migrate from prefixed-name secrets.
+    environment: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
+    env:
+      IS_PROD:          ${{ github.ref_name == 'main' }}
+      ENV_NAME:         ${{ github.ref_name == 'main' && 'production' || 'staging' }}
+      NAMESPACE:        ${{ github.ref_name == 'main' && 'verdictcouncil' || 'verdictcouncil-staging' }}
+      OVERLAY:          ${{ github.ref_name == 'main' && 'production' || 'staging' }}
+      ROLLING_TAG:      ${{ github.ref_name == 'main' && 'latest' || 'staging-latest' }}
+      TRIVY_CATEGORY:   ${{ github.ref_name == 'main' && 'trivy-image-production' || 'trivy-image-staging' }}
+      TRIVY_ARTIFACT:   ${{ github.ref_name == 'main' && 'trivy-image-sarif-production' || 'trivy-image-sarif-staging' }}
+      DOKS_CLUSTER_ID:  ${{ github.ref_name == 'main' && secrets.DOKS_PRODUCTION_CLUSTER_ID || secrets.DOKS_STAGING_CLUSTER_ID }}
+      DATABASE_URL:     ${{ github.ref_name == 'main' && secrets.DATABASE_URL || secrets.STAGING_DATABASE_URL }}
+      REDIS_URL:        ${{ github.ref_name == 'main' && secrets.REDIS_URL || secrets.STAGING_REDIS_URL }}
+      JWT_SECRET:       ${{ github.ref_name == 'main' && secrets.JWT_SECRET || secrets.STAGING_JWT_SECRET }}
+      FRONTEND_ORIGINS: ${{ github.ref_name == 'main' && secrets.FRONTEND_ORIGINS || secrets.STAGING_FRONTEND_ORIGINS }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Always fetch full history — required by `git describe` in the
+          # production path. Cheap; one extra fetch.
+          fetch-depth: 0
+
+      - name: Install doctl
+        uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+
+      - name: Login to DOCR
+        run: doctl registry login
+
+      - name: Build and push image
+        run: |
+          if [ "$IS_PROD" = "true" ]; then
+            TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "latest")
+          else
+            TAG="rc-${{ github.sha }}"
+          fi
+          IMAGE="${{ secrets.DOCR_REGISTRY }}/verdictcouncil:${TAG}"
+          ROLLING="${{ secrets.DOCR_REGISTRY }}/verdictcouncil:${ROLLING_TAG}"
+          docker build -t "${IMAGE}" -t "${ROLLING}" .
+          docker push "${IMAGE}"
+          docker push "${ROLLING}"
+          echo "IMAGE=${IMAGE}" >> "$GITHUB_ENV"
+
+      - name: Trivy image scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.IMAGE }}
+          format: sarif
+          output: trivy-image.sarif
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+        continue-on-error: true
+
+      - name: Upload Trivy SARIF to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-image.sarif
+          category: ${{ env.TRIVY_CATEGORY }}
+        continue-on-error: true
+
+      - name: Upload Trivy SARIF artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ${{ env.TRIVY_ARTIFACT }}
+          path: trivy-image.sarif
+
+      - name: Configure kubectl
+        run: doctl kubernetes cluster kubeconfig save "${DOKS_CLUSTER_ID}"
+
+      - name: Render secrets
+        run: |
+          kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
+          kubectl create secret generic verdictcouncil-secrets \
+            --namespace "${NAMESPACE}" \
+            --from-literal=OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }} \
+            --from-literal=DATABASE_URL=${DATABASE_URL} \
+            --from-literal=REDIS_URL=${REDIS_URL} \
+            --from-literal=JWT_SECRET=${JWT_SECRET} \
+            --from-literal=OPENAI_VECTOR_STORE_ID=${{ secrets.OPENAI_VECTOR_STORE_ID }} \
+            --from-literal=FRONTEND_ORIGINS=${FRONTEND_ORIGINS} \
+            --from-literal=LANGSMITH_API_KEY=${{ secrets.LANGSMITH_API_KEY }} \
+            --from-literal=COOKIE_SECURE=true \
+            --from-literal=NAMESPACE="${NAMESPACE}" \
+            --from-literal=ENVIRONMENT="${ENV_NAME}" \
+            --from-literal=FASTAPI_HOST=0.0.0.0 \
+            --from-literal=FASTAPI_PORT=8001 \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Apply manifests with pinned image
+        # Rewrite the placeholder `verdictcouncil:latest` everywhere it
+        # appears in the rendered overlay (api-service + arq-worker
+        # Deployments, stuck-case-watchdog CronJob) so all three pull
+        # the freshly-built DOCR-qualified tag. Also removes the need
+        # for separate `kubectl set image` calls.
+        run: |
+          kubectl kustomize "k8s/overlays/${OVERLAY}/" \
+            | sed "s|image: verdictcouncil:latest|image: ${IMAGE}|g" \
+            | kubectl apply -f -
+
+      - name: Run database migrations
+        run: |
+          kubectl delete job alembic-migrate --namespace "${NAMESPACE}" --ignore-not-found
+          sed "s|verdictcouncil:latest|${IMAGE}|g" k8s/base/job-alembic-migrate.yaml \
+            | kubectl apply --namespace "${NAMESPACE}" -f -
+          kubectl wait --for=condition=complete job/alembic-migrate \
+            --namespace "${NAMESPACE}" --timeout=300s
+
+      - name: Wait for rollouts
+        run: |
+          kubectl rollout status -n "${NAMESPACE}" deployment/api-service --timeout=300s
+          kubectl rollout status -n "${NAMESPACE}" deployment/arq-worker  --timeout=300s

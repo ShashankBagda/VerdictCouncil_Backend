@@ -1,0 +1,63 @@
+{
+  "metadata": {
+    "id": "traffic-5-illegal-parking-loading",
+    "domain": "traffic_violation",
+    "author": "douglasswm",
+    "date": "2026-04-25",
+    "notes": "Parking citation in loading-bay outside loading-bay hours. Tests Road Traffic (Parking) Rules + LTA loading bay schedules."
+  },
+  "inputs": {
+    "case_id": "eval-tr-005",
+    "domain": "traffic_violation",
+    "parties": [
+      {
+        "name": "Lim Wei Ming",
+        "role": "accused"
+      },
+      {
+        "name": "Land Transport Authority",
+        "role": "prosecution"
+      }
+    ],
+    "case_metadata": {
+      "jurisdiction": "SG-TC",
+      "offence_code": "RTA-PARK-S118A",
+      "fine_amount": 70
+    },
+    "raw_documents": [
+      {
+        "filename": "Driver_Appeal.pdf",
+        "content": "On 22 March 2026 at 21:35 I parked my van at the loading bay at 23 Hong Kong Street to make a 6-minute pickup of restaurant supplies. The bay sign reads 'Loading bay 0700-2100 Mon-Sat'. By 21:35 the loading-bay restriction had expired. The bay was therefore unrestricted parking. I dispute the parking ticket issued by LTA Officer 3309 at 21:38."
+      },
+      {
+        "filename": "LTA_Position.pdf",
+        "content": "The bay at 23 Hong Kong Street is signed 'Loading bay 0700-2100 Mon-Sat; No Parking 2100-0700'. Photograph of full sign attached. Outside loading hours the bay reverts to a no-parking zone, not free parking. Officer 3309 issued a $70 fine under Road Traffic (Parking) Rules s.6 at 21:38 on 22 Mar 2026."
+      },
+      {
+        "filename": "Sign_Photograph.pdf",
+        "content": "Photograph of bay signage at 23 Hong Kong Street. Full text: 'LOADING ONLY 0700-2100 MON-SAT / NO PARKING 2100-0700 / NO PARKING ALL DAY SUN & PH'. Photograph metadata: 22 Mar 2026 16:42, daylight."
+      }
+    ]
+  },
+  "expected": {
+    "intake": {
+      "domain": "traffic_violation",
+      "parties_count": 2,
+      "offence_code": "RTA-PARK-S118A",
+      "fine_amount": 70
+    },
+    "research": {
+      "legal_rules": [
+        "Road Traffic (Parking) Rules s.6 (parking in restricted zones)",
+        "Road Traffic Act 1961 s.118A (illegal parking)"
+      ],
+      "precedents": [
+        "Public Prosecutor v Goh Lai Chuan"
+      ],
+      "supporting_sources": [
+        "placeholder-rtpr-s6:3bfe43a42130",
+        "placeholder-rta-s118a:43a7169e9256"
+      ]
+    }
+  }
+}

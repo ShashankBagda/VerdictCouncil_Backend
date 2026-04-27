@@ -15,9 +15,11 @@ from src.models.case import (
     ReopenRequest,
     Witness,
 )
+from src.models.judge_correction import JudgeCorrection
 from src.models.pipeline_checkpoint import PipelineCheckpoint
 from src.models.pipeline_event import PipelineEvent
 from src.models.pipeline_job import PipelineJob, PipelineJobStatus, PipelineJobType
+from src.models.suppressed_citation import SuppressedCitationRecord
 from src.models.system_config import SystemConfig
 from src.models.user import PasswordResetToken, Session, User
 
@@ -39,6 +41,8 @@ __all__ = [
     "HearingAnalysis",
     "ReopenRequest",
     "AuditLog",
+    "JudgeCorrection",
+    "SuppressedCitationRecord",
     "AdminEvent",
     "SystemConfig",
     "PipelineCheckpoint",

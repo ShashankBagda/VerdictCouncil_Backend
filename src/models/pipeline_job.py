@@ -20,6 +20,12 @@ class PipelineJobType(str, enum.Enum):
     # structured fields (parties, offence_code, title, description, filed_date,
     # claim_amount) for the judge to confirm before the 9-agent pipeline runs.
     intake_extraction = "intake_extraction"
+    # Q2.1: cache `parse_document` output on `documents.parsed_text` so the
+    # pipeline runner can hydrate raw_documents without paying the parse
+    # cost on the hot path. Enqueued per-document at upload time;
+    # `target_id` carries the document UUID. Failures leave `parsed_text`
+    # NULL and the runner-side fallback kicks in (Q2.2).
+    document_parse = "document_parse"
 
 
 class PipelineJobStatus(str, enum.Enum):
@@ -55,6 +61,10 @@ class PipelineJob(UUIDPrimaryKeyMixin, Base):
     )
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # 2.C1.4: W3C traceparent captured at enqueue. The worker re-establishes
+    # OTEL context from this so the worker's spans (and downstream LangSmith
+    # run) inherit the API request's trace_id. Nullable for legacy queued jobs.
+    traceparent: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

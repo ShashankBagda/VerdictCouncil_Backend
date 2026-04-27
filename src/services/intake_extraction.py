@@ -78,6 +78,17 @@ Extract:
 For every non-null field, add a citation: document_id (UUID), page (1-based
 int or null), and a short verbatim quote. Report self-rated confidence
 (low|medium|high) per field.
+
+The user prompt may include the lead pleading (Notice of Traffic Offence
+or Charge Sheet) PLUS supporting documents (witness statements, police
+reports, evidence bundles). Treat the lead pleading as primary for
+offence_code, claim_amount, and is_advisory_only. Use supporting
+documents to corroborate parties, dates, and the description — and
+prefer citing the supporting document when it carries a more specific
+quote (e.g. an officer's witness statement naming the recorded speed,
+a calibration certificate dating the equipment). When supporting and
+lead disagree, raise the confidence on the lead-pleading reading and
+flag the disagreement in `notes`.
 """
 
 # JSON Schema for Responses API strict structured output. Keep in sync with
@@ -273,7 +284,19 @@ async def run_intake_extraction(
     await publish_intake_event(
         case_id, {"type": "status", "phase": "parsing_documents", "ts": _now()}
     )
-    docs_with_text = [(d, await _document_text(db, d)) for d in authoritative]
+    # Feed every uploaded document into the extractor — not only the
+    # authoritative ones. The lead pleading (notice / charge sheet) gates
+    # whether we run at all (above) and is the primary source for
+    # offence_code / claim_amount, but supporting documents (witness
+    # statements, evidence bundles) corroborate parties / dates / facts
+    # and must be citable from `intake_extraction.citations`. Earlier
+    # behaviour silently dropped the bundle so the intake agent's
+    # downstream "treat intake_extraction as ground truth" reading
+    # missed half the evidence. Lead pleadings are listed first so the
+    # model attends to them as the primary frame.
+    supporting = [d for d in all_docs if d not in authoritative]
+    ordered_docs = [*authoritative, *supporting]
+    docs_with_text = [(d, await _document_text(db, d)) for d in ordered_docs]
 
     await publish_intake_event(
         case_id, {"type": "status", "phase": "extracting_fields", "ts": _now()}

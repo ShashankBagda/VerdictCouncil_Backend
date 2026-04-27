@@ -43,6 +43,15 @@ from src.models.case import (
     Witness,
 )
 from src.models.user import UserRole
+from src.pipeline.manifest import (
+    PIPELINE_AGENT_LABELS as AGENT_LABELS,
+)
+from src.pipeline.manifest import (
+    PIPELINE_AGENT_ORDER as PIPELINE_AGENTS,
+)
+from src.pipeline.manifest import (
+    normalize_agent_id,
+)
 
 # Typed slots that kick off intake extraction as soon as one is uploaded.
 # Judges can still drop evidence bundles or letters of mitigation into a
@@ -56,33 +65,11 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# 9-agent pipeline topology used for status derivation
-PIPELINE_AGENTS = [
-    "case-processing",
-    "complexity-routing",
-    "evidence-analysis",
-    "fact-reconstruction",
-    "witness-analysis",
-    "legal-knowledge",
-    "argument-construction",
-    "hearing-analysis",
-    "hearing-governance",
-]
-
-AGENT_LABELS = {
-    "case-processing": "Case Processing",
-    "complexity-routing": "Complexity Routing",
-    "evidence-analysis": "Evidence Analysis",
-    "fact-reconstruction": "Fact Reconstruction",
-    "witness-analysis": "Witness Analysis",
-    "legal-knowledge": "Legal Knowledge",
-    "argument-construction": "Argument Construction",
-    "hearing-analysis": "Hearing Analysis",
-    "hearing-governance": "Hearing Governance",
-}
-
-SUPPLEMENTARY_RETRIGGERED_STAGES = PIPELINE_AGENTS[2:]
-SUPPLEMENTARY_PRESERVED_STAGES = PIPELINE_AGENTS[:2]
+# Stages re-triggered when a supplementary document arrives. With the
+# LangGraph topology, intake stays sticky and everything downstream
+# (research → synthesis → audit) re-runs.
+SUPPLEMENTARY_RETRIGGERED_STAGES = PIPELINE_AGENTS[1:]
+SUPPLEMENTARY_PRESERVED_STAGES = PIPELINE_AGENTS[:1]
 
 
 # ---------------------------------------------------------------------------
@@ -101,17 +88,69 @@ async def _get_case_or_404(case_id: UUID, db, current_user) -> Case:
     return case
 
 
+# Gate → agents that run before that gate's pause. Used to back-fill
+# agent status when audit_logs are sparse (e.g. a gate persisted before
+# the audit-clear bug was fixed wiped its agent rows). Without this the
+# Graph Mesh / Building views render every gate as "pending" forever
+# despite the dossier showing the agents already produced output.
+_AGENTS_BY_GATE: dict[int, list[str]] = {
+    1: ["intake"],
+    2: ["research-evidence", "research-facts", "research-witnesses", "research-law"],
+    3: ["synthesis"],
+    4: ["audit"],
+}
+
+
 def _derive_agent_status(case: Case, audit_logs: list[AuditLog]) -> list[dict[str, Any]]:
-    """Derive per-agent status from the case status and audit log entries."""
+    """Derive per-agent status from the case state, gate_state, and audit log.
+
+    Three signal sources, in priority order:
+      1. ``case.gate_state`` — the canonical record of which gate just
+         finished. Agents that fed into a finished gate are completed,
+         the agents feeding the current gate are completed when
+         ``awaiting_review=True``, and any later agents are pending.
+      2. Audit log entries written by the LangGraph middleware as agents
+         tool-call. These give per-agent start/end timestamps and finer-
+         grained run/complete signals when present.
+      3. Case-level status (``processing`` / ``failed`` / terminal) for
+         the running-agent indicator and final fallback.
+
+    Audit rows written by the LangGraph middleware use the canonical
+    LangGraph node IDs (`intake`, `research-evidence`, …); rows written
+    by pre-LangGraph code paths still use the legacy 9-name display
+    list. `normalize_agent_id` collapses the latter onto the former so
+    both stream into the same per-agent bucket.
+    """
     agent_actions: dict[str, list[AuditLog]] = {a: [] for a in PIPELINE_AGENTS}
     for log in audit_logs:
-        name = log.agent_name
-        if name in agent_actions:
-            agent_actions[name].append(log)
+        canonical = normalize_agent_id(log.agent_name)
+        if canonical in agent_actions:
+            agent_actions[canonical].append(log)
+
+    # Pull "which gate finished" from gate_state. Treat it as the floor
+    # for completion: every agent that ran before this gate is completed
+    # regardless of whether its audit rows survived.
+    gate_state = case.gate_state if isinstance(case.gate_state, dict) else {}
+    current_gate = gate_state.get("current_gate") if gate_state else None
+    awaiting_review = bool(gate_state.get("awaiting_review")) if gate_state else False
+
+    completed_agents: set[str] = set()
+    if isinstance(current_gate, int) and current_gate >= 1:
+        # All agents in gates strictly before current_gate are done.
+        for g in range(1, current_gate):
+            completed_agents.update(_AGENTS_BY_GATE.get(g, []))
+        # Agents at the current gate are done iff we're paused awaiting
+        # judge review — that's the contract of the gate-pause node.
+        if awaiting_review:
+            completed_agents.update(_AGENTS_BY_GATE.get(current_gate, []))
+    # Terminal states imply every agent finished.
+    if case.status in (CaseStatus.ready_for_review, CaseStatus.closed):
+        completed_agents.update(PIPELINE_AGENTS)
 
     agents = []
     for agent_id in PIPELINE_AGENTS:
         logs = agent_actions[agent_id]
+        # Default state from audit log signal.
         if not logs:
             agent_status = "pending"
             start_time = None
@@ -137,6 +176,12 @@ def _derive_agent_status(case: Case, audit_logs: list[AuditLog]) -> list[dict[st
                 )
             else:
                 elapsed_seconds = None
+
+        # Gate-state floor wins over audit-log silence. Don't downgrade
+        # an agent the audit log says is `failed` though — that's a real
+        # signal we want surfaced even if the gate machine moved on.
+        if agent_id in completed_agents and agent_status not in ("failed",):
+            agent_status = "completed"
 
         agents.append(
             {
@@ -349,18 +394,30 @@ async def upload_documents(
     for doc in created:
         await db.refresh(doc)
 
+    from src.models.pipeline_job import PipelineJobType
+    from src.workers.outbox import enqueue_outbox_job
+
+    # Q2.1: cache parse_document output on documents.parsed_text so the
+    # pipeline runner doesn't pay the parse cost on the hot path. Skip
+    # documents that didn't make it to OpenAI Files (no file_id, nothing
+    # to parse) — runner-side fallback covers them.
+    for doc in created:
+        if doc.openai_file_id:
+            await enqueue_outbox_job(
+                db,
+                case_id=case.id,
+                job_type=PipelineJobType.document_parse,
+                target_id=doc.id,
+            )
+
     # Draft intake: the first authoritative document triggers extraction.
     # Anything uploaded after the case has left intake is business-as-usual
     # (evidence / supplementary uploads for an already-pending case).
     if case.status == CaseStatus.draft and any(k in _INTAKE_TRIGGER_KINDS for k in resolved_kinds):
-        from src.models.pipeline_job import PipelineJobType
-        from src.workers.outbox import enqueue_outbox_job
-
         case.status = CaseStatus.extracting
         await enqueue_outbox_job(db, case_id=case.id, job_type=PipelineJobType.intake_extraction)
-        await db.commit()
-    else:
-        await db.commit()
+
+    await db.commit()
 
     return created
 
@@ -465,6 +522,18 @@ async def upload_supplementary_documents(
     await db.flush()
     for doc in created:
         await db.refresh(doc)
+
+    # Q2.1: cache parse_document output for each newly-uploaded document so
+    # the next pipeline pass hydrates raw_documents from cache.
+    for doc in created:
+        if doc.openai_file_id:
+            await enqueue_outbox_job(
+                db,
+                case_id=case_id,
+                job_type=PipelineJobType.document_parse,
+                target_id=doc.id,
+            )
+
     await db.commit()
 
     return SupplementaryUploadResponse(
@@ -486,8 +555,12 @@ async def upload_supplementary_documents(
     "/{case_id}/status",
     operation_id="get_pipeline_status",
     summary="Get pipeline processing status",
-    description="Returns the 9-agent pipeline status derived from the case state "
-    "and audit log. Used by the frontend polling hook.",
+    description=(
+        "Returns the LangGraph 7-agent pipeline status (intake → 4 research "
+        "subagents → synthesis → audit) derived from the case state and audit "
+        "log. Agent IDs match those emitted on the SSE stream. Used by the "
+        "frontend polling hook."
+    ),
     responses={
         404: {"model": ErrorResponse, "description": "Case not found"},
     },

@@ -28,18 +28,34 @@ async def enqueue_outbox_job(
     job_type: PipelineJobType,
     target_id: uuid.UUID | None = None,
     payload: dict[str, Any] | None = None,
+    traceparent: str | None = None,
 ) -> PipelineJob:
     """Insert a `pending` pipeline_jobs row. Caller owns the commit.
 
     This MUST run inside the same transaction that flips the
     corresponding case / scenario / stability status row — otherwise
     the outbox guarantee (state flip ↔ dispatch) is broken.
+
+    `traceparent` (2.C1.4) records the W3C trace context of the enqueuing
+    API request so the worker can re-parent its OTEL span and stamp the
+    inherited trace_id onto LangSmith metadata. When omitted, the active
+    OTEL span (FastAPIInstrumentor's per-request server span) is captured
+    automatically — explicit callers can still pass `traceparent=None` to
+    opt out, but the production default is auto-capture.
     """
+    if traceparent is None:
+        from opentelemetry import trace
+
+        from src.api.trace_propagation import format_w3c_traceparent
+
+        traceparent = format_w3c_traceparent(trace.get_current_span())
+
     job = PipelineJob(
         case_id=case_id,
         job_type=job_type,
         target_id=target_id,
         payload=payload,
+        traceparent=traceparent,
         status=PipelineJobStatus.pending,
     )
     db.add(job)

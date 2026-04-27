@@ -1,0 +1,139 @@
+"""Sprint 1 1.A1.7 — graph topology integration test.
+
+Asserts the new 6-phase StateGraph topology compiles and exposes the
+expected node set, and that the legacy 9-agent topology is gone.
+
+The new topology in compact form: see `src/pipeline/graph/builder.py`
+docstring for the full diagram. Compile-time invariants only — node
+bodies are not exercised here.
+"""
+
+from __future__ import annotations
+
+from langgraph.checkpoint.memory import InMemorySaver
+
+from src.pipeline.graph.builder import build_graph
+
+EXPECTED_NEW_NODES: frozenset[str] = frozenset(
+    {
+        "intake",
+        "gate1_pause",
+        "gate1_apply",
+        "research_dispatch",
+        "research_evidence",
+        "research_facts",
+        "research_witnesses",
+        "research_law",
+        "research_join",
+        "gate2_pause",
+        "gate2_apply",
+        "synthesis",
+        "gate3_pause",
+        "gate3_apply",
+        "auditor",
+        "gate4_pause",
+        "gate4_apply",
+        "terminal",
+    }
+)
+
+LEGACY_NODES_THAT_MUST_BE_GONE: frozenset[str] = frozenset(
+    {
+        "pre_run_guardrail",
+        "case_processing",
+        "complexity_routing",
+        "gate2_dispatch",
+        "gate2_join",
+        "gate2_retry_router",
+        "evidence_analysis",
+        "fact_reconstruction",
+        "witness_analysis",
+        "legal_knowledge",
+        "argument_construction",
+        "hearing_analysis",
+        "hearing_analysis_retry_router",
+        "hearing_governance",
+    }
+)
+
+
+def _node_names(compiled) -> set[str]:
+    """Return the user-declared node names on the compiled graph.
+
+    LangGraph injects internal `__start__` / `__end__` sentinels into the
+    builder's node map; strip those so the assertions read cleanly.
+    """
+    raw = set(compiled.builder.nodes.keys())
+    return {n for n in raw if not n.startswith("__")}
+
+
+def test_compiled_graph_contains_all_expected_phase_and_gate_nodes() -> None:
+    compiled = build_graph(checkpointer=InMemorySaver())
+    nodes = _node_names(compiled)
+
+    missing = EXPECTED_NEW_NODES - nodes
+    assert not missing, f"New topology is missing required nodes: {sorted(missing)}"
+
+
+def test_compiled_graph_does_not_retain_legacy_9_agent_topology() -> None:
+    compiled = build_graph(checkpointer=InMemorySaver())
+    nodes = _node_names(compiled)
+
+    leftover = LEGACY_NODES_THAT_MUST_BE_GONE & nodes
+    assert not leftover, (
+        "Legacy 9-agent nodes must be removed by 1.A1.7 + 1.A1.6: "
+        f"still present: {sorted(leftover)}"
+    )
+
+
+def test_research_dispatch_uses_conditional_edge_send_factory() -> None:
+    """V-4 contract: Send fan-out goes through `add_conditional_edges`.
+
+    A node returning `list[Send]` from its body is the wrong pattern. The
+    conditional-edge router is registered on the `branches` map keyed by
+    source node name; the absence of that entry is the signal that the
+    builder fell back to a node-returns-Send shape.
+    """
+    compiled = build_graph(checkpointer=InMemorySaver())
+    branches = compiled.builder.branches
+    assert "research_dispatch" in branches, (
+        "research_dispatch must use add_conditional_edges with a Send-returning "
+        "router (V-4); no conditional edges registered for that source node."
+    )
+
+
+def test_make_graph_is_the_langgraph_cli_factory() -> None:
+    """LangGraph CLI factories must take exactly one `config` arg.
+
+    `langgraph.json` points at `make_graph`. The CLI strictly enforces a
+    one-positional-arg signature on factories — a two-arg shape (e.g.
+    `build_graph(config, *, checkpointer=None)`) fails with:
+
+        ValueError: Graph factory function ... must take exactly one
+        argument, a RunnableConfig
+
+    Lock the contract in. `make_graph` accepts `config` (which it
+    ignores) and returns a compiled graph; the CLI runtime injects its
+    own checkpointer at run time.
+    """
+    import inspect
+
+    from src.pipeline.graph.builder import make_graph
+
+    sig = inspect.signature(make_graph)
+    params = list(sig.parameters.values())
+    assert len(params) == 1, (
+        f"`make_graph` must take exactly one positional arg for the LangGraph "
+        f"CLI's strict factory check; got {len(params)} params: {params!r}"
+    )
+    # The positional arg must accept None (CLI calls it with a dict, but the
+    # default-None lets unit tests call `make_graph()` directly).
+    assert params[0].default is None, (
+        f"`make_graph`'s sole arg must default to None; got {params[0].default!r}"
+    )
+
+    runnable_config = {"configurable": {"thread_id": "smoke"}, "metadata": {}}
+    compiled = make_graph(runnable_config)
+    assert compiled is not None
+    nodes = _node_names(compiled)
+    assert "intake" in nodes, "CLI factory must produce the same topology as build_graph"

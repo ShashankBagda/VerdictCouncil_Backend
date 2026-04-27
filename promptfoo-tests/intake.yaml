@@ -1,0 +1,76 @@
+# yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
+description: 'Intake phase prompt — IntakeOutput schema + golden-case parity'
+
+providers:
+  - id: openai:chat:gpt-4.1-mini
+    config:
+      temperature: 0
+      max_tokens: 4096
+      response_format:
+        type: json_object
+
+prompts:
+  - file://prompt_builders/intake.js
+
+defaultTest:
+  options:
+    transform: "output.replace(/^```(?:json)?\\n?|```$/g, '').trim()"
+    # Pinned grader for llm-rubric stability across runs.
+    provider: openai:chat:gpt-4.1-mini
+  assert:
+    # Budget gates — fail if a single test exceeds these.
+    - type: cost
+      threshold: 0.10
+    - type: latency
+      threshold: 45000
+    # Groundedness rubric — every routing_factor.rationale must cite a
+    # concrete case detail (a specific document filename, party name,
+    # amount, or specific allegation), not a generic phrase like
+    # "multiple documents" or "review required".
+    - type: llm-rubric
+      threshold: 0.8
+      value: |
+        Examine the `routing_decision.routing_factors` list in the model output.
+        Pass criterion: every `routing_factors[i].rationale` must reference at
+        least one CONCRETE detail visible in the case input — a specific
+        document filename, a named party, a specific amount, an offence code,
+        or a specific allegation text. Generic phrases like "multiple
+        documents", "review needed", "moderate complexity" alone are NOT
+        concrete; they must be paired with at least one specific reference.
+        Fail if any rationale is purely generic.
+    - type: is-json
+      value:
+        type: object
+        required: [domain, parties, case_metadata, raw_documents, routing_decision]
+        properties:
+          domain:
+            enum: [small_claims, traffic_violation]
+          parties:
+            type: array
+          case_metadata:
+            type: object
+            required: [jurisdiction]
+          raw_documents:
+            type: array
+          routing_decision:
+            type: object
+            required: [complexity, complexity_score, route, routing_factors, vulnerability_assessment]
+            properties:
+              complexity:
+                enum: [simple, moderate, complex]
+              complexity_score:
+                type: integer
+                minimum: 0
+                maximum: 100
+              route:
+                enum: [gate2, escalate, halt]
+    - type: javascript
+      value: |
+        const parsed = JSON.parse(output);
+        return Array.isArray(parsed.routing_decision.routing_factors);
+    - type: javascript
+      value: |
+        const parsed = JSON.parse(output);
+        return Array.isArray(parsed.routing_decision.vulnerability_assessment);
+
+tests: file://test_loaders/intake.js

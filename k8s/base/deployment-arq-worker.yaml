@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: arq-worker
+  namespace: verdictcouncil
+  labels:
+    app: verdictcouncil
+    component: arq-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: verdictcouncil
+      component: arq-worker
+  template:
+    metadata:
+      labels:
+        app: verdictcouncil
+        component: arq-worker
+    spec:
+      # arq processes a job to completion; allow up to 15 min for an in-flight
+      # pipeline run to finish before SIGKILL. Matches WorkerSettings.job_timeout.
+      terminationGracePeriodSeconds: 900
+      containers:
+        - name: arq-worker
+          image: verdictcouncil:latest
+          command: ["arq"]
+          args: ["src.workers.worker_settings.WorkerSettings"]
+          envFrom:
+            - secretRef:
+                name: verdictcouncil-secrets
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          # No liveness/readiness probe. arq exits non-zero on Redis loss
+          # and on unhandled exceptions; K8s restarts the pod automatically.
+          # `arq --check` would require `health_check_interval` configured
+          # on WorkerSettings, which is not set today — adding a probe that
+          # depends on that would CrashLoopBackOff this Deployment.

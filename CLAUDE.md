@@ -1,37 +1,10 @@
-## Branching Strategy (Gitflow)
+## Branching Strategy (Trunk-Based)
 
-### Branch Hierarchy
+The backend is **trunk-based on `development`**. Commits go straight to `development`; PRs are optional and used only when a change benefits from review. `main` still tracks production-validated state — promote `development → main` when ready to release.
 
-```
-main → release/<context>/<tag> → dev → feat/<context>
-```
-
-| Branch | Purpose | Deploys To | Merges Into |
-|--------|---------|------------|-------------|
-| `main` | Production-ready code | Production | — |
-| `release` | Staging/QA validation | Cloud staging | `main` |
-| `development` | Integration branch | Local development | `release` |
-| `feat/*` | Unit of work | — | `development` |
-
-### Rules
-
-- **Never commit directly to `main`, `release`, or `development`** — all work goes through feat branches
-- **Feat branches** branch from `development` and merge back into `development` via PR
-- **`development` → `release`**: merge when development is stable and ready for staging validation
-- **`release` → `main`**: merge only after staging QA passes
-- **Hotfixes**: branch from `main`, merge into both `main` and `development`
-- Branch naming:
-  - Feat branches: `feat/<context>` (e.g., `feat/user-auth`, `feat/payment-api`)
-  - Release branches: `release/<context>/<tag_version>` (e.g., `release/sprint-1/v1.0.0`)
-- Resolve all merge conflicts in the feature branch before merging into `development`
-- Delete feat branches after merge
-
-### Enforcement
-
-- Before creating a branch: confirm you are branching from the correct parent (`development` for features)
-- Before opening a PR: confirm the target branch is correct (`development` for features, `release` for development, `main` for release)
-- Before merging: ensure CI passes and conflicts are resolved
-- If asked to push directly to `main` or `release`, **refuse and explain the gitflow process**
+- Default workflow: commit straight to `development`, push, done.
+- Feature branches (`feat/<context>`) are still fine when you want isolation, but they aren't required.
+- Don't force-push `main` or `development`.
 
 ---
 

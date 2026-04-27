@@ -1,0 +1,59 @@
+{
+  "metadata": {
+    "id": "traffic-4-mobile-phone-driving",
+    "domain": "traffic_violation",
+    "author": "douglasswm",
+    "date": "2026-04-25",
+    "notes": "Mobile-phone-while-driving citation disputed on hands-free / GPS interaction grounds. Tests RTA s.65B definition of 'use'."
+  },
+  "inputs": {
+    "case_id": "eval-tr-004",
+    "domain": "traffic_violation",
+    "parties": [
+      {
+        "name": "Rahmat bin Yusoff",
+        "role": "accused"
+      },
+      {
+        "name": "Singapore Police Force (Traffic Police)",
+        "role": "prosecution"
+      }
+    ],
+    "case_metadata": {
+      "jurisdiction": "SG-TC",
+      "offence_code": "RTA-S65B",
+      "fine_amount": 1000
+    },
+    "raw_documents": [
+      {
+        "filename": "Driver_Statement.pdf",
+        "content": "On 5 April 2026 at 12:18 I was stopped at the Bukit Timah / Dunearn traffic light. The light was red. I picked up my phone from the cradle to redirect my Google Maps route because the original route had been closed. The vehicle was stationary the entire time. Officer 4128 issued me a $1,000 ticket for using a mobile phone while driving. I submit that since the vehicle was stopped at a red light, I was not 'driving' for the purposes of s.65B."
+      },
+      {
+        "filename": "Officer_Report.pdf",
+        "content": "On 5 April 2026 12:18 at Bukit Timah / Dunearn Junction I observed driver of SBJ 4502L (Rahmat bin Yusoff) holding a mobile phone in his right hand while seated at the wheel of a vehicle in motoring traffic. Engine on, vehicle in drive, transmission engaged. The light cycle changed during the encounter; the accused did not move off because he remained engaged with the device. RTA s.65B prohibits 'use' which is defined to include any operational interaction. Citation issued."
+      }
+    ]
+  },
+  "expected": {
+    "intake": {
+      "domain": "traffic_violation",
+      "parties_count": 2,
+      "offence_code": "RTA-S65B",
+      "fine_amount": 1000
+    },
+    "research": {
+      "legal_rules": [
+        "Road Traffic Act 1961 s.65B (use of mobile phone while driving)",
+        "Road Traffic Act 1961 s.2 (definition of 'driving')"
+      ],
+      "precedents": [
+        "Public Prosecutor v Mohamed Said"
+      ],
+      "supporting_sources": [
+        "placeholder-rta-s65b:b5efe7c8400b",
+        "placeholder-rta-s2:ce8049e72e0a"
+      ]
+    }
+  }
+}

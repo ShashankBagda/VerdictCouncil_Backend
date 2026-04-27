@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from decimal import Decimal
 from enum import Enum
 from typing import Any
 
@@ -82,13 +83,24 @@ class AuditEntry(BaseModel):
     model: str | None = None
     token_usage: dict[str, Any] | None = None
 
+    # Sprint 4 4.C4.2 — observability + cost + provenance + redaction.
+    # All optional — older checkpoints round-trip cleanly with these unset.
+    trace_id: str | None = None
+    span_id: str | None = None
+    retrieved_source_ids: list[str] | None = None
+    cost_usd: Decimal | None = None
+    redaction_applied: bool = False
+
 
 class CaseState(BaseModel):
     # Schema version — incremented when the CaseState shape changes in a way
     # that breaks round-trip with older checkpoints. The reader in
-    # `src/db/pipeline_state.py` compares this against CURRENT_SCHEMA_VERSION
-    # and fails loud on mismatch rather than silently defaulting.
-    schema_version: int = 2
+    # `src/db/pipeline_state.py` accepts versions in
+    # `SUPPORTED_READ_SCHEMA_VERSIONS = {2, 3}` and newly-constructed
+    # CaseStates serialize at this default. The bake window (Q2.3a →
+    # Q2.3b) ended when this default flipped to 3; pre-flip in-flight
+    # checkpoints continue to load because the reader still accepts v2.
+    schema_version: int = 3
 
     # Identity & Status
     case_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -99,6 +111,12 @@ class CaseState(BaseModel):
     status: CaseStatusEnum = CaseStatusEnum.pending
     parties: list[dict[str, Any]] = Field(default_factory=list)
     case_metadata: dict[str, Any] = Field(default_factory=dict)
+
+    # Q2.3b: pre-pipeline intake extraction (Case.intake_extraction column),
+    # bridged into CaseState so the runner and the agents see the same
+    # judge-confirmed fields. None on v2 checkpoints (older than the
+    # Q2.3b flip) — readers default to None for backward compat.
+    intake_extraction: dict[str, Any] | None = None
 
     # Documents (written by Case Processing)
     raw_documents: list[dict[str, Any]] = Field(default_factory=list)

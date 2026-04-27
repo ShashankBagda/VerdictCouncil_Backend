@@ -1,3 +1,5 @@
+import os
+
 from pydantic_settings import BaseSettings
 
 
@@ -58,7 +60,8 @@ class Settings(BaseSettings):
             )
         if self.pair_api_key is None:
             logging.getLogger(__name__).info(
-                "PAIR disabled — no PAIR_API_KEY configured; vector store is the primary precedent source."
+                "PAIR disabled — no PAIR_API_KEY configured; vector store "
+                "is the primary precedent source."
             )
 
     # Application
@@ -68,14 +71,64 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     precedent_cache_ttl_seconds: int = 86400
     pair_api_url: str = "https://search.pair.gov.sg/api/v1/search"
-    pair_api_key: str | None = None  # when None, PAIR HTTP calls are skipped; vector store is primary
+    # When None, PAIR HTTP calls are skipped; vector store is primary.
+    pair_api_key: str | None = None
     pair_circuit_breaker_threshold: int = 3
     pair_circuit_breaker_timeout: int = 60
 
-    # MLflow tracing (LLMSecOps observability)
-    mlflow_enabled: bool = False
-    mlflow_tracking_uri: str = "http://localhost:5001"
-    mlflow_experiment: str = "verdictcouncil-pipeline"
+    # LangGraph checkpointer mode — "postgres" wires the AsyncPostgresSaver via
+    # the FastAPI lifespan / arq startup hook; "disabled" skips it (useful for
+    # smoke tests or when running against an env without Postgres).
+    langgraph_checkpointer: str = "postgres"
+
+    # Environment tag (Sprint 1 1.C3a.1). Injected into every graph run's
+    # `metadata={"env": ...}` so LangSmith traces can be filtered by env
+    # without splitting the project. Values: "dev" | "staging" | "prod".
+    app_env: str = "dev"
+
+    # In-memory IP rate limiter — disabled by default. The dossier loader
+    # fans out ~12 parallel requests on mount; combined with auth/session
+    # polling and SSE-fallback polling the SPA easily exceeded the legacy
+    # 60 rpm hard-coded ceiling, surfacing as 429s on routine reloads.
+    # Operators can enable it explicitly via RATE_LIMIT_ENABLED=true and
+    # tune the per-minute ceiling via RATE_LIMIT_PER_MINUTE.
+    rate_limit_enabled: bool = False
+    rate_limit_per_minute: int = 600
+
+    # LangGraph runtime selector (Sprint 1 1.DEP1.3). "in_process" runs
+    # the compiled graph in this Python process (current behaviour);
+    # "cloud" routes through the LangGraph Cloud HTTP API (wired in
+    # Sprint 5 task 5.DEP.6). Default keeps existing local + tests
+    # working unchanged.
+    graph_runtime: str = "in_process"
+
+    @property
+    def pipeline_conversational_streaming_phases(self) -> list[str]:
+        """Q1.6 default-on — phases enrolled in conversational streaming
+        (`llm_token`, `tool_call_delta`). Read fresh from
+        `PIPELINE_CONVERSATIONAL_STREAMING_PHASES` (comma-separated)
+        each access so a hot env-var flip doesn't require a process
+        restart.
+
+        Default is `intake` (the phase Q1.6 wired up) — the streaming
+        UX is the new default. Set the env var explicitly to override:
+          - `PIPELINE_CONVERSATIONAL_STREAMING_PHASES=` (empty) →
+            disable for all phases (legacy JSON-mode everywhere).
+          - `PIPELINE_CONVERSATIONAL_STREAMING_PHASES=intake,triage`
+            → enrol additional phases (Q1.13's target).
+
+        D4 (the master-sequence fidelity gate) is being run by hand
+        per `tasks/q1.6-fidelity-gate-deferral-2026-04-26.md` since
+        the automated harness (Q1.6b) is deferred. The audit phase
+        is NEVER enrolled (architecture decision A3 —
+        strict-correctness path stays JSON-only); the `make_phase_node`
+        hard-exclusion enforces this regardless of env-var content.
+
+        Implemented as a property reading `os.environ` directly to
+        sidestep pydantic-settings' JSON-decode-first behaviour for
+        `list[str]` fields."""
+        raw = os.environ.get("PIPELINE_CONVERSATIONAL_STREAMING_PHASES", "intake")
+        return [p.strip() for p in raw.split(",") if p.strip()]
 
     # OpenAI Models
     openai_vector_store_id: str = ""

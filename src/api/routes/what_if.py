@@ -41,11 +41,22 @@ router = APIRouter()
 # --------------------------------------------------------------------------- #
 
 
-async def _run_whatif_scenario(scenario_id: uuid.UUID) -> None:
-    """Background task that executes the what-if scenario.
+async def _run_whatif_scenario(
+    scenario_id: uuid.UUID,
+    *,
+    trace_id: str | None = None,  # noqa: ARG001
+) -> None:
+    """Background task that executes the what-if scenario via the fork primitive.
 
-    Imports are deferred to avoid circular dependencies and to create
-    a fresh database session for the background task.
+    Sprint 4 4.A5.2 — saver-driven LangGraph fork (see
+    ``services/whatif/fork.py``). The fork seeds the modified CaseState
+    into a fresh thread (``case_id-whatif-judge_id-uuid``); driving the
+    fork to terminal advances synthesis + audit against the modified
+    state. The fork's terminal CaseState is read back off the saver and
+    diffed against the original.
+
+    Imports are deferred to avoid circular dependencies and to create a
+    fresh database session for the background task.
     """
     from src.db.pipeline_state import (
         CheckpointCorruptError,
@@ -54,8 +65,12 @@ async def _run_whatif_scenario(scenario_id: uuid.UUID) -> None:
     )
     from src.pipeline.graph.runner import GraphPipelineRunner
     from src.services.database import async_session
-    from src.services.whatif_controller.controller import WhatIfController
-    from src.services.whatif_controller.diff_engine import generate_diff
+    from src.services.whatif.diff import generate_diff
+    from src.services.whatif.fork import (
+        WhatIfModification,
+        create_whatif_fork,
+        drive_whatif_to_terminal,
+    )
 
     async with async_session() as db:
         try:
@@ -76,9 +91,11 @@ async def _run_whatif_scenario(scenario_id: uuid.UUID) -> None:
                 await db.commit()
                 return
 
-            # Hydrate the real terminal CaseState from the checkpoint. The
-            # legacy path constructed an empty CaseState(case_id, run_id),
-            # which is why every what-if used to diff garbage against garbage.
+            # Hydrate the real terminal CaseState from the checkpoint so the
+            # diff has a known-good baseline. The fork primitive itself
+            # reads the saver-side terminal state on the thread to derive
+            # its own seed; we keep the DB path here because diff_engine
+            # operates on CaseState directly.
             if not case.latest_run_id:
                 logger.error(
                     "what-if scenario %s aborted: case %s has no latest_run_id "
@@ -115,12 +132,23 @@ async def _run_whatif_scenario(scenario_id: uuid.UUID) -> None:
                 await db.commit()
                 return
 
-            controller = WhatIfController(GraphPipelineRunner())
-            modified_state = await controller.create_scenario(
-                case_state,
-                scenario.modification_type.value,
-                scenario.modification_payload or {},
+            runner = GraphPipelineRunner()
+            graph = runner._graph  # the compiled StateGraph; saver-bound
+            modification = WhatIfModification(
+                modification_type=scenario.modification_type.value,  # type: ignore[arg-type]
+                payload=scenario.modification_payload or {},
             )
+            fork_thread_id = await create_whatif_fork(
+                graph=graph,
+                case_id=str(case.id),
+                judge_id=str(scenario.created_by),
+                modifications=[modification],
+                parent_run_id=case.latest_run_id,
+            )
+            await drive_whatif_to_terminal(graph=graph, fork_thread_id=fork_thread_id)
+
+            fork_snap = await graph.aget_state({"configurable": {"thread_id": fork_thread_id}})
+            modified_state = fork_snap.values["case"]
 
             diff = generate_diff(case_state, modified_state)
 
@@ -133,7 +161,11 @@ async def _run_whatif_scenario(scenario_id: uuid.UUID) -> None:
             )
             db.add(result_record)
 
-            scenario.scenario_run_id = modified_state.run_id
+            # Record the fork's thread_id under scenario_run_id so the API
+            # response carries a usable trace handle. This was previously
+            # the cloned CaseState's run_id; the fork's thread_id is the
+            # closer analog (saver-keyed identity for the hypothetical).
+            scenario.scenario_run_id = fork_thread_id
             scenario.status = ScenarioStatus.completed
             scenario.completed_at = datetime.now(UTC)
             await db.commit()
@@ -144,8 +176,18 @@ async def _run_whatif_scenario(scenario_id: uuid.UUID) -> None:
             raise
 
 
-async def _run_stability_computation(stability_id: uuid.UUID) -> None:
-    """Background task that computes the stability score."""
+async def _run_stability_computation(
+    stability_id: uuid.UUID,
+    *,
+    trace_id: str | None = None,  # noqa: ARG001
+) -> None:
+    """Background task that computes the stability score.
+
+    Sprint 4 4.A5.2 — runs N parallel forks via the saver-driven fork
+    primitive (``services/whatif/stability.py``). Each perturbation
+    forks a fresh thread off the case's terminal checkpoint, drives it
+    to terminal, and contributes one cell to the held / total ratio.
+    """
     from src.db.pipeline_state import (
         CheckpointCorruptError,
         CheckpointSchemaMismatchError,
@@ -153,7 +195,7 @@ async def _run_stability_computation(stability_id: uuid.UUID) -> None:
     )
     from src.pipeline.graph.runner import GraphPipelineRunner
     from src.services.database import async_session
-    from src.services.whatif_controller.controller import WhatIfController
+    from src.services.whatif.stability import compute_stability_score
 
     async with async_session() as db:
         try:
@@ -207,9 +249,18 @@ async def _run_stability_computation(stability_id: uuid.UUID) -> None:
             # Anchor the stability row at the real terminal run_id.
             stability.run_id = case.latest_run_id
 
-            controller = WhatIfController(GraphPipelineRunner())
-            score_result = await controller.compute_stability_score(
-                case_state, n=stability.perturbation_count
+            # Synthetic judge_id for fork thread keys: stability is a
+            # system computation, not a per-judge what-if, so we scope
+            # the forks under f"stab-{stability_id}" to keep them off
+            # any human judge's saver namespace.
+            runner = GraphPipelineRunner()
+            score_result = await compute_stability_score(
+                graph=runner._graph,
+                case_id=str(case.id),
+                case_state=case_state,
+                n=stability.perturbation_count,
+                fork_judge_id=f"stab-{stability.id}",
+                parent_run_id=case.latest_run_id,
             )
 
             stability.score = score_result["score"]
@@ -338,7 +389,11 @@ async def get_whatif_result(
         )
     )
     scenario = result.scalar_one_or_none()
-    if not scenario:
+    # R-10 cross-judge isolation (Sprint 4 4.A5.4): a scenario is private
+    # to its creator. Returning 404 (not 403) hides the existence of
+    # another judge's hypothetical from B's view — the URL must be
+    # indistinguishable from a non-existent scenario.
+    if not scenario or scenario.created_by != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Scenario not found",

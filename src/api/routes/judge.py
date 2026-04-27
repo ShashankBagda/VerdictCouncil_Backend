@@ -17,6 +17,7 @@ from src.api.schemas.judge import (
     DisputeFactRequest,
     DisputeFactResponse,
     EvidenceGapsResponse,
+    FairnessAuditCheck,
     FairnessAuditResponse,
     GovernanceFairnessEntry,
     UncorroboratedFact,
@@ -31,6 +32,7 @@ from src.models.case import (
     FactConfidence,
     FactStatus,
 )
+from src.models.pipeline_event import PipelineEvent
 from src.models.user import User, UserRole
 
 router = APIRouter()
@@ -203,7 +205,8 @@ async def get_fairness_audit(
     if case_result.scalar_one_or_none() is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
 
-    # Governance audit log entries
+    # Legacy `hearing-governance` AuditLog entries — kept for back-compat
+    # with cases produced before the LangGraph topology cutover.
     audit_result = await db.execute(
         select(AuditLog)
         .where(
@@ -213,7 +216,6 @@ async def get_fairness_audit(
         .limit(50)
     )
     audit_entries = list(audit_result.scalars().all())
-
     governance_checks = [
         GovernanceFairnessEntry(
             audit_log_id=entry.id,
@@ -224,13 +226,122 @@ async def get_fairness_audit(
         for entry in audit_entries
     ]
 
-    has_fairness_data = len(governance_checks) > 0
+    # New-topology source: the gate-4 interrupt event payload.
+    # `audit_summary.fairness_check` is the auditor's structured output;
+    # the audit phase has no tools so it doesn't write its own AuditLog
+    # row — the persisted SSE interrupt is the durable record.
+    gate4_payload = await _latest_gate4_audit_summary(db, case_id)
+    fairness_check, recommend_send_back, checks, verdict, overall_score = (
+        _shape_fairness_audit(gate4_payload)
+    )
+
+    has_fairness_data = bool(governance_checks) or fairness_check is not None
 
     return FairnessAuditResponse(
         case_id=case_id,
         governance_checks=governance_checks,
         has_fairness_data=has_fairness_data,
+        checks=checks,
+        verdict=verdict,
+        overall_score=overall_score,
+        fairness_check=fairness_check,
+        recommend_send_back=recommend_send_back,
     )
+
+
+async def _latest_gate4_audit_summary(
+    db: DBSession, case_id: UUID
+) -> dict | None:
+    """Return the most recent gate4 interrupt event's `audit_summary`, or None."""
+    result = await db.execute(
+        select(PipelineEvent.payload)
+        .where(
+            PipelineEvent.case_id == case_id,
+            PipelineEvent.kind == "interrupt",
+            PipelineEvent.payload["gate"].astext == "gate4",
+        )
+        .order_by(PipelineEvent.ts.desc())
+        .limit(1)
+    )
+    payload = result.scalar_one_or_none()
+    if not isinstance(payload, dict):
+        return None
+    summary = payload.get("audit_summary")
+    return summary if isinstance(summary, dict) else None
+
+
+_SEVERITY_PREFIXES = ("CRITICAL", "MAJOR", "MINOR")
+
+
+def _parse_severity(issue: str) -> str | None:
+    """Extract a severity bucket from issue strings like 'CRITICAL [L1]: ...'."""
+    head = issue.strip().split(":", 1)[0].upper()
+    for prefix in _SEVERITY_PREFIXES:
+        if head.startswith(prefix):
+            return prefix
+    return None
+
+
+def _shape_fairness_audit(
+    audit_summary: dict | None,
+) -> tuple[
+    dict | None,
+    dict | None,
+    list[FairnessAuditCheck],
+    str | None,
+    int | None,
+]:
+    """Project an `audit_summary` blob into the FE-friendly response fields."""
+    if audit_summary is None:
+        return None, None, [], None, None
+
+    fairness = audit_summary.get("fairness_check")
+    if not isinstance(fairness, dict):
+        fairness = None
+    send_back = audit_summary.get("recommend_send_back")
+    if not isinstance(send_back, dict):
+        send_back = None
+
+    checks: list[FairnessAuditCheck] = []
+    verdict: str | None = None
+    overall_score: int | None = None
+
+    if fairness is not None:
+        for issue in fairness.get("issues") or []:
+            text = str(issue)
+            checks.append(
+                FairnessAuditCheck(
+                    label=text,
+                    passed=False,
+                    severity=_parse_severity(text),
+                )
+            )
+        if not checks and fairness.get("audit_passed"):
+            checks.append(
+                FairnessAuditCheck(
+                    label="No critical or major fairness issues identified.",
+                    passed=True,
+                    severity=None,
+                )
+            )
+
+        recommendations = fairness.get("recommendations") or []
+        if send_back and isinstance(send_back.get("reason"), str):
+            verdict = (
+                f"Send back to {send_back.get('to_phase') or 'previous phase'}: "
+                f"{send_back['reason']}"
+            )
+        elif recommendations:
+            verdict = str(recommendations[0])
+        elif fairness.get("audit_passed"):
+            verdict = "Audit passed — no remediation recommended."
+
+        if fairness.get("audit_passed") and not fairness.get("critical_issues_found"):
+            overall_score = 100
+        else:
+            overall_score = 0
+
+    return fairness, send_back, checks, verdict, overall_score
 
 
 # --------------------------------------------------------------------------- #

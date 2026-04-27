@@ -1,0 +1,46 @@
+# yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
+description: 'Audit phase prompt — AuditOutput schema (single-case)'
+
+providers:
+  - id: openai:chat:gpt-4.1-mini
+    config:
+      temperature: 0
+      max_tokens: 4096
+      response_format:
+        type: json_object
+
+prompts:
+  - file://prompt_builders/audit.js
+
+defaultTest:
+  options:
+    transform: "output.replace(/^```(?:json)?\\n?|```$/g, '').trim()"
+    # Pinned grader for llm-rubric stability across runs.
+    provider: openai:chat:gpt-4.1-mini
+  assert:
+    # Budget gates — fail if a single test exceeds these.
+    - type: cost
+      threshold: 0.10
+    - type: latency
+      threshold: 45000
+    - type: llm-rubric
+      threshold: 0.8
+      value: |
+        Examine the `fairness_check.issues` list in the model output.
+                Pass criterion: every `issues[i].specific_evidence` (when present
+                and non-empty) must cite a CONCRETE identifier — a document
+                filename, a fact_id, a witness_id, an evidence_id, or a specific
+                section of an upstream phase output. Generic phrases like "the
+                synthesis output" or "evidence is weak" are NOT concrete.
+    - type: is-json
+      value:
+        type: object
+        required: [fairness_check, status, should_rerun]
+        properties:
+          fairness_check:
+            type: object
+            required: [critical_issues_found, audit_passed]
+          should_rerun:
+            type: boolean
+
+tests: file://test_loaders/audit.js

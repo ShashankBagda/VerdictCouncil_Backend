@@ -3,11 +3,13 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from starlette.routing import Route
 
 from src.api.middleware.metrics import MetricsMiddleware, metrics_endpoint
 from src.api.middleware.rate_limit import RateLimitMiddleware
-from src.pipeline.observability import configure_mlflow
+from src.api.middleware.trace_context import TraceContextMiddleware
+from src.pipeline.graph.checkpointer import lifespan_checkpointer
 from src.shared.config import settings
 
 OPENAPI_TAGS = [
@@ -123,8 +125,15 @@ def _custom_openapi(app: FastAPI) -> dict:
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
-    configure_mlflow()
-    yield
+    # Hold the LangGraph AsyncPostgresSaver context manager open over the
+    # FastAPI app lifetime so checkpointer connections survive across
+    # requests (per source-driven audit F-1/F-1b). Setting `LANGGRAPH_CHECKPOINTER=disabled`
+    # in tests / dev lets us run without a Postgres-backed saver.
+    if settings.langgraph_checkpointer == "disabled":
+        yield
+    else:
+        async with lifespan_checkpointer(settings.database_url):
+            yield
 
 
 def create_app() -> FastAPI:
@@ -150,6 +159,11 @@ def create_app() -> FastAPI:
     # Override OpenAPI schema generation
     app.openapi = lambda: _custom_openapi(app)  # type: ignore[method-assign]
 
+    # OTEL instrumentation must run before middleware so spans wrap the full
+    # request lifecycle. The instrumentor honors inbound `traceparent` headers
+    # so trace context propagates from upstream callers.
+    FastAPIInstrumentor.instrument_app(app)
+
     # Middleware is applied in reverse order (last added runs first).
     # Order of execution: RateLimit -> Metrics -> CORS -> handler
     app.add_middleware(
@@ -160,7 +174,14 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     app.add_middleware(MetricsMiddleware)
-    app.add_middleware(RateLimitMiddleware)
+    app.add_middleware(
+        RateLimitMiddleware,
+        requests_per_minute=settings.rate_limit_per_minute,
+        enabled=settings.rate_limit_enabled,
+    )
+    # TraceContext runs first (last added → first executed) so handlers and
+    # downstream middleware can read `request.state.trace_id`.
+    app.add_middleware(TraceContextMiddleware)
 
     from src.api.routes import (
         admin,
@@ -168,6 +189,7 @@ def create_app() -> FastAPI:
         auth,
         case_data,
         cases,
+        cost,
         dashboard,
         documents,
         domains,
@@ -176,6 +198,7 @@ def create_app() -> FastAPI:
         hearing_pack,
         judge,
         knowledge_base,
+        pipeline,
         precedent_search,
         reopen_requests,
         what_if,
@@ -190,6 +213,7 @@ def create_app() -> FastAPI:
     app.include_router(hearing_pack.router, prefix="/api/v1/cases", tags=["hearing-pack"])
     app.include_router(reopen_requests.router, prefix="/api/v1/cases", tags=["reopen-requests"])
     app.include_router(audit.router, prefix="/api/v1/audit", tags=["audit"])
+    app.include_router(cost.router, prefix="/api/v1/cost", tags=["cost"])
     app.include_router(dashboard.router, prefix="/api/v1/dashboard", tags=["dashboard"])
     app.include_router(health.router, prefix="/api/v1/health", tags=["health"])
     app.include_router(
@@ -201,6 +225,7 @@ def create_app() -> FastAPI:
     app.include_router(documents.router, prefix="/api/v1/documents", tags=["documents"])
     app.include_router(admin.router, prefix="/api/v1/admin", tags=["admin"])
     app.include_router(domains.router, prefix="/api/v1/domains", tags=["domains"])
+    app.include_router(pipeline.router, prefix="/api/v1/pipeline", tags=["pipeline"])
 
     # Prometheus-compatible metrics (excluded from OpenAPI spec)
     app.routes.append(Route("/metrics", metrics_endpoint, methods=["GET"], include_in_schema=False))

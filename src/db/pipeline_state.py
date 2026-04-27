@@ -35,11 +35,18 @@ from src.shared.case_state import CaseState
 logger = logging.getLogger(__name__)
 
 
-# Bump when CaseState changes in a way that breaks round-trip with older
-# checkpoint rows. Checkpoints persisted at a different version are rejected
-# by `load_case_state` so callers fail loud rather than silently proceeding
-# with a partially-decoded state.
-CURRENT_SCHEMA_VERSION = 2
+# Writer stamp — the version newly-constructed CaseStates carry by
+# default. The writer (`persist_case_state`) serializes whatever the
+# in-memory CaseState holds, so anything older still round-trips at
+# its own version.
+CURRENT_SCHEMA_VERSION = 3
+
+# Reader-accept set — checkpoints with `schema_version` outside this set
+# are rejected. Kept wider than `CURRENT_SCHEMA_VERSION` so any
+# pre-Q2.3b in-flight v2 row continues to load through the rollout. A
+# follow-up cleanup will narrow this to `{3}` once no v2 rows remain
+# in any environment (manual gate, not automatic).
+SUPPORTED_READ_SCHEMA_VERSIONS = frozenset({2, 3})
 
 
 class CheckpointSchemaMismatchError(RuntimeError):
@@ -198,10 +205,11 @@ async def load_case_state(
         )
 
     version = raw["schema_version"]
-    if version != CURRENT_SCHEMA_VERSION:
+    if version not in SUPPORTED_READ_SCHEMA_VERSIONS:
         raise CheckpointSchemaMismatchError(
             f"checkpoint for case_id={case_id} run_id={run_id} has "
-            f"schema_version={version!r}, expected {CURRENT_SCHEMA_VERSION}"
+            f"schema_version={version!r}, expected one of "
+            f"{sorted(SUPPORTED_READ_SCHEMA_VERSIONS)}"
         )
 
     try:

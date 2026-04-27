@@ -181,9 +181,19 @@ class EvidenceResponse(BaseModel):
     id: UUID
     evidence_type: EvidenceType = Field(..., description="Type of evidence")
     strength: EvidenceStrength | None = Field(None, description="Assessed strength")
-    admissibility_flags: dict[str, Any] | None = Field(None, description="Admissibility flags")
-    linked_claims: dict[str, Any] | None = Field(
-        None, description="Linked claims, contradictions, or corroboration metadata"
+    # `admissibility_flags` and `linked_claims` are JSONB columns that the
+    # research-evidence agent fills with whichever shape best fits the
+    # claim. In practice we see both `{name: bool}` dicts and bullet-style
+    # `["supports (prosecution): ..."]` lists. The response schema must
+    # accept both — locking to dict-only causes a 500 on the FE's
+    # /cases/{id} call and tears down the entire workspace.
+    admissibility_flags: dict[str, Any] | list[Any] | None = Field(
+        None, description="Admissibility flags (object or bullet list)"
+    )
+    linked_claims: dict[str, Any] | list[Any] | None = Field(
+        None,
+        description="Linked claims, contradictions, or corroboration metadata "
+        "(object or bullet list)",
     )
 
     model_config = {"from_attributes": True}
@@ -196,8 +206,10 @@ class FactResponse(BaseModel):
     event_time: time | None = Field(None, description="Time of the event")
     confidence: FactConfidence | None = Field(None, description="Confidence level")
     status: FactStatus | None = Field(None, description="Agreed or disputed")
-    corroboration: dict[str, Any] | None = Field(
-        None, description="Corroboration or dispute metadata"
+    # Same shape-tolerance rationale as EvidenceResponse — agents emit
+    # both objects and bullet lists; the response must accept both.
+    corroboration: dict[str, Any] | list[Any] | None = Field(
+        None, description="Corroboration or dispute metadata (object or bullet list)"
     )
     source_document_id: UUID | None = Field(None, description="Originating document id")
 
@@ -209,8 +221,8 @@ class WitnessResponse(BaseModel):
     name: str = Field(..., description="Witness name")
     role: str | None = Field(None, description="Witness role")
     credibility_score: int | None = Field(None, description="Credibility score (0-100)")
-    bias_indicators: dict[str, Any] | None = Field(
-        None, description="Bias indicators and credibility factors"
+    bias_indicators: dict[str, Any] | list[Any] | None = Field(
+        None, description="Bias indicators and credibility factors (object or bullet list)"
     )
     simulated_testimony: str | None = Field(
         None, description="Traffic-only simulated testimony summary"
@@ -250,12 +262,20 @@ class ArgumentResponse(BaseModel):
     id: UUID
     side: ArgumentSide = Field(..., description="Which side the argument supports")
     legal_basis: str = Field(..., description="Legal basis for the argument")
-    supporting_evidence: dict[str, Any] | None = Field(
-        None, description="Supporting evidence chain"
+    # `supporting_evidence` and `suggested_questions` are JSONB columns
+    # the synthesis mirror fills with whichever shape best fits — the
+    # current SynthesisOutput projection emits a list of SourceRef dicts
+    # under supporting_evidence, but earlier dict-shaped payloads still
+    # exist on older case rows. Same shape-tolerance rationale as
+    # EvidenceResponse / FactResponse: locking to dict-only here returns
+    # 500 from /cases/{id}/arguments and Gate 3 silently renders "No
+    # arguments constructed yet."
+    supporting_evidence: dict[str, Any] | list[Any] | None = Field(
+        None, description="Supporting evidence chain (object or list of refs)"
     )
     weaknesses: str | None = Field(None, description="Identified weaknesses")
-    suggested_questions: dict[str, Any] | None = Field(
-        None, description="Suggested judicial questions"
+    suggested_questions: dict[str, Any] | list[Any] | None = Field(
+        None, description="Suggested judicial questions (object or bullet list)"
     )
 
     model_config = {"from_attributes": True}
@@ -263,10 +283,17 @@ class ArgumentResponse(BaseModel):
 
 class HearingAnalysisResponse(BaseModel):
     id: UUID
-    reasoning_chain: dict[str, Any] | None = Field(None, description="Structured reasoning chain")
+    # `reasoning_chain` and `uncertainty_flags` are JSONB columns the
+    # synthesis mirror writes as lists of structured dicts (one per
+    # ReasoningStep / UncertaintyFlag). Same shape-tolerance rationale
+    # as ArgumentResponse / EvidenceResponse — locking to dict-only
+    # 500s GET /cases/{id} and tears down the workspace.
+    reasoning_chain: dict[str, Any] | list[Any] | None = Field(
+        None, description="Structured reasoning chain (object or list of steps)"
+    )
     preliminary_conclusion: str | None = Field(None, description="Preliminary conclusion")
-    uncertainty_flags: dict[str, Any] | None = Field(
-        None, description="Uncertainty flags and pivot factors"
+    uncertainty_flags: dict[str, Any] | list[Any] | None = Field(
+        None, description="Uncertainty flags (object or list of flag entries)"
     )
     confidence_score: int | None = Field(None, description="Confidence score (0-100)")
 
@@ -357,7 +384,15 @@ class CaseDetailResponse(CaseResponse):
 
 
 class GateAdvanceRequest(BaseModel):
-    pass
+    notes: str | None = Field(
+        None,
+        description=(
+            "Optional reviewer note recorded on the audit log. Mirrors the "
+            "'notes' field on POST /respond so legacy /advance clients can "
+            "preserve the audit trail without migrating to the unified "
+            "endpoint."
+        ),
+    )
 
 
 class GateRerunRequest(BaseModel):

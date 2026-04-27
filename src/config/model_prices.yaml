@@ -1,0 +1,39 @@
+# Sprint 4 4.C4.3 — per-model pricing for cost rollup (USD per 1K tokens).
+#
+# Prices reflect the OpenAI tiers in use across the pipeline (see
+# src/pipeline/graph/prompts.py model-tier table). Update when the
+# upstream price list changes; cost_summary endpoints and Prometheus
+# gauges read this file at startup.
+#
+# Format: <model_id>: { input: <USD/1K>, output: <USD/1K> }
+# Costs are computed as:
+#   cost_usd = (prompt_tokens / 1000 * input) + (completion_tokens / 1000 * output)
+#
+# Embedding-only models carry a single `input` rate; calc_cost handles
+# the absent `output` rate as zero.
+
+# Frontier reasoning
+gpt-5.4:
+  input: 0.060
+  output: 0.240
+
+# Strong reasoning
+gpt-5:
+  input: 0.030
+  output: 0.120
+
+# Efficient reasoning
+gpt-5-mini:
+  input: 0.0030
+  output: 0.012
+
+# Lightweight
+gpt-5.4-nano:
+  input: 0.0008
+  output: 0.0032
+
+# Embeddings (default; calc_cost reads `input` only)
+text-embedding-3-large:
+  input: 0.00013
+text-embedding-3-small:
+  input: 0.00002

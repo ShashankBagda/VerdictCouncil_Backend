@@ -1,0 +1,62 @@
+{
+  "metadata": {
+    "id": "small-claims-2-renovation-defects",
+    "domain": "small_claims",
+    "author": "douglasswm",
+    "date": "2026-04-25",
+    "notes": "Service contract: 60% completion + defects vs. scope-change defence. Tests Supply of Goods Act / fitness for purpose."
+  },
+  "inputs": {
+    "case_id": "eval-sc-002",
+    "domain": "small_claims",
+    "parties": [
+      {
+        "name": "Daniel Lim",
+        "role": "claimant"
+      },
+      {
+        "name": "Northline Renovations",
+        "role": "respondent"
+      }
+    ],
+    "case_metadata": {
+      "jurisdiction": "SG-SCT",
+      "claim_amount": 1680,
+      "dispute_type": "service_complaint"
+    },
+    "raw_documents": [
+      {
+        "filename": "Owner_Complaint.pdf",
+        "content": "I contracted Northline Renovations on 1 August 2025 for a kitchen renovation at $4,200. The contract specified completion within 6 weeks. After 3 months the work is approximately 60% complete. The installed countertop has visible cracks, cabinet doors are misaligned, and the backsplash tiles are uneven. I have paid $2,520 (60% of contract value) in progress payments. The contractor has not appeared on site since 15 October 2025. I seek the remaining work to be completed or a refund of $1,680 to hire another contractor."
+      },
+      {
+        "filename": "Contractor_Response.pdf",
+        "content": "Northline Renovations confirms the project timeline was extended due to three scope change requests from Mr. Lim: (1) upgrade from laminate to quartz countertop (agreed 20 Aug), (2) addition of under-cabinet lighting (agreed 5 Sep), (3) change of backsplash material from ceramic to mosaic (agreed 18 Sep). Each change required remeasurement and reordering. The tile supplier experienced a 3-week delay. We dispute the defect claims \u2014 the countertop was inspected at installation and the crack appeared after Mr. Lim placed heavy equipment on it."
+      },
+      {
+        "filename": "Quotation_2025-08-01.pdf",
+        "content": "Quotation: kitchen renovation, $4,200. Scope: countertop (laminate), 12 cabinet doors, ceramic backsplash, plumbing reconnection. Timeline: 6 weeks from start. Variation orders to be priced separately."
+      }
+    ]
+  },
+  "expected": {
+    "intake": {
+      "domain": "small_claims",
+      "parties_count": 2,
+      "claim_amount": 1680
+    },
+    "research": {
+      "legal_rules": [
+        "Supply of Goods Act 1979 s.13",
+        "Consumer Protection (Fair Trading) Act 2003 s.4"
+      ],
+      "precedents": [
+        "Hong Tong Motor Trading v Hyundai Mobis Parts Distribution"
+      ],
+      "supporting_sources": [
+        "placeholder-sga-s13:9a214945a2b1",
+        "placeholder-cpfta-s4:7becff8a09df"
+      ]
+    }
+  }
+}

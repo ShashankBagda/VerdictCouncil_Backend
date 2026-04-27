@@ -10,8 +10,11 @@ node; the caller folds this into CaseState.precedent_source_metadata at exit.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 from typing import Any
 
+from langchain_core.documents import Document
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
@@ -54,6 +57,104 @@ class PrecedentMetaSideChannel:
     @property
     def metadata(self) -> dict[str, Any] | None:
         return self._meta
+
+
+# ---------------------------------------------------------------------------
+# Citation provenance helpers (Sprint 3 Workstream B)
+# ---------------------------------------------------------------------------
+
+
+def _content_hash(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+
+
+def _resolve_file_id(item: dict[str, Any], surrogate_prefix: str) -> str:
+    """Return a stable identifier for an item's source document.
+
+    OpenAI vector-store hits expose a real ``file_id``; live PAIR results
+    and any other source without one synthesise a surrogate from the URL
+    (or citation as last resort) so every artifact carries a verifiable
+    provenance key.
+
+    The surrogate uses a hyphen (``pair-<hash>``) rather than a colon
+    so the final ``source_id`` keeps the documented one-colon shape:
+    ``<file_id>:<content_hash>``. With ``pair:<hash>`` the surrogate
+    forced a three-token id and broke the ``source_id.split(":", 1)``
+    contract that downstream consumers (golden-case validation, audit
+    parsing) rely on.
+    """
+    file_id = item.get("file_id")
+    if file_id:
+        return str(file_id)
+    surrogate = item.get("url") or item.get("citation") or ""
+    digest = hashlib.sha256(surrogate.encode("utf-8")).hexdigest()[:12]
+    return f"{surrogate_prefix}-{digest}"
+
+
+def _precedent_to_document(precedent: dict[str, Any]) -> Document:
+    """Project a precedent dict into a Document carrying citation provenance.
+
+    The page_content is a deterministic projection of the citable fields so
+    the resulting `source_id` is reproducible across runs.
+    """
+    citation = precedent.get("citation", "")
+    summary = precedent.get("reasoning_summary", "")
+    page_content = f"{citation}\n{summary}".strip()
+    file_id = _resolve_file_id(precedent, surrogate_prefix="pair")
+    source_id = f"{file_id}:{_content_hash(page_content)}"
+    # Upstream search backends emit different keys: the precedent fetcher
+    # historically returns ``similarity_score``; the domain-guidance
+    # fetcher returns ``score``. Read both so the projector tolerates
+    # either source shape, and always normalise to ``score`` in the
+    # Document metadata so downstream consumers see one key.
+    score = precedent.get("similarity_score", precedent.get("score", 0))
+    return Document(
+        page_content=page_content,
+        metadata={
+            "source_id": source_id,
+            "file_id": file_id,
+            "filename": citation,
+            "score": score,
+            "url": precedent.get("url", ""),
+            "source": precedent.get("source", ""),
+        },
+    )
+
+
+def _guidance_to_document(guidance: dict[str, Any]) -> Document:
+    """Project a domain-guidance dict into a Document with citation provenance.
+
+    Domain guidance always hits an OpenAI vector store, so the `file_id`
+    is normally present; we still call `_resolve_file_id` defensively in
+    case the impl returns a result without one.
+    """
+    citation = guidance.get("citation", "")
+    content = guidance.get("content", "")
+    page_content = f"{citation}\n{content}".strip()
+    file_id = _resolve_file_id(guidance, surrogate_prefix="guidance")
+    source_id = f"{file_id}:{_content_hash(page_content)}"
+    # See _precedent_to_document — accept either `score` or
+    # `similarity_score` from upstream and normalise to `score` here.
+    score = guidance.get("score", guidance.get("similarity_score", 0))
+    return Document(
+        page_content=page_content,
+        metadata={
+            "source_id": source_id,
+            "file_id": file_id,
+            "filename": citation,
+            "score": score,
+            "source": guidance.get("source", "domain_guidance"),
+        },
+    )
+
+
+def _format_results_for_llm(results: list[dict[str, Any]]) -> str:
+    """Render search results back to the agent as JSON.
+
+    Keeps prompts backward-compatible while artifacts carry typed Documents
+    to the audit layer.
+    """
+    return json.dumps(results)
 
 
 # ---------------------------------------------------------------------------
@@ -116,7 +217,15 @@ class _SearchDomainGuidanceInput(BaseModel):
     query: str = Field(
         description="Semantic query for statutes, practice directions, or bench books"
     )
-    max_results: int = Field(5, description="Maximum number of guidance results to return")
+    max_results: int = Field(
+        25,
+        description=(
+            "Maximum number of guidance results to return. Bias toward MORE — "
+            "missing a relevant statute is worse than reading a few extra chunks. "
+            "Up to 50."
+        ),
+        le=50,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -126,7 +235,7 @@ class _SearchDomainGuidanceInput(BaseModel):
 
 def make_tools(
     state: GraphState,
-    agent_name: str,
+    agent_name: str | None = None,
 ) -> tuple[list[Any], PrecedentMetaSideChannel]:
     """Build the LangChain tool list for an agent node.
 
@@ -136,11 +245,23 @@ def make_tools(
 
     Vector store injection: both search tools receive domain_vector_store_id
     from the case state via closure — the LLM never needs to pass this arg.
+
+    `agent_name` is the legacy 9-agent (`AGENT_TOOLS`) filter — when
+    supplied the returned tool list is the per-agent subset declared
+    in `prompts.AGENT_TOOLS`. The new-topology factory (`PHASE_TOOL_NAMES`
+    / `RESEARCH_TOOL_NAMES`) does its own scoping in
+    `_filter_tools(...)`, so production callers pass `agent_name=None`
+    and get every registered tool. The legacy parameter stays for
+    `tests/unit/test_graph_tools.py` and `test_tool_artifact.py` until
+    they're rewritten against the new-topology contract — see
+    follow-up ticket on the orchestration root.
     """
     vector_store_id: str | None = state["case"].domain_vector_store_id
     precedent_meta = PrecedentMetaSideChannel()
 
-    allowed_names = set(AGENT_TOOLS.get(agent_name, []))
+    allowed_names: set[str] | None = (
+        set(AGENT_TOOLS.get(agent_name, [])) if agent_name is not None else None
+    )
     all_tools: dict[str, Any] = {}
 
     # ------------------------------------------------------------------
@@ -260,12 +381,16 @@ def make_tools(
     # ------------------------------------------------------------------
     # search_precedents  (vector_store_id injected via closure)
     # ------------------------------------------------------------------
-    @tool("search_precedents", args_schema=_SearchPrecedentsInput)
+    @tool(
+        "search_precedents",
+        args_schema=_SearchPrecedentsInput,
+        response_format="content_and_artifact",
+    )
     async def search_precedents_tool(
         query: str,
         domain: str = "small_claims",
         max_results: int = 5,
-    ) -> list[dict]:
+    ) -> tuple[str, list[Document]]:
         """Query the PAIR Search API for binding higher court case law.
 
         Use this to find precedent cases matching the current fact pattern.
@@ -281,39 +406,53 @@ def make_tools(
             vector_store_id=vector_store_id,
         )
         precedent_meta.record(result.metadata)
-        return result.precedents
+        artifact = [_precedent_to_document(p) for p in result.precedents]
+        return _format_results_for_llm(result.precedents), artifact
 
     all_tools["search_precedents"] = search_precedents_tool
 
     # ------------------------------------------------------------------
     # search_domain_guidance  (vector_store_id injected via closure)
     # ------------------------------------------------------------------
-    @tool("search_domain_guidance", args_schema=_SearchDomainGuidanceInput)
+    @tool(
+        "search_domain_guidance",
+        args_schema=_SearchDomainGuidanceInput,
+        response_format="content_and_artifact",
+    )
     async def search_domain_guidance_tool(
         query: str,
-        max_results: int = 5,
-    ) -> list[dict]:
+        max_results: int = 25,
+    ) -> tuple[str, list[Document]]:
         """Query the domain knowledge base for statutes and practice directions.
 
         Use this to retrieve applicable statutes, bench books, and procedural
         rules. Do not pass vector_store_id — it is injected automatically.
         Raises DomainGuidanceUnavailable if the domain store is not configured.
+
+        Recall over precision: prefer MORE results (default 25, max 50). It is
+        cheaper to read a few extra chunks than to miss a controlling statute.
         """
         from src.tools.exceptions import DomainGuidanceUnavailable
         from src.tools.search_domain_guidance import search_domain_guidance
 
         if not vector_store_id:
             raise DomainGuidanceUnavailable("No domain_vector_store_id configured for this case")
-        return await search_domain_guidance(
+        results = await search_domain_guidance(
             query=query,
             vector_store_id=vector_store_id,
             max_results=max_results,
         )
+        artifact = [_guidance_to_document(g) for g in results]
+        return _format_results_for_llm(results), artifact
 
     all_tools["search_domain_guidance"] = search_domain_guidance_tool
 
     # ------------------------------------------------------------------
     # Filter to the agent's allowed subset
     # ------------------------------------------------------------------
-    tools = [t for name, t in all_tools.items() if name in allowed_names]
+    if allowed_names is None:
+        # New-topology: caller scopes via PHASE_TOOL_NAMES / RESEARCH_TOOL_NAMES.
+        tools = list(all_tools.values())
+    else:
+        tools = [t for name, t in all_tools.items() if name in allowed_names]
     return tools, precedent_meta

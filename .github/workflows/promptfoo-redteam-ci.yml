@@ -1,0 +1,138 @@
+name: PromptFoo Red-Team
+
+# Auto-generative red-team safety probes targeting the intake phase.
+# Heavier than the per-phase regression suite (numTests × plugins ×
+# strategies ≈ 50 generated test cases per run) — runs on a slower
+# cadence: weekly cron + manual dispatch + when the redteam config or
+# its prompt builder changes. NOT triggered on every PR.
+#
+# See promptfoo-tests/redteam.yaml for the threat model.
+
+on:
+  push:
+    branches: [main, development]
+    paths:
+      - 'promptfoo-tests/redteam.yaml'
+      - 'promptfoo-tests/prompt_builders/intake-redteam.js'
+      - 'prompts/intake.md'
+      - '.github/workflows/promptfoo-redteam-ci.yml'
+  schedule:
+    # Mondays 02:00 UTC.
+    - cron: '0 2 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+  # promptfoo's auto-generative redteam plugins require their hosted
+  # service. Add a repo secret PROMPTFOO_API_KEY (from
+  # `npx promptfoo auth login` → ~/.promptfoo/config.yaml or the
+  # web app at https://www.promptfoo.app). Without it most plugins
+  # skip with a "requires remote generation" warning and the run
+  # produces a thin no-signal report.
+  PROMPTFOO_API_KEY: ${{ secrets.PROMPTFOO_API_KEY }}
+
+jobs:
+  redteam:
+    name: PromptFoo Red-Team — intake
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Validate redteam config
+        working-directory: promptfoo-tests
+        run: npx promptfoo@latest validate -c redteam.yaml
+
+      - name: Run red-team
+        id: redteam
+        working-directory: promptfoo-tests
+        timeout-minutes: 25
+        continue-on-error: true
+        run: |
+          npx promptfoo@latest redteam run \
+            -c redteam.yaml \
+            -o redteam-results.json \
+            --no-cache \
+            --max-concurrency 4
+
+      - name: Render Job Summary
+        if: always() && hashFiles('promptfoo-tests/redteam-results.json') != ''
+        working-directory: promptfoo-tests
+        run: |
+          node -e "
+            const fs = require('fs');
+            const r = JSON.parse(fs.readFileSync('redteam-results.json', 'utf8'));
+            const tests = r.results?.results ?? [];
+            const stats = r.results?.stats ?? {};
+            const lines = [];
+            lines.push('## intake red-team');
+            lines.push('');
+            lines.push('| metric | value |');
+            lines.push('|---|---|');
+            lines.push('| generated tests | ' + tests.length + ' |');
+            lines.push('| passes (model resisted) | ' + (stats.successes ?? 0) + ' |');
+            lines.push('| failures (attack succeeded) | ' + (stats.failures ?? 0) + ' |');
+            lines.push('| errors | ' + (stats.errors ?? 0) + ' |');
+            lines.push('| total tokens | ' + (stats.tokenUsage?.total ?? 0) + ' |');
+            lines.push('');
+            // Per-plugin breakdown — count by metric (plugin id).
+            const byPlugin = {};
+            for (const t of tests) {
+              const metrics = (t.gradingResult?.componentResults || [])
+                .map(c => c.assertion?.metric).filter(Boolean);
+              const pluginId = metrics[0] || (t.testCase?.metadata?.pluginId) || 'unknown';
+              if (!byPlugin[pluginId]) byPlugin[pluginId] = { pass: 0, fail: 0 };
+              byPlugin[pluginId][t.success ? 'pass' : 'fail'] += 1;
+            }
+            if (Object.keys(byPlugin).length) {
+              lines.push('### Per-plugin breakdown');
+              lines.push('');
+              lines.push('| plugin | pass | fail |');
+              lines.push('|---|---|---|');
+              for (const [k, v] of Object.entries(byPlugin).sort()) {
+                lines.push('| ' + k + ' | ' + v.pass + ' | ' + v.fail + ' |');
+              }
+              lines.push('');
+            }
+            const fails = tests.filter(t => !t.success).slice(0, 10);
+            if (fails.length) {
+              lines.push('### Sample successful attacks (top 10)');
+              lines.push('');
+              for (const t of fails) {
+                const desc = t.testCase?.description || '(unnamed)';
+                const metric = t.gradingResult?.componentResults?.[0]?.assertion?.metric || '?';
+                const reason = String(t.gradingResult?.reason || '').split('\n')[0].slice(0, 200);
+                lines.push('- **[' + metric + ']** ' + desc + ' — ' + reason);
+              }
+              lines.push('');
+            }
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join('\n') + '\n');
+          "
+
+      - name: Upload red-team report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: promptfoo-redteam-results
+          path: |
+            promptfoo-tests/redteam-results.json
+            promptfoo-tests/redteam.report.html
+          if-no-files-found: warn
+
+      # Soft gate — surface results in the Job Summary but don't fail the
+      # workflow on attack successes by default. Once we have a baseline
+      # of "expected resistance rate" we can flip this to hard-fail.
+      - name: Note red-team outcome
+        if: always()
+        run: |
+          if [ "${{ steps.redteam.outcome }}" != "success" ]; then
+            echo "::warning::redteam run reported failures — see Job Summary and the uploaded artifact for details."
+          fi

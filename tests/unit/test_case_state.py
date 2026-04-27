@@ -40,3 +40,23 @@ class TestCaseState:
         assert state.witnesses is None
         assert state.hearing_analysis is None
         assert state.fairness_check is None
+
+    def test_intake_extraction_defaults_to_none(self):
+        """Q2.3a: the new field defaults to None so v2 callers that don't
+        pass it round-trip unchanged."""
+        state = CaseState()
+        assert state.intake_extraction is None
+
+    def test_intake_extraction_round_trips(self):
+        """Q2.3a: a populated intake_extraction survives serialise/load."""
+        state = CaseState(
+            intake_extraction={
+                "fields": {"parties": [{"name": "Alice"}]},
+                "citations": [],
+            }
+        )
+        restored = CaseState.model_validate_json(state.model_dump_json())
+        assert restored.intake_extraction == {
+            "fields": {"parties": [{"name": "Alice"}]},
+            "citations": [],
+        }

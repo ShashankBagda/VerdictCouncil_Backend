@@ -1,0 +1,63 @@
+{
+  "metadata": {
+    "id": "traffic-1-improper-lane-change",
+    "domain": "traffic_violation",
+    "author": "douglasswm",
+    "date": "2026-04-25",
+    "notes": "Camera-captured solid-line crossing during roadworks. Tests obscured-markings defence under Road Traffic Act + camera calibration evidence."
+  },
+  "inputs": {
+    "case_id": "eval-tr-001",
+    "domain": "traffic_violation",
+    "parties": [
+      {
+        "name": "Siti Rahman",
+        "role": "accused"
+      },
+      {
+        "name": "Land Transport Authority",
+        "role": "prosecution"
+      }
+    ],
+    "case_metadata": {
+      "jurisdiction": "SG-TC",
+      "offence_code": "RTA-S65",
+      "fine_amount": 300
+    },
+    "raw_documents": [
+      {
+        "filename": "Driver_Appeal_Statement.pdf",
+        "content": "On 3 October 2025 at approximately 14:30, I was driving along Tampines Ave 4 when I encountered roadworks that had obscured the lane markings. Temporary cones were placed inconsistently and the lane guide signs were partially blocked by construction equipment. I made what I believed was a legal lane change based on the visible temporary markings. The traffic camera captured this as an improper lane change. I have dashcam footage showing the obscured markings and confusing temporary signage."
+      },
+      {
+        "filename": "Agency_Enforcement_Summary.pdf",
+        "content": "Camera ID: TC-TA4-0892 captured vehicle SJK 4521E executing an improper lane change at Tampines Ave 4, Junction 12 on 3 Oct 2025 at 14:32:15. The vehicle crossed a solid white line to change from Lane 2 to Lane 1. While roadworks were present in the area, the solid white line at the junction was not obscured by construction activity. The camera system was calibrated on 1 Oct 2025 and was functioning within specifications. Fine: $300 under Road Traffic Act S.65."
+      },
+      {
+        "filename": "Calibration_Certificate.pdf",
+        "content": "TC-TA4-0892 calibration certificate. Calibrated 1 Oct 2025 by LTA Field Operations. Pass: lane-detection accuracy 99.8%; solid-line discrimination 99.6% per RTA Schedule 9 standard."
+      }
+    ]
+  },
+  "expected": {
+    "intake": {
+      "domain": "traffic_violation",
+      "parties_count": 2,
+      "offence_code": "RTA-S65",
+      "fine_amount": 300
+    },
+    "research": {
+      "legal_rules": [
+        "Road Traffic Act 1961 s.65 (improper lane change)",
+        "Road Traffic Act 1961 Schedule 9 (camera calibration standard)"
+      ],
+      "precedents": [
+        "Public Prosecutor v Khong Hor Hee"
+      ],
+      "supporting_sources": [
+        "placeholder-rta-s65:01650c9481ad",
+        "placeholder-rta-sch9:440e890a2f87"
+      ]
+    }
+  }
+}

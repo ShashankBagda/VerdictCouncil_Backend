@@ -4,6 +4,7 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - deployment-api-service.yaml
+  - deployment-arq-worker.yaml
   - cronjob-stuck-case-watchdog.yaml
   - service-api-service.yaml
   - ingress.yaml

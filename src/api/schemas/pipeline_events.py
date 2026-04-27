@@ -15,7 +15,7 @@ Generate the JSON Schema doc with::
 """
 
 from datetime import datetime
-from typing import Annotated, Any, Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -65,18 +65,11 @@ class PipelineProgressEvent(BaseModel):
             "Extra payload for terminal events: {'reason': <halt reason>, 'stopped_at': <stage>}."
         ),
     )
-    mlflow_run_id: str | None = Field(
+    trace_id: str | None = Field(
         None,
         description=(
-            "MLflow run UUID for the nested agent run. Populated on the "
-            "`completed` phase when MLflow tracing is enabled."
-        ),
-    )
-    mlflow_experiment_id: str | None = Field(
-        None,
-        description=(
-            "MLflow experiment id owning `mlflow_run_id`. Needed to build the "
-            "MLflow UI URL because the path includes /experiments/<id>/runs/<run_id>."
+            "W3C OTEL trace id (32 lowercase hex chars). Sprint 2 2.C1.5; "
+            "consumers tolerate absence for backward compat."
         ),
     )
 
@@ -88,14 +81,99 @@ class AgentEvent(BaseModel):
     schema_version: Literal[1] = 1
     case_id: str
     agent: str
-    event: Literal[
-        "thinking", "tool_call", "tool_result", "llm_response", "agent_completed"
-    ]
+    event: Literal["thinking", "tool_call", "tool_result", "llm_response", "agent_completed"]
     content: str | None = None
     tool_name: str | None = None
     args: dict[str, Any] | None = None
     result: str | None = None
     ts: str
+    trace_id: str | None = None
+
+
+class AgentFailedEvent(BaseModel):
+    """Q1.2 — terminal failure of an agent's stream after at least one
+    chunk was emitted. Frontend consumers render this as a red error
+    card; no retry happens at the SSE layer. Only the error CLASS is
+    carried — the original message may contain prompt PII and is
+    explicitly suppressed."""
+
+    kind: Literal["agent"] = "agent"
+    schema_version: Literal[1] = 1
+    case_id: str
+    agent: str
+    event: Literal["agent_failed"]
+    error_class: str = Field(
+        ..., description="Python exception class name. NO error message — PII risk."
+    )
+    ts: str
+    trace_id: str | None = None
+
+
+class LlmTokenEvent(BaseModel):
+    """Q1.3 — coalesced prose delta during conversational streaming.
+
+    Emitted only when the agent's phase is enrolled in
+    `PIPELINE_CONVERSATIONAL_STREAMING_PHASES` (Q1.4 wires this).
+    Decoupled from `pipeline_events` table persistence (decision A4 /
+    Risk #2): the per-token row insert would explode write volume.
+    The existing `llm_response` event still tee-writes one
+    consolidated row at message-end."""
+
+    kind: Literal["agent"] = "agent"
+    schema_version: Literal[1] = 1
+    case_id: str
+    agent: str
+    phase: str = Field(
+        ..., description="Phase identity (intake / triage / …) — enables flag-based gating."
+    )
+    event: Literal["llm_token"]
+    message_id: str = Field(
+        ..., description="Stable id per assistant message; consumers concatenate by this key."
+    )
+    delta: str = Field(..., description="Coalesced prose chunk (post-StreamCoalescer batch).")
+    ts: str
+    trace_id: str | None = None
+
+
+class StructuredArtifactEvent(BaseModel):
+    """Q1.5 — schema-bound artifact emitted at end of conversational
+    streaming. ONE event per phase (not per token), so the
+    `pipeline_events` table tee-write is safe and gives the frontend
+    a single render trigger for the result panel."""
+
+    kind: Literal["agent"] = "agent"
+    schema_version: Literal[1] = 1
+    case_id: str
+    agent: str
+    phase: str
+    event: Literal["structured_artifact"]
+    artifact: dict[str, Any] = Field(
+        ..., description="The schema-bound output (per-phase shape, see PHASE_SCHEMAS)."
+    )
+    ts: str
+    trace_id: str | None = None
+
+
+class ToolCallDeltaEvent(BaseModel):
+    """Q1.3 — partial tool-call args streaming during conversational mode.
+
+    Same gating + persistence policy as `LlmTokenEvent`. Frontend
+    renders these into the inline `<ToolCallChip>` (Q1.9) so the user
+    sees args forming as the model emits them."""
+
+    kind: Literal["agent"] = "agent"
+    schema_version: Literal[1] = 1
+    case_id: str
+    agent: str
+    phase: str
+    event: Literal["tool_call_delta"]
+    tool_call_id: str
+    name: str = Field(..., description="Tool name (e.g. parse_document).")
+    args_delta: str = Field(
+        ..., description="Partial JSON for tool args; concatenate across deltas to assemble."
+    )
+    ts: str
+    trace_id: str | None = None
 
 
 class NarrationEvent(BaseModel):
@@ -108,6 +186,81 @@ class NarrationEvent(BaseModel):
     content: str
     chunk_index: int = 0
     ts: str
+    trace_id: str | None = None
+
+
+class InterruptEvent(BaseModel):
+    """Gate-pause interrupt — judge must respond via /cases/{id}/respond.
+
+    Emitted by `publish_interrupt(...)` (Sprint 4 4.A3.7) whenever the
+    LangGraph pipeline pauses at a gate. The ``phase_output`` carries
+    the per-gate review payload (intake / research / synthesis / audit
+    output for gates 1-4 respectively). ``audit_summary`` is gate4-only
+    and surfaces the optional `recommend_send_back` recommendation
+    from the auditor (4.A3.14).
+    """
+
+    kind: Literal["interrupt"] = "interrupt"
+    schema_version: Literal[1] = 1
+    case_id: UUID
+    gate: Literal["gate1", "gate2", "gate3", "gate4"]
+    actions: list[str]
+    phase_output: dict[str, Any] | None = None
+    audit_summary: dict[str, Any] | None = None
+    trace_id: str | None = None
+    ts: datetime
+
+
+class AgentAwaitingInputEvent(BaseModel):
+    """Q1.11 chat-steering — fired when an agent calls `ask_judge(...)`.
+
+    Shares `kind="interrupt"` with `InterruptEvent` (gate pauses) so the
+    SSE layer routes both through the same `interrupt` event channel.
+    Consumers discriminate on payload shape: gate pauses carry `gate`,
+    agent pauses carry `question` + `interrupt_id`.
+
+    The `interrupt_id` is minted inside the `ask_judge` tool body
+    (uuid4().hex) and rides through to /respond — the API matches the
+    inbound id against the pending interrupt to reject stale double-sends.
+    """
+
+    kind: Literal["interrupt"] = "interrupt"
+    schema_version: Literal[1] = 1
+    case_id: UUID
+    agent: str = Field(
+        ...,
+        description=(
+            "Phase or research-{scope} that fired the interrupt — used by "
+            "the frontend to route the chat panel to the right AgentCard."
+        ),
+    )
+    question: str = Field(..., description="The verbatim question text.")
+    interrupt_id: str = Field(
+        ..., description="UUID4 hex minted by the ask_judge tool body."
+    )
+    ts: datetime
+    trace_id: str | None = None
+
+
+class AgentResumedEvent(BaseModel):
+    """Q1.11 chat-steering — fired immediately after /respond resumes the graph.
+
+    Lets the UI clear the chat input + return the AgentCard to its
+    `running` state before the next `llm_token` frame lands. Without
+    this the panel would hang on `awaiting_input` until the resumed
+    model call started emitting tokens.
+    """
+
+    kind: Literal["agent"] = "agent"
+    schema_version: Literal[1] = 1
+    case_id: str
+    agent: str
+    event: Literal["agent_resumed"]
+    interrupt_id: str = Field(
+        ..., description="Mirrors the resumed interrupt's id for client-side matching."
+    )
+    ts: str
+    trace_id: str | None = None
 
 
 class HeartbeatEvent(BaseModel):
@@ -116,6 +269,7 @@ class HeartbeatEvent(BaseModel):
     kind: Literal["heartbeat"] = "heartbeat"
     schema_version: Literal[1] = 1
     ts: datetime
+    trace_id: str | None = None
 
 
 class AuthExpiringEvent(BaseModel):
@@ -126,8 +280,23 @@ class AuthExpiringEvent(BaseModel):
     expires_at: datetime
 
 
-#: Discriminated union of all SSE event shapes on both streaming endpoints.
-Event = Annotated[
-    PipelineProgressEvent | AgentEvent | NarrationEvent | HeartbeatEvent | AuthExpiringEvent,
-    Field(discriminator="kind"),
-]
+#: Union of all SSE event shapes on both streaming endpoints.
+#: Multiple event classes share `kind="agent"` (`AgentEvent`,
+#: `AgentFailedEvent`, `LlmTokenEvent`, `ToolCallDeltaEvent`) so a
+#: single `kind` discriminator can no longer disambiguate. Pydantic
+#: validates left-to-right; consumers narrow further on the `event`
+#: field literal at the call site.
+Event = (
+    PipelineProgressEvent
+    | AgentEvent
+    | AgentFailedEvent
+    | LlmTokenEvent
+    | ToolCallDeltaEvent
+    | StructuredArtifactEvent
+    | NarrationEvent
+    | AgentAwaitingInputEvent
+    | AgentResumedEvent
+    | InterruptEvent
+    | HeartbeatEvent
+    | AuthExpiringEvent
+)

@@ -1,0 +1,62 @@
+{
+  "metadata": {
+    "id": "small-claims-5-tuition-non-delivery",
+    "domain": "small_claims",
+    "author": "douglasswm",
+    "date": "2026-04-25",
+    "notes": "Prepaid services not delivered when tutor went bankrupt. Tests partial-performance refund + creditor priority (out-of-scope for SCT \u2014 should flag for routing)."
+  },
+  "inputs": {
+    "case_id": "eval-sc-005",
+    "domain": "small_claims",
+    "parties": [
+      {
+        "name": "Yusoff Ibrahim",
+        "role": "claimant"
+      },
+      {
+        "name": "BrightPath Tutors",
+        "role": "respondent"
+      }
+    ],
+    "case_metadata": {
+      "jurisdiction": "SG-SCT",
+      "claim_amount": 3600,
+      "dispute_type": "service_non_performance"
+    },
+    "raw_documents": [
+      {
+        "filename": "Parent_Demand.pdf",
+        "content": "I prepaid BrightPath Tutors $3,600 on 15 January 2026 for 24 weekly tuition sessions for my son. Sessions began 22 January and ran for 6 weeks. On 5 March 2026 BrightPath emailed all parents that they were ceasing operations. 18 sessions remain undelivered. I demand pro-rated refund of $2,700 (18 of 24 sessions)."
+      },
+      {
+        "filename": "BrightPath_Closure_Notice.pdf",
+        "content": "BrightPath Tutors regrets to inform parents that we are ceasing operations effective 5 March 2026 due to financial difficulties. We are working with our liquidator to settle outstanding obligations. Refund claims should be submitted to the liquidator in writing. Reply directly to this email is not monitored."
+      },
+      {
+        "filename": "Bank_Transfer_Receipt.pdf",
+        "content": "Transfer of $3,600 from Yusoff Ibrahim to BrightPath Tutors Pte Ltd on 15 January 2026 via DBS PayNow. Reference: BPTUITION-Q1-2026."
+      }
+    ]
+  },
+  "expected": {
+    "intake": {
+      "domain": "small_claims",
+      "parties_count": 2,
+      "claim_amount": 3600
+    },
+    "research": {
+      "legal_rules": [
+        "Civil Law Act 1909 s.4 (frustration of contract)",
+        "Insolvency, Restructuring and Dissolution Act 2018 (creditor priority)"
+      ],
+      "precedents": [
+        "Lee Tat Realty v Maxz Universal Development"
+      ],
+      "supporting_sources": [
+        "placeholder-cla-s4:35c10f6b7de8",
+        "placeholder-irda:79977dc962b1"
+      ]
+    }
+  }
+}

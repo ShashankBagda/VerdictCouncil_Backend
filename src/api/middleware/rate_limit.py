@@ -16,9 +16,10 @@ from starlette.responses import JSONResponse
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """In-memory sliding window rate limiter per client IP."""
 
-    def __init__(self, app, *, requests_per_minute: int = 60):
+    def __init__(self, app, *, requests_per_minute: int = 60, enabled: bool = True):
         super().__init__(app)
         self.requests_per_minute = requests_per_minute
+        self.enabled = enabled
         self.window_seconds = 60
         self._requests: dict[str, list[float]] = defaultdict(list)
         self._lock = threading.Lock()
@@ -52,6 +53,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             del self._requests[key]
 
     async def dispatch(self, request: Request, call_next):
+        if not self.enabled:
+            return await call_next(request)
         now = time.monotonic()
         client_ip = self._client_ip(request)
         cutoff = now - self.window_seconds

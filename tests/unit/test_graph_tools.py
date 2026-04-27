@@ -23,7 +23,6 @@ def _make_state(vector_store_id: str | None = "vs-test-123") -> dict:
         "extra_instructions": {},
         "retry_counts": {},
         "halt": None,
-        "mlflow_run_ids": {},
         "is_resume": False,
         "start_agent": None,
     }
@@ -168,7 +167,11 @@ class TestSearchPrecedentsTool:
             max_results=5,
             vector_store_id="vs-999",
         )
-        assert result == [{"case": "Test v Test"}]
+        # Tool now returns content_and_artifact; ainvoke({args}) surfaces only
+        # the content string. The artifact path is exercised in test_tool_artifact.
+        import json as _json
+
+        assert _json.loads(result) == [{"case": "Test v Test"}]
         assert side_ch.metadata == {"source_failed": False, "pair_status": "ok"}
 
     @pytest.mark.asyncio
@@ -220,7 +223,11 @@ class TestSearchDomainGuidanceTool:
             vector_store_id="vs-abc",
             max_results=5,
         )
-        assert result == [{"citation": "Act s.1"}]
+        # content_and_artifact: ainvoke({args}) surfaces only the content string.
+        # Full artifact path is exercised in test_tool_artifact.
+        import json as _json
+
+        assert _json.loads(result) == [{"citation": "Act s.1"}]
 
     @pytest.mark.asyncio
     async def test_raises_when_no_vector_store(self):

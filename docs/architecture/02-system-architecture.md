@@ -37,68 +37,60 @@ We consolidated to 9 agents using four guiding principles:
 
 ## 2.2 Orchestration Platform
 
-VerdictCouncil is a **nine-agent microservices system** coordinated by a central **Orchestrator**. Each reasoning agent runs as its own Kubernetes Deployment backed by a distinct container image; the Orchestrator holds the pipeline graph and invokes agents over HTTP. Agents communicate only with the Orchestrator — there are no direct agent-to-agent calls — and all persistent state (shared case state, checkpoints, domain projections) lives in DO Managed Postgres with DO Managed Redis as the queue + cache.
+VerdictCouncil is an **in-process LangGraph `StateGraph`** that runs all reasoning agents, gates, and routing inside a single Python process. There is no message broker, no per-agent network hop, and no separate Orchestrator service: the graph is the orchestrator, and "agents" are nodes in that graph.
 
-This topology was chosen over a monolithic deploy because it matches the grading/assessment requirement of one agent per container, lets each agent scale independently (in particular the frontier-tier agents, which dominate cost and latency), and keeps blast radius small when one agent misbehaves. The previous Solace Agent Mesh + Google ADK stack was removed in the responsible-AI refactor; LangGraph was selected for the Orchestrator because its typed shared state + conditional-edge semantics map cleanly onto this microservices topology.
+> **Topology change (2026-04, decommissioned).** Earlier drafts of this architecture proposed a nine-agent Kubernetes microservices fleet coordinated by an HTTP Orchestrator (and, before that, Solace Agent Mesh + Google ADK). Both were removed in the responsible-AI refactor. The system today is single-image, in-process; per-agent containers, HMAC `/invoke` payloads, and broker-based dispatch are no longer part of the design. See `tasks/lessons.md` and `EXECUTIVE_SUMMARY.md` for the rationale.
 
-### Orchestrator
+### Topology
 
-- **Runs the LangGraph `StateGraph`** (`src/pipeline/graph/builder.py`). Node implementations dispatch to remote agent services rather than executing the agent logic locally.
-- **Owns checkpointing.** `AsyncPostgresSaver` persists `GraphState` after every agent response — the substrate for crash recovery, what-if rewind, and audit replay.
-- **Owns routing.** Conditional edges (escalation, retry, halt) evaluate typed fields of `CaseState`; no agent decides the next hop.
-- **Owns parallelism.** For Gate 2, the Orchestrator fires four concurrent HTTP requests (`asyncio.gather`) and applies the `_merge_case` reducer to the combined responses — see §2.5.1.
-- **Claims work from arq.** Live runs are enqueued via an outbox (`pipeline_jobs` in Postgres) that the arq worker drains.
-
-### Agent services
-
-Each of the nine agents is a stateless FastAPI microservice with a uniform contract:
+The compiled graph (`src/pipeline/graph/builder.py:make_graph`) has three main reasoning phases plus four research subagents that fan out in parallel, gated by four HITL review points:
 
 ```
-POST /invoke
-Request body: {
-  "run_id":            str,
-  "case":              CaseState,       # Pydantic, src/shared/case_state.py
-  "extra_instructions": str | null      # set by Orchestrator on retry
-}
-Response body: {
-  "partial_state":  CaseState,          # fields owned by this agent only
-  "audit_entry":    AuditEntry          # appended to CaseState.audit_log
-}
+START → intake → gate1 ─advance→ research_dispatch ─Send─▶ research_evidence ┐
+                  │                                       research_facts    │
+                  └─rerun→ intake                         research_witnesses │
+                  └─halt → terminal                       research_law      ┘
+                                                                ↓
+                                                   research_join → gate2 ─advance→ synthesis
+                                                                        ─rerun→ research_dispatch
+                                                                        ─halt → terminal
+synthesis → gate3 ─advance→ auditor ─advance→ END
+                  ─rerun→ synthesis            ─rerun→ auditor
+                  ─halt → terminal             ─halt → terminal
 ```
 
-Agents are:
+Distinct graph nodes today: `intake`, `gate1{pause,apply}`, `research_dispatch`, `research_{evidence,facts,witnesses,law}`, `research_join`, `gate2{pause,apply}`, `synthesis`, `gate3{pause,apply}`, `auditor`, `gate4{pause,apply}`, `terminal`. Conceptually that is **three reasoning phases (intake / synthesis / audit) plus four parallel research subagents** — *not* the nine independently deployable agents some earlier diagrams imply.
 
-- **Stateless.** No per-request state survives across invocations; retry safety comes from the Orchestrator's checkpoint, not from agent-local memory.
-- **Idempotent within a `run_id`.** If the Orchestrator retries an invocation, the agent re-runs the LLM call; `audit_log` dedupe is handled by the `_merge_case` reducer on return.
-- **OpenAI-aware.** Each agent uses `langchain-openai.ChatOpenAI` with model, tools, and prompt resolved from `src/pipeline/graph/prompts.py`. Tools come from `src/pipeline/graph/tools.py::make_tools(case_state)` bound per request.
-- **Health-gated.** Each agent exposes `GET /health` for K8s liveness / readiness.
+### Where the graph runs
 
-### Communication protocol
+Two long-lived Kubernetes Deployments execute the graph, both built from the same multi-stage Docker image (`Dockerfile`); the `command`/`args` in each Deployment select the role:
 
-- **Transport:** HTTPS (internal, ClusterIP). Target adds mTLS via service mesh.
-- **Encoding:** JSON; `CaseState` round-trips through Pydantic's `.model_dump_json()` / `.model_validate_json()` to guarantee schema stability across versions (see `CaseState.schema_version`).
-- **Auth:** short-lived HMAC header signed with a per-deployment secret (Orchestrator → agent only; agents never call each other).
-- **Timeouts:** Orchestrator applies a per-agent timeout (default 180 s; frontier-tier agents get 300 s). On timeout, the Orchestrator records a failure `AuditEntry` and either retries (via `retry_counts` / `extra_instructions`) or halts via the conditional edge.
-- **Back-pressure:** if an agent pod is slow, the Orchestrator waits in place — the arq job timeout (900 s per run) is the ultimate ceiling. The PAIR tool inside `legal-knowledge` has its own circuit breaker (`src/shared/circuit_breaker.py`) to shed load on the external PAIR API.
+- **`api-service` (uvicorn :8001).** Runs `src/api/app.py`. The compiled graph is held in process memory and used directly by REST endpoints that need synchronous execution (e.g. resume after gate, what-if branching).
+- **`arq-worker`.** Runs `arq src.workers.worker_settings.WorkerSettings`. The same compiled graph drives async pipeline runs queued through `pipeline_jobs` (Postgres outbox). Periodic maintenance — domain reconciliation, etc. — runs as arq cron entries inside this Deployment. The stuck-case watchdog that marks long-`processing` cases `failed_retryable` is a separate `CronJob` (`k8s/base/cronjob-stuck-case-watchdog.yaml`).
 
-### Why LangGraph despite the remote dispatch
+There is **no Orchestrator service**, **no per-agent service**, **no `/invoke` HTTP contract between agents**. Agents are Python functions composed with LangChain `create_agent` and bound to a phase-specific tool/schema set by `src/pipeline/graph/agents/factory.py`.
 
-LangGraph still earns its place even though the nodes are not executed locally:
+### Communication
 
-- **Typed shared state.** `GraphState` + the `_merge_case` reducer guarantee safe merges when the Orchestrator waits on the four concurrent Gate-2 responses.
-- **Conditional edges.** Halt / retry / escalate logic lives in graph builder code, not scattered across agents.
-- **Checkpointer.** `AsyncPostgresSaver` is a drop-in durable substrate that works regardless of how nodes dispatch.
-- **Homogeneous agent skeleton.** Each agent's `/invoke` handler delegates to `src/pipeline/graph/nodes/common.py::_run_agent_node`, so prompt assembly, tool dispatch, schema validation, and MLflow tracing are identical across agents.
+Internal (within a graph run): Python function calls and `asyncio.gather` for the research fan-out. No JSON marshalling, no HMAC, no per-agent timeout — the only timeout that matters is the arq job timeout (900 s) plus the per-LLM-node `RetryPolicy(max_attempts=2)` configured in the builder.
 
-### Implementation status
+External: each phase node calls OpenAI via `langchain-openai.ChatOpenAI` with the model, tools, and prompt resolved from `src/pipeline/graph/prompts.py` and `src/pipeline/graph/agents/factory.py`. The `legal-knowledge`-style PAIR / precedent tools have a circuit breaker (`src/shared/circuit_breaker.py`) for the external PAIR API.
 
-**The MVP deployment runs all nine agents plus the Orchestrator from a single polyvalent container image** (`verdictcouncil:<tag>`) with a `--agent` entrypoint flag selecting which role the container plays; per-agent Deployments on DOKS are described in [Part 6](06-cicd-pipeline.md) and [Part 8](08-infrastructure-setup.md). In local development the Orchestrator can skip the HTTP hop and invoke agent handlers as Python function calls for speed (`DISPATCH_MODE=local`) — this is the `make dev` / `honcho` path. Production defaults to `DISPATCH_MODE=remote`. Regardless of dispatch mode the logical architecture is unchanged: the Orchestrator is the only component that sees the graph; agents only see their own `/invoke` payload.
+### Durability
+
+- **Checkpointer.** `AsyncPostgresSaver` (`src/pipeline/graph/checkpointer.py`) persists `GraphState` to the `langgraph_checkpoint` table after every node, keyed by `thread_id` (= the pipeline `run_id`). A crashed run resumes from the last checkpoint with `is_resume=True`.
+- **HITL gates.** `gate{1..4}_pause` nodes call `interrupt(...)`; `gate{1..4}_apply` nodes return `Command(goto=...)`. State pauses on the checkpointer and resumes via the API's `/cases/{id}/resume` route, which calls `Command(resume=...)` on the same `thread_id`.
+- **Domain projections.** Alongside the checkpoint, each node's typed output is mirrored into SQLAlchemy tables (`src/models/`) so the API can serve case CRUD, search, and audit export without loading checkpoints. The checkpoint remains authoritative on conflict.
+
+### Deployment shape
+
+The two Deployments run on **DigitalOcean Kubernetes (DOKS)** in `sgp1`, with **DO Managed Postgres** and **DO Managed Redis** in the same VPC. The frontend deploys separately to **DO App Platform** as a static site. See [Part 6](06-cicd-pipeline.md) for the CI/CD pipeline and [Part 8](08-infrastructure-setup.md) for provisioning. The K8s manifests live under `k8s/` — see `k8s/README.md` for layout.
 
 ---
 
 ## 2.3 Architecture Layers
 
-The 9 reasoning agents are organized into 4 logical layers reflecting the judicial reasoning process. Three additional infrastructure nodes (`pre_run_guardrail`, `gate2_dispatch`, `gate2_join`, `terminal`) handle input sanitisation, fan-out dispatch, fan-in merge, and terminal SSE emission respectively.
+The reasoning logic is organized into four logical layers reflecting the judicial reasoning process. The diagram below shows that **conceptual** decomposition. The compiled graph collapses some phases into single nodes — e.g. case-processing + complexity-routing live together in `intake`, and argument-construction + hearing-analysis live together in `synthesis` — so the actual phase-node count is seven (`intake`, four research subagents `research_{evidence,facts,witnesses,law}`, `synthesis`, `auditor`) plus four HITL gate nodes, fan-out dispatch / join, and `terminal`. See `src/pipeline/graph/builder.py` for the authoritative shape.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐

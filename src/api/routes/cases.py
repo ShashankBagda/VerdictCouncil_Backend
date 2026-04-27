@@ -12,7 +12,8 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import selectinload
 
-from src.api.deps import CurrentUser, DBSession, require_role
+from src.api.deps import CurrentUser, CurrentUserForStream, DBSession, require_role
+from src.services.database import async_session
 from src.api.schemas.cases import (
     CaseConfirmRequest,
     CaseCreateRequest,
@@ -27,18 +28,21 @@ from src.api.schemas.cases import (
     SuggestedQuestionsUpdate,
 )
 from src.api.schemas.common import ErrorResponse, MessageResponse, ValidationErrorResponse
+from src.api.schemas.resume import ResumePayload
 from src.models.audit import AuditLog
 from src.models.case import (
     Case,
     CaseComplexity,
     CaseDomain,
     CaseStatus,
+    Document,
     Fact,
     Party,
 )
 from src.models.pipeline_event import PipelineEvent
 from src.models.user import User, UserRole
 from src.services.case_report_data import build_case_report_data
+from src.services.document_parse import parse_and_persist_document
 from src.services.hearing_pack import assemble_pack
 from src.services.pdf_export import render_case_report_pdf
 from src.services.pipeline_events import subscribe as subscribe_pipeline_events
@@ -56,18 +60,17 @@ STARTABLE_STATUSES = (CaseStatus.pending, CaseStatus.ready_for_review, CaseStatu
 SSE_HEARTBEAT_SECONDS = 15.0
 SSE_WATCHDOG_SECONDS = 600.0
 
-PIPELINE_AGENT_ORDER = [
-    "case-processing",
-    "complexity-routing",
-    "evidence-analysis",
-    "fact-reconstruction",
-    "witness-analysis",
-    "legal-knowledge",
-    "argument-construction",
-    "hearing-analysis",
-    "hearing-governance",
-]
-
+# Re-export from the runtime manifest so this file and case_data.py
+# agree on the same 7 LangGraph node IDs.
+from src.pipeline.manifest import (  # noqa: E402
+    GATE_AGENTS as _MANIFEST_GATE_AGENTS,
+)
+from src.pipeline.manifest import (  # noqa: E402
+    PIPELINE_AGENT_ORDER,
+)
+from src.pipeline.manifest import (  # noqa: E402
+    normalize_agent_id as _normalize_agent_id,
+)
 
 _GATE_PAUSE_STATUSES = {
     CaseStatus.awaiting_review_gate1,
@@ -129,6 +132,165 @@ def _optional_text(value: Any) -> str | None:
 
 def _display_text(value: Any, fallback: str) -> str:
     return _optional_text(value) or fallback
+
+
+# ---------------------------------------------------------------------------
+# Q2.2 — runner-side hydration of CaseState.raw_documents.
+# ---------------------------------------------------------------------------
+#
+# The intake agent needs the parsed text of each uploaded document to do
+# its job. The Q2.1 worker caches `parse_document` output on
+# `Document.parsed_text` at upload time so this hot-path read is just a
+# JSONB column. For documents the worker hasn't covered yet (legacy
+# uploads, worker still in flight, parse failure), the runner does a
+# best-effort back-fill via `parse_and_persist_document`. If even that
+# fails the entry gets `parsed_text=""` and the agent's `parse_document`
+# tool-call fallback handles the gap.
+
+# `parsed_text` is a string in CaseState.raw_documents[i] but a dict
+# (`{text, pages, tables}`) on the Document column. We flatten here.
+
+
+async def _hydrate_raw_documents(db, documents: list[Document]) -> list[dict[str, Any]]:
+    """Build the `raw_documents` list for `CaseState`, hydrating parsed
+    text from `Document.parsed_text` (cache hit) or via a runner-side
+    back-fill (cache miss). Failures degrade to `parsed_text=""` — the
+    run continues and the agent's tool-call fallback covers the gap."""
+    entries: list[dict[str, Any]] = []
+    for document in documents:
+        parsed = document.parsed_text if isinstance(document.parsed_text, dict) else None
+        if parsed is None and document.openai_file_id:
+            try:
+                await parse_and_persist_document(db, document_id=document.id)
+            except Exception as exc:
+                logger.warning(
+                    "raw_documents back-fill failed for document=%s file=%s: %s; "
+                    "entry gets parsed_text='' and the agent will fall back to parse_document",
+                    document.id,
+                    document.openai_file_id,
+                    exc,
+                )
+            else:
+                parsed = (
+                    document.parsed_text
+                    if isinstance(document.parsed_text, dict)
+                    else None
+                )
+
+        text = (parsed or {}).get("text") or ""
+        # Prefer pages from the fresh parse output; fall back to the
+        # legacy `Document.pages` column for rows the upload path never
+        # populated `parsed_text` on. Single source of truth wins.
+        pages = (parsed or {}).get("pages")
+        if pages is None:
+            pages = getattr(document, "pages", None)
+
+        entries.append(
+            {
+                "document_id": str(document.id),
+                "filename": document.filename,
+                "file_type": _optional_text(getattr(document, "file_type", None)),
+                "openai_file_id": _optional_text(getattr(document, "openai_file_id", None)),
+                "pages": pages,
+                "parsed_text": text,
+            }
+        )
+    return entries
+
+
+# ---------------------------------------------------------------------------
+# Q2.3b — bridge Case.intake_extraction into CaseState.
+# ---------------------------------------------------------------------------
+#
+# Per Q-B (option A): the bridge fills only EMPTY Case columns. When
+# the judge confirmed values via the intake UI, those columns win — the
+# extractor's proposal is treated as a fallback, not an override.
+# `intake_extraction` itself is always carried onto CaseState (so
+# downstream agents see what the extractor produced even when Case
+# columns hold the authoritative values).
+
+# Metadata fields the bridge knows how to merge from
+# `intake_extraction.fields` into `CaseState.case_metadata`.
+_BRIDGED_METADATA_FIELDS: tuple[str, ...] = (
+    "title",
+    "description",
+    "filed_date",
+    "claim_amount",
+    "consent_to_higher_claim_limit",
+    "offence_code",
+)
+
+
+def _build_initial_state_overrides(case: Case) -> dict[str, Any]:
+    """Build the `parties` / `case_metadata` / `intake_extraction`
+    portion of CaseState's constructor kwargs, with the Q2.3b bridge
+    applied.
+
+    Returned shape mirrors the keys the runner passes to `CaseState(...)`
+    — the runner can splat this dict alongside its own additions
+    (case_id, domain, raw_documents, …).
+    """
+    extraction = case.intake_extraction if isinstance(case.intake_extraction, dict) else None
+    extraction_fields = (extraction or {}).get("fields") if extraction else None
+    if not isinstance(extraction_fields, dict):
+        extraction_fields = {}
+
+    parties: list[dict[str, Any]]
+    if case.parties:
+        parties = [
+            {
+                "name": party.name,
+                "role": party.role.value,
+                "contact_info": party.contact_info,
+            }
+            for party in case.parties
+        ]
+    else:
+        proposed = extraction_fields.get("parties") or []
+        parties = [
+            {
+                "name": p.get("name"),
+                "role": p.get("role"),
+                "contact_info": p.get("contact_info"),
+            }
+            for p in proposed
+            if isinstance(p, dict)
+        ]
+
+    case_metadata: dict[str, Any] = {}
+    for field in _BRIDGED_METADATA_FIELDS:
+        case_value = getattr(case, field, None)
+        if field == "filed_date" and case_value is not None:
+            case_value = case_value.isoformat()
+        if case_value:
+            case_metadata[field] = case_value
+        else:
+            case_metadata[field] = extraction_fields.get(field)
+
+    return {
+        "parties": parties,
+        "case_metadata": case_metadata,
+        "intake_extraction": extraction,
+    }
+
+
+def _log_intake_phase_start(
+    *,
+    case_id: UUID,
+    raw_documents: list[dict[str, Any]],
+    parties_count: int,
+) -> None:
+    """Operator-facing breadcrumb used to spot intake halts. Logs counts
+    only — no PII, no document text. Format is grep-friendly so an
+    on-call can `grep intake_phase_start` and read the columns."""
+    parsed_text_chars = sum(len(entry.get("parsed_text") or "") for entry in raw_documents)
+    logger.info(
+        "intake_phase_start case_id=%s documents=%d parties=%d parsed_text_chars=%d",
+        case_id,
+        len(raw_documents),
+        parties_count,
+        parsed_text_chars,
+    )
 
 
 def _party_role_lookup(parties: list[Party]) -> dict[str, str]:
@@ -268,8 +430,9 @@ def _build_pipeline_progress(case: Case) -> dict[str, Any]:
 
     grouped_logs: dict[str, list[AuditLog]] = {agent_id: [] for agent_id in PIPELINE_AGENT_ORDER}
     for log in case.audit_logs or []:
-        if log.agent_name in grouped_logs:
-            grouped_logs[log.agent_name].append(log)
+        canonical = _normalize_agent_id(log.agent_name)
+        if canonical in grouped_logs:
+            grouped_logs[canonical].append(log)
 
     for agent_id in PIPELINE_AGENT_ORDER:
         logs = grouped_logs[agent_id]
@@ -846,10 +1009,13 @@ async def stream_intake_events(
                 except TimeoutError:
                     if producer_done.is_set() and queue.empty():
                         return
+                    from src.api.trace_propagation import current_trace_id
+
                     heartbeat = {
                         "kind": "heartbeat",
                         "schema_version": 1,
                         "ts": datetime.now(UTC).isoformat(),
+                        "trace_id": current_trace_id(),
                     }
                     yield f"event: heartbeat\ndata: {json.dumps(heartbeat)}\n\n"
                     continue
@@ -1130,8 +1296,7 @@ async def list_pipeline_events(
 async def stream_pipeline_status(
     case_id: UUID,
     request: Request,
-    db: DBSession,
-    current_user: CurrentUser,
+    current_user: CurrentUserForStream,
 ) -> StreamingResponse:
     import jwt as _jwt
 
@@ -1152,30 +1317,73 @@ async def stream_pipeline_status(
             if exp:
                 token_expires_at = datetime.fromtimestamp(exp, UTC)
         except Exception:
-            pass  # auth already validated by CurrentUser; expiry warning is best-effort
+            pass  # auth already validated by CurrentUserForStream; expiry warning is best-effort
 
-    await _load_case_for_export(case_id, db, current_user)
+    # Validate case + capture snapshot inside a short-lived session so the
+    # streaming response below never holds an asyncpg connection. Plain
+    # values only — never let an ORM instance escape the with-block.
+    async with async_session() as session:
+        case = await _load_case_for_export(case_id, session, current_user)
+        snap_status_value = case.status.value if case.status else None
+        snap_gate_state = case.gate_state
+
+    snap_event = {
+        "kind": "progress",
+        "schema_version": 1,
+        "case_id": str(case_id),
+        "agent": "pipeline",
+        "phase": "case.status",
+        "ts": datetime.now(UTC).isoformat(),
+        "detail": {
+            "status": snap_status_value,
+            "gate_state": snap_gate_state,
+        },
+    }
+    snap_payload = f"event: progress\ndata: {json.dumps(snap_event)}\n\n"
+
+    # Q1.11 chat-steering — snapshot any pending `ask_judge` interrupt so a
+    # client that reconnects after the original SSE event was missed can
+    # still render the chat question. Without this, the AgentChatPanel
+    # stays disabled forever and the judge has no way to reply, leaving
+    # the case stuck mid-synthesis.
+    snap_chat_payload: str | None = None
+    try:
+        from src.pipeline.graph.resume import find_pending_chat_interrupt
+        from src.pipeline.graph.runner import GraphPipelineRunner as _GPR
+
+        _runner = _GPR()
+        if _runner._graph is not None:
+            _chat = await find_pending_chat_interrupt(
+                _runner._graph,
+                {"configurable": {"thread_id": str(case_id)}},
+            )
+            if _chat is not None:
+                snap_chat_event = {
+                    "kind": "interrupt",
+                    "schema_version": 1,
+                    "case_id": str(case_id),
+                    "agent": _chat.get("agent") or "synthesis",
+                    "question": _chat.get("question"),
+                    "interrupt_id": _chat.get("interrupt_id"),
+                    "ts": datetime.now(UTC).isoformat(),
+                }
+                snap_chat_payload = (
+                    f"event: interrupt\ndata: {json.dumps(snap_chat_event)}\n\n"
+                )
+    except Exception:
+        # Snapshot replay must never break the SSE handshake — fall through
+        # silently and rely on the next live event.
+        snap_chat_payload = None
 
     async def event_generator():
         # Snapshot-on-connect: emit current case status so a client that
-        # re-subscribes after a gate advance sees the current state immediately,
-        # without waiting for the next Redis event. Uses the already-open
-        # dependency-injected session so tests can mock it cleanly.
-        _snap_case = await db.get(Case, case_id)
-        if _snap_case is not None:
-            snap_event = {
-                "kind": "progress",
-                "schema_version": 1,
-                "case_id": str(case_id),
-                "agent": "pipeline",
-                "phase": "case.status",
-                "ts": datetime.now(UTC).isoformat(),
-                "detail": {
-                    "status": _snap_case.status.value if _snap_case.status else None,
-                    "gate_state": _snap_case.gate_state,
-                },
-            }
-            yield f"event: progress\ndata: {json.dumps(snap_event)}\n\n"
+        # re-subscribes after a gate advance sees the current state
+        # immediately, without waiting for the next Redis event. Built
+        # above from a closed short-lived session — no DB calls run
+        # while streaming, so the request holds no connection.
+        yield snap_payload
+        if snap_chat_payload is not None:
+            yield snap_chat_payload
 
         # Producer-consumer pattern: a background task owns the subscribe()
         # generator for its full lifetime and pushes payloads onto a queue.
@@ -1222,11 +1430,14 @@ async def stream_pipeline_status(
                 except TimeoutError:
                     if producer_done.is_set() and queue.empty():
                         return
+                    from src.api.trace_propagation import current_trace_id
+
                     now = datetime.now(UTC)
                     heartbeat = {
                         "kind": "heartbeat",
                         "schema_version": 1,
                         "ts": now.isoformat(),
+                        "trace_id": current_trace_id(),
                     }
                     yield f"event: heartbeat\ndata: {json.dumps(heartbeat)}\n\n"
                     # Emit auth_expiring when the session cookie will expire within
@@ -1240,10 +1451,7 @@ async def stream_pipeline_status(
                                 "schema_version": 1,
                                 "expires_at": token_expires_at.isoformat(),
                             }
-                            yield (
-                                f"event: auth_expiring\n"
-                                f"data: {json.dumps(auth_expiring)}\n\n"
-                            )
+                            yield (f"event: auth_expiring\ndata: {json.dumps(auth_expiring)}\n\n")
                     continue
                 # Extract the `kind` field to emit the named SSE event type so
                 # EventSource.addEventListener('progress'/'agent', ...) fires natively.
@@ -1272,8 +1480,13 @@ async def stream_pipeline_status(
     )
 
 
-async def _run_case_pipeline(case_id: UUID) -> None:
-    """Background task: run the 9-agent pipeline for a case and persist results."""
+async def _run_case_pipeline(case_id: UUID, *, trace_id: str | None = None) -> None:
+    """Background task: run the 9-agent pipeline for a case and persist results.
+
+    `trace_id` (Sprint 2 2.C1.4) is the W3C hex trace id resurrected by the
+    worker from `pipeline_jobs.traceparent`. It is stamped onto LangSmith
+    metadata so the agent run can be cross-referenced with its OTEL trace.
+    """
 
     from src.api.schemas.pipeline_events import PipelineProgressEvent
     from src.db.persist_case_results import persist_case_results
@@ -1307,16 +1520,12 @@ async def _run_case_pipeline(case_id: UUID) -> None:
             logger.warning("run_case_pipeline: case %s not found", case_id)
             return
 
-        raw_documents = [
-            {
-                "document_id": str(document.id),
-                "filename": document.filename,
-                "file_type": _optional_text(getattr(document, "file_type", None)),
-                "openai_file_id": _optional_text(getattr(document, "openai_file_id", None)),
-                "pages": getattr(document, "pages", None),
-            }
-            for document in case.documents
-        ]
+        raw_documents = await _hydrate_raw_documents(db, case.documents)
+        _log_intake_phase_start(
+            case_id=case_id,
+            raw_documents=raw_documents,
+            parties_count=len(case.parties),
+        )
 
         domain_vector_store_id = (
             case.domain_ref.vector_store_id
@@ -1328,32 +1537,20 @@ async def _run_case_pipeline(case_id: UUID) -> None:
             case_id=str(case.id),
             domain=case.domain.value if case.domain else None,
             domain_vector_store_id=domain_vector_store_id,
-            status="processing",
-            parties=[
-                {
-                    "name": party.name,
-                    "role": party.role.value,
-                    "contact_info": party.contact_info,
-                }
-                for party in case.parties
-            ],
-            case_metadata={
-                "title": case.title,
-                "description": case.description,
-                "filed_date": case.filed_date.isoformat() if case.filed_date else None,
-                "claim_amount": case.claim_amount,
-                "consent_to_higher_claim_limit": case.consent_to_higher_claim_limit,
-                "offence_code": case.offence_code,
-            },
             raw_documents=raw_documents,
+            **_build_initial_state_overrides(case),
         )
 
     try:
         from src.pipeline.graph.runner import GraphPipelineRunner
 
-        final_state = await GraphPipelineRunner().run(initial_state)
+        final_state = await GraphPipelineRunner().run(initial_state, trace_id=trace_id)
     except Exception as exc:
         logger.exception("Pipeline run failed for case_id=%s", case_id)
+        # Sprint 1 1.A1.6: legacy AgentOutputParseError is gone — `create_agent`
+        # with `ToolStrategy(handle_errors=True)` retries on validation errors
+        # internally, so a leaked exception here is uniformly orchestrator-level.
+        reason = "orchestrator_exception"
         await publish_progress(
             PipelineProgressEvent(
                 case_id=case_id,
@@ -1362,7 +1559,7 @@ async def _run_case_pipeline(case_id: UUID) -> None:
                 step=None,
                 ts=datetime.now(UTC),
                 error=str(exc)[:500],
-                detail={"reason": "orchestrator_exception"},
+                detail={"reason": reason},
             )
         )
         async with async_session() as db:
@@ -1389,10 +1586,34 @@ async def _run_case_pipeline(case_id: UUID) -> None:
                 await db.commit()
         return
 
+    # Sprint 4 4.A3.7 — detect the saver's pending interrupt and emit
+    # InterruptEvent for the FE GateReviewPanel. The legacy
+    # `awaiting_review` PipelineProgressEvent below stays as a
+    # backwards-compat SSE close signal.
+    from src.pipeline.graph.resume import find_pending_interrupt
+    from src.services.pipeline_events import publish_interrupt
+
+    pending = await find_pending_interrupt(
+        GraphPipelineRunner()._graph,
+        {"configurable": {"thread_id": str(case_id)}},
+    )
+    paused_gate: str | None = pending[0] if pending else None
+    interrupt_payload: dict | None = pending[1] if pending else None
+
     gate_state_payload: dict | None = None
     gate_run_id: str | None = None
     status_val = final_state.status.value if final_state.status else ""
-    if status_val.startswith("awaiting_review_gate"):
+    if paused_gate is not None:
+        gate_num = int(paused_gate[-1])
+        gate_state_payload = {
+            "current_gate": gate_num,
+            "awaiting_review": True,
+            "rerun_agent": None,
+        }
+        gate_run_id = f"{case_id}-{paused_gate}"
+    elif status_val.startswith("awaiting_review_gate"):
+        # Legacy fallback for any code path that still writes the
+        # awaiting_review_gateN status into the CaseState directly.
         gate_num = int(status_val[-1])
         gate_state_payload = {
             "current_gate": gate_num,
@@ -1403,6 +1624,12 @@ async def _run_case_pipeline(case_id: UUID) -> None:
 
     async with async_session() as db:
         await persist_case_results(db, case_id, final_state, gate_state_payload=gate_state_payload)
+
+    if paused_gate is not None and interrupt_payload is not None:
+        # publish_interrupt UPSERTs case.status = awaiting_review_gateN
+        # and writes case.gate_state, so it must run after persist_case_results
+        # which writes case.status from final_state (still "processing").
+        await publish_interrupt(case_id, paused_gate, interrupt_payload)
 
     if gate_run_id and final_state.run_id:
         from src.db.pipeline_state import persist_case_state
@@ -1418,11 +1645,11 @@ async def _run_case_pipeline(case_id: UUID) -> None:
 
     # Close the SSE stream from the backend side: the frontend treats
     # `agent=pipeline` + `phase=awaiting_review|terminal` as the
-    # authoritative shutdown signal, but the sequential runner never
-    # emits it on its own. Without this, the browser holds an open
-    # EventSource well past the gate pause and never shows the gate
-    # review UI until the next poll tick catches up.
-    if status_val.startswith("awaiting_review_gate"):
+    # authoritative shutdown signal. The InterruptEvent above carries
+    # the gate-review payload; this event is the legacy compat signal
+    # for clients still keying off agent/phase only.
+    if paused_gate is not None or status_val.startswith("awaiting_review_gate"):
+        stopped_at = f"awaiting_review_{paused_gate}" if paused_gate else status_val
         close_event = PipelineProgressEvent(
             case_id=case_id,
             agent="pipeline",
@@ -1430,7 +1657,7 @@ async def _run_case_pipeline(case_id: UUID) -> None:
             step=None,
             total=9,
             ts=datetime.now(UTC),
-            detail={"reason": "gate_pause", "stopped_at": status_val},
+            detail={"reason": "gate_pause", "stopped_at": stopped_at},
         )
         await publish_progress(close_event)
 
@@ -1457,7 +1684,9 @@ async def process_case(
     current_user: CurrentUser,
 ) -> MessageResponse:
     result = await db.execute(
-        select(Case).where(Case.id == case_id).options(selectinload(Case.documents))
+        select(Case)
+        .where(Case.id == case_id)
+        .options(selectinload(Case.documents), selectinload(Case.parties))
     )
     case = result.scalar_one_or_none()
     if not case:
@@ -1467,6 +1696,24 @@ async def process_case(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Case has no uploaded documents",
+        )
+
+    # Q2.5: fail fast when intake confirmation never completed. Without
+    # parties OR a populated `intake_extraction.fields`, the intake
+    # agent has nothing to ground its output on and the run is
+    # guaranteed to halt — burning a status flip and an outbox row for
+    # nothing. Allow the run if either signal is present; Q2.3b will
+    # bridge `intake_extraction.fields` into CaseState so the agent can
+    # pick up where the judge stopped.
+    extraction = case.intake_extraction if isinstance(case.intake_extraction, dict) else None
+    extraction_fields = (extraction or {}).get("fields") or {}
+    if not case.parties and not extraction_fields:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Intake confirmation incomplete: complete the intake review "
+                "before processing"
+            ),
         )
 
     flip = await db.execute(
@@ -1510,11 +1757,11 @@ async def process_case(
 async def cancel_case_pipeline(
     case_id: UUID,
     db: DBSession,
-    current_user: CurrentUser,
+    current_user: User = require_role(UserRole.judge),
 ) -> MessageResponse:
     result = await db.execute(select(Case).where(Case.id == case_id))
     case = result.scalar_one_or_none()
-    if not case:
+    if case is None or case.created_by != current_user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
 
     if case.status != CaseStatus.processing:
@@ -1523,7 +1770,23 @@ async def cancel_case_pipeline(
             detail="Case is not currently processing",
         )
 
+    # Sprint 4 4.A3.9 — saver-halt is the primary cancel signal. The Redis
+    # cancel-flag is still written below so the legacy `_run_case_pipeline`
+    # run-end status detection (cases.py:~1394) keeps working until that
+    # path migrates fully.
+    from src.pipeline.graph.resume import cancel_via_halt
+    from src.pipeline.graph.runner import GraphPipelineRunner
     from src.services.pipeline_events import set_cancel_flag
+
+    runner = GraphPipelineRunner()
+    if runner._graph is not None:
+        config = {"configurable": {"thread_id": str(case_id)}}
+        await cancel_via_halt(
+            runner._graph,
+            config,
+            reason="cancelled by user",
+            by=str(current_user.id),
+        )
 
     await set_cancel_flag(case_id)
     return MessageResponse(message="Cancellation requested")
@@ -1618,6 +1881,35 @@ _NEXT_GATE: dict[str, str | None] = {
     "gate4": None,
 }
 
+#: Sprint 4 4.A3 — legacy gate names → unified ResumePayload phase. The
+#: worker keys off ``resume_action`` to choose the saver-driven path
+#: (`drive_resume`) over the legacy ``_run_gate_via_legacy`` path.
+_GATE_TO_PHASE: dict[str, str] = {
+    "gate1": "intake",
+    "gate2": "research",
+    "gate3": "synthesis",
+    "gate4": "audit",
+}
+
+#: Gate2 agent_name → unified ResearchPart subagent. Accepts both the
+#: legacy display names (`evidence-analysis`, …) and the LangGraph node
+#: IDs (`research-evidence`, …) so old and new clients both work. Other
+#: gates have no per-subagent granularity in the new topology, so a
+#: per-agent ``agent_name`` for those gates is dropped and a phase-level
+#: rerun is enqueued.
+_AGENT_TO_SUBAGENT: dict[str, str] = {
+    # Legacy display names
+    "evidence-analysis": "evidence",
+    "fact-reconstruction": "facts",
+    "witness-analysis": "witnesses",
+    "legal-knowledge": "law",
+    # LangGraph node IDs (canonical)
+    "research-evidence": "evidence",
+    "research-facts": "facts",
+    "research-witnesses": "witnesses",
+    "research-law": "law",
+}
+
 
 @router.post(
     "/{case_id}/gates/{gate_name}/advance",
@@ -1625,11 +1917,15 @@ _NEXT_GATE: dict[str, str | None] = {
     status_code=status.HTTP_202_ACCEPTED,
     operation_id="advance_gate",
     summary="Advance to the next pipeline gate",
+    description=(
+        "Sprint 4 4.A3 — thin wrapper around POST /respond with "
+        "action='advance'. Kept for clients that haven't migrated."
+    ),
 )
 async def advance_gate(
     case_id: UUID,
     gate_name: str,
-    body: GateAdvanceRequest,  # noqa: ARG001
+    body: GateAdvanceRequest,
     db: DBSession,
     current_user: User = require_role(UserRole.judge),
 ) -> MessageResponse:
@@ -1659,20 +1955,28 @@ async def advance_gate(
             detail="Gate 4 is the final gate; record a decision instead",
         )
 
+    audit_payload: dict[str, Any] = {"gate_name": gate_name, "next_gate": next_gate}
+    if body.notes:
+        audit_payload["notes"] = body.notes
     db.add(
         AuditLog(
             case_id=case_id,
             agent_name="judge",
             action="gate_advanced",
-            input_payload={"gate_name": gate_name, "next_gate": next_gate},
+            input_payload=audit_payload,
         )
     )
     case.status = CaseStatus.processing
+    job_payload: dict[str, Any] = {"gate_name": next_gate, "resume_action": "advance"}
+    if body.notes:
+        # Forward to the worker so the resume path can attach notes to the
+        # gate_advanced step's downstream audit entries — mirrors POST /respond.
+        job_payload["notes"] = body.notes
     await enqueue_outbox_job(
         db,
         case_id=case_id,
         job_type=PipelineJobType.gate_run,
-        payload={"gate_name": next_gate},
+        payload=job_payload,
     )
     await db.commit()
 
@@ -1685,6 +1989,12 @@ async def advance_gate(
     status_code=status.HTTP_202_ACCEPTED,
     operation_id="rerun_gate",
     summary="Re-run agents in the current gate from a specific agent",
+    description=(
+        "Sprint 4 4.A3 — thin wrapper around POST /respond with "
+        "action='rerun'. Maps legacy gate_name → phase and (gate2 only) "
+        "agent_name → subagent. Other gates' agent_name is dropped and "
+        "a phase-level rerun is enqueued."
+    ),
 )
 async def rerun_gate(
     case_id: UUID,
@@ -1694,7 +2004,7 @@ async def rerun_gate(
     current_user: User = require_role(UserRole.judge),
 ) -> MessageResponse:
     from src.models.pipeline_job import PipelineJobType
-    from src.pipeline.graph.prompts import GATE_AGENTS
+    from src.pipeline.graph.prompts import GATE_AGENTS as _LEGACY_GATE_AGENTS
     from src.workers.outbox import enqueue_outbox_job
 
     if gate_name not in _VALID_GATE_NAMES:
@@ -1713,11 +2023,21 @@ async def rerun_gate(
             detail=f"Case is not paused at {gate_name}",
         )
 
-    if body.agent_name and body.agent_name not in GATE_AGENTS[gate_name]:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Agent {body.agent_name!r} is not in {gate_name}",
+    # Accept both the legacy display names and the LangGraph node IDs
+    # for `agent_name`. Validation passes if the input matches either
+    # alphabet for the requested gate.
+    if body.agent_name:
+        accepted = set(_LEGACY_GATE_AGENTS.get(gate_name, [])) | set(
+            _MANIFEST_GATE_AGENTS.get(gate_name, [])
         )
+        if body.agent_name not in accepted:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Agent {body.agent_name!r} is not in {gate_name}",
+            )
+
+    phase = _GATE_TO_PHASE[gate_name]
+    subagent = _AGENT_TO_SUBAGENT.get(body.agent_name) if body.agent_name else None
 
     db.add(
         AuditLog(
@@ -1726,25 +2046,456 @@ async def rerun_gate(
             action="gate_rerun_requested",
             input_payload={
                 "gate_name": gate_name,
+                "phase": phase,
+                "subagent": subagent,
                 "start_agent": body.agent_name,
                 "has_instructions": bool(body.instructions),
             },
         )
     )
     case.status = CaseStatus.processing
+    job_payload: dict[str, Any] = {
+        "gate_name": gate_name,
+        "resume_action": "rerun",
+        "phase": phase,
+    }
+    if subagent is not None:
+        job_payload["subagent"] = subagent
+    if body.instructions:
+        # Carry the legacy `instructions` slot too — `_run_gate_via_legacy`
+        # still reads it for in-flight pre-cutover jobs (`workers/tasks.py`
+        # backwards-compat path).
+        job_payload["instructions"] = body.instructions
+        job_payload["notes"] = body.instructions
+    if body.agent_name:
+        job_payload["start_agent"] = body.agent_name
     await enqueue_outbox_job(
         db,
         case_id=case_id,
         job_type=PipelineJobType.gate_run,
-        payload={
-            "gate_name": gate_name,
-            "start_agent": body.agent_name,
-            "instructions": body.instructions,
-        },
+        payload=job_payload,
     )
     await db.commit()
 
     return MessageResponse(message=f"Re-running {gate_name}")
+
+
+# ---------------------------------------------------------------------------
+# Sprint 4 4.A3.15 — unified /respond endpoint
+# ---------------------------------------------------------------------------
+
+
+_PHASE_TO_GATE: dict[str, str] = {
+    "intake": "gate1",
+    "research": "gate2",
+    "synthesis": "gate3",
+    "audit": "gate4",
+}
+
+
+def _gate_for_phase(phase: str) -> str:
+    """Map ResumePayload phase to the gate that pauses after it."""
+    return _PHASE_TO_GATE[phase]
+
+
+async def _handle_message_resume(
+    case_id: UUID,
+    payload: ResumePayload,
+    db: DBSession,
+) -> MessageResponse:
+    """Q1.11 chat-steering — resume an agent paused on `ask_judge`.
+
+    Distinct from the gate-pause flow: the agent (today only synthesis)
+    is mid-phase, blocked inside its tool call. We:
+      1. Read the checkpointer for a pending `ask_judge` interrupt.
+      2. Verify the inbound `interrupt_id` matches — 409 if stale.
+      3. Append the Judge's reply to `judge_messages` via aupdate_state
+         so the chat thread persists across gates and reruns.
+      4. Schedule the actual `Command(resume=...)` drive as a background
+         task — the post-resume execution may run for many seconds, and
+         the Judge's HTTP request should not block on it.
+      5. Emit AgentResumedEvent so the frontend can clear the chat input
+         immediately, before the next llm_token frame lands.
+    """
+    import asyncio
+
+    from langchain_core.messages import HumanMessage
+    from langgraph.types import Command
+
+    from src.pipeline.graph.runner import GraphPipelineRunner
+    from src.services.pipeline_events import publish_agent_event
+
+    assert payload.text is not None and payload.interrupt_id is not None
+
+    runner = GraphPipelineRunner()
+    if runner._graph is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Graph runtime is in cloud mode; chat-steering not yet wired",
+        )
+
+    config = {"configurable": {"thread_id": str(case_id)}}
+
+    # 1 + 2: locate the pending ask_judge interrupt and validate id match.
+    snapshot = await runner._graph.aget_state(config)
+    pending_match: dict[str, Any] | None = None
+    for task in snapshot.tasks:
+        for interrupt in getattr(task, "interrupts", []) or []:
+            value = getattr(interrupt, "value", None)
+            if (
+                isinstance(value, dict)
+                and value.get("kind") == "ask_judge"
+                and value.get("interrupt_id") == payload.interrupt_id
+            ):
+                pending_match = value
+                break
+        if pending_match is not None:
+            break
+
+    if pending_match is None:
+        # Either no pending ask_judge interrupt, or the id has already
+        # been resolved (typical cause: double-click / network retry).
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="No pending ask_judge interrupt matches that interrupt_id",
+        )
+
+    # 3 + 4. Atomic state-update + resume. We MUST do both in one
+    # `Command(update=..., resume=...)` — calling `aupdate_state` first
+    # would fork state and clear the pending interrupt, after which
+    # `ainvoke(Command(resume=...))` has nothing to resume against.
+    # `add_messages` (the reducer on judge_messages) appends.
+    async def _drive_resume() -> None:
+        from datetime import UTC as _UTC, datetime as _datetime
+
+        from src.api.schemas.pipeline_events import PipelineProgressEvent
+        from src.db.persist_case_results import persist_case_results
+        from src.pipeline.graph.resume import (
+            find_pending_chat_interrupt,
+            find_pending_interrupt,
+        )
+        from src.services.database import async_session
+        from src.services.pipeline_events import (
+            publish_interrupt as _publish_interrupt,
+            publish_progress as _publish_progress,
+        )
+        from src.shared.case_state import CaseStatusEnum as _CaseStatusEnum
+
+        try:
+            await runner._graph.ainvoke(
+                Command(
+                    update={
+                        "judge_messages": [HumanMessage(content=payload.text)]
+                    },
+                    resume={"text": payload.text},
+                ),
+                config=config,
+            )
+        except Exception:
+            logger.exception(
+                "ask_judge resume failed for case=%s interrupt_id=%s",
+                case_id,
+                payload.interrupt_id,
+            )
+            return
+
+        # Post-resume: detect what the graph paused on next so the case
+        # row + SSE stream stay coherent. Without this, a chat reply that
+        # triggers gate3_pause would leave case.status=processing forever
+        # because no follow-up path persists the gate state. Mirrors the
+        # outcome handling in workers.tasks._run_gate_via_resume.
+        try:
+            chat = await find_pending_chat_interrupt(runner._graph, config)
+            if chat is not None:
+                # Another ask_judge interrupt — its question event was
+                # published from inside the tool; nothing for us to do.
+                return
+
+            pending = await find_pending_interrupt(runner._graph, config)
+            snapshot = await runner._graph.aget_state(config)
+            final_state = snapshot.values["case"]
+
+            if pending is None:
+                # Run reached terminal (rare from a chat reply — would
+                # require synthesis to be the last node before END).
+                halt = snapshot.values.get("halt") or {}
+                terminal_status = (
+                    _CaseStatusEnum.failed if halt else _CaseStatusEnum.closed
+                )
+                final_state = final_state.model_copy(update={"status": terminal_status})
+                async with async_session() as db_:
+                    await persist_case_results(db_, case_id, final_state)
+                await _publish_progress(
+                    PipelineProgressEvent(
+                        case_id=case_id,
+                        agent="pipeline",
+                        phase="terminal",
+                        ts=_datetime.now(_UTC),
+                        detail={
+                            "reason": halt.get("reason", "completed") if halt else "completed",
+                            "stopped_at": halt.get("gate") if halt else "end",
+                        },
+                    )
+                )
+                return
+
+            gate, interrupt_payload = pending
+            gate_num = int(gate[-1])
+            gate_state_payload = {
+                "current_gate": gate_num,
+                "awaiting_review": True,
+                "rerun_agent": None,
+            }
+            async with async_session() as db_:
+                await persist_case_results(
+                    db_, case_id, final_state, gate_state_payload=gate_state_payload
+                )
+            if interrupt_payload is not None:
+                await _publish_interrupt(case_id, gate, interrupt_payload)
+            await _publish_progress(
+                PipelineProgressEvent(
+                    case_id=case_id,
+                    agent="pipeline",
+                    phase="awaiting_review",
+                    ts=_datetime.now(_UTC),
+                    detail={"gate": gate, "stopped_at": f"awaiting_review_{gate}"},
+                )
+            )
+        except Exception:
+            logger.exception(
+                "post-chat-reply outcome handling failed for case=%s",
+                case_id,
+            )
+
+    asyncio.create_task(_drive_resume())
+
+    # Audit log + 5. SSE resumed-event in parallel with the background task.
+    db.add(
+        AuditLog(
+            case_id=case_id,
+            agent_name="judge",
+            action="agent_message",
+            input_payload={
+                "interrupt_id": payload.interrupt_id,
+                "text_chars": len(payload.text),
+            },
+        )
+    )
+    await db.commit()
+
+    await publish_agent_event(
+        str(case_id),
+        {
+            "kind": "agent",
+            "case_id": str(case_id),
+            "agent": "synthesis",
+            "event": "agent_resumed",
+            "interrupt_id": payload.interrupt_id,
+            "ts": datetime.now(UTC).isoformat(),
+        },
+    )
+
+    return MessageResponse(message="Reply delivered; agent resumed")
+
+
+@router.post(
+    "/{case_id}/respond",
+    response_model=MessageResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    operation_id="respond_to_gate",
+    summary="Unified gate-resume endpoint (advance / rerun / halt / send_back / message)",
+)
+async def respond_to_gate(
+    case_id: UUID,
+    payload: ResumePayload,
+    db: DBSession,
+    current_user: User = require_role(UserRole.judge),
+) -> MessageResponse:
+    """Single endpoint handling all four judge gate-resume actions.
+
+    Authorization: judge owns the case (404 on miss — no enumeration).
+    Validation: action must be valid for the current gate (409 otherwise).
+    Behaviour: enqueues a gate_run worker job carrying the resume payload.
+    The worker translates the payload into ``Command(resume=...)`` against
+    the saver-checkpointed thread.
+
+    The legacy ``/advance`` and ``/rerun`` endpoints stay as thin wrappers
+    that target this same code path; ``/respond`` is the source-of-truth
+    for the FE ``<GateReviewPanel>``. ``send_back`` requires the worker
+    rewrite (4.A3.5/4.A3.14) and currently returns 501.
+    """
+    from src.models.pipeline_job import PipelineJobType
+    from src.workers.outbox import enqueue_outbox_job
+
+    case = (await db.execute(select(Case).where(Case.id == case_id))).scalar_one_or_none()
+    if case is None or case.created_by != current_user.id:
+        # Same response shape — judge enumeration is not allowed.
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
+
+    # Q1.11 chat-steering: action="message" replies to an agent-initiated
+    # ask_judge interrupt mid-phase. The case status is `processing` at
+    # this point, NOT awaiting_review_* — the gate-pause guard below would
+    # reject it. Handle this branch first so the rest of the endpoint sees
+    # only gate-paused cases.
+    if payload.action == "message":
+        return await _handle_message_resume(case_id, payload, db)
+
+    if case.status not in _GATE_PAUSE_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Case is not paused at any gate",
+        )
+
+    current_gate = case.status.value.removeprefix("awaiting_review_")
+    if current_gate not in _VALID_GATE_NAMES:
+        # Defensive — _GATE_PAUSE_STATUSES guarantees this, but pin the invariant.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Unrecognised pause status {case.status.value!r}",
+        )
+
+    # Action vs current-gate compatibility — gate4 cannot 'advance' (it is END).
+    if payload.action == "advance" and current_gate == "gate4":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Gate 4 is the final gate; record a decision instead",
+        )
+
+    # send_back (Sprint 4 4.A3.14) — rewind the LangGraph thread to the
+    # gate pause that follows the target phase, fork via update_state,
+    # then resume with action=rerun so the apply node re-runs the
+    # target phase. The current head moves to the rewound point; later
+    # checkpoints stay reachable via get_state_history for audit.
+    if payload.action == "send_back":
+        from src.pipeline.graph.resume import send_back_to_phase
+        from src.pipeline.graph.runner import GraphPipelineRunner
+
+        assert payload.to_phase is not None  # ResumePayload validator guarantees
+        runner = GraphPipelineRunner()
+        if runner._graph is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Graph runtime is in cloud mode; send_back not yet wired",
+            )
+        graph_config = {"configurable": {"thread_id": str(case_id)}}
+        try:
+            new_pause_gate = await send_back_to_phase(
+                runner._graph,
+                graph_config,
+                to_phase=payload.to_phase,
+                notes=payload.notes,
+            )
+        except RuntimeError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=str(exc),
+            ) from exc
+
+        db.add(
+            AuditLog(
+                case_id=case_id,
+                agent_name="judge",
+                action="gate_send_back",
+                input_payload={
+                    "from_gate": current_gate,
+                    "to_phase": payload.to_phase,
+                    "notes": payload.notes,
+                    "new_pause_gate": new_pause_gate,
+                },
+            )
+        )
+        if new_pause_gate is not None and new_pause_gate.startswith("gate"):
+            new_status = f"awaiting_review_{new_pause_gate}"
+            try:
+                case.status = CaseStatus(new_status)
+            except ValueError:
+                case.status = CaseStatus.processing
+        else:
+            case.status = CaseStatus.processing
+        await db.commit()
+        return MessageResponse(
+            message=f"Sent back to {payload.to_phase}; paused at {new_pause_gate or 'end'}"
+        )
+
+    # halt — short-circuit; cancel rather than enqueue.
+    if payload.action == "halt":
+        db.add(
+            AuditLog(
+                case_id=case_id,
+                agent_name="judge",
+                action="gate_halt",
+                input_payload={"gate": current_gate, "notes": payload.notes},
+            )
+        )
+        case.status = CaseStatus.failed
+        await db.commit()
+        return MessageResponse(message=f"Halted at {current_gate}")
+
+    # advance / rerun — same outbox enqueue path as legacy endpoints.
+    audit_action = "gate_advanced" if payload.action == "advance" else "gate_rerun_requested"
+    audit_input: dict[str, Any] = {
+        "gate": current_gate,
+        "action": payload.action,
+        "notes": payload.notes,
+    }
+    if payload.action == "rerun":
+        audit_input["phase"] = payload.phase
+        audit_input["subagent"] = payload.subagent
+        audit_input["has_field_corrections"] = payload.field_corrections is not None
+    db.add(
+        AuditLog(
+            case_id=case_id,
+            agent_name="judge",
+            action=audit_action,
+            input_payload=audit_input,
+        )
+    )
+
+    case.status = CaseStatus.processing
+
+    if payload.action == "advance":
+        next_gate = _NEXT_GATE[current_gate]
+        if next_gate is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Gate 4 is the final gate; record a decision instead",
+            )
+        await enqueue_outbox_job(
+            db,
+            case_id=case_id,
+            job_type=PipelineJobType.gate_run,
+            payload={
+                "gate_name": next_gate,
+                "resume_action": "advance",
+                "notes": payload.notes,
+            },
+        )
+        await db.commit()
+        return MessageResponse(message=f"Advancing to {next_gate}")
+
+    # action == "rerun"
+    job_payload: dict[str, Any] = {
+        "gate_name": current_gate,
+        "resume_action": "rerun",
+        "phase": payload.phase,
+        "notes": payload.notes,
+    }
+    if payload.subagent is not None:
+        job_payload["subagent"] = payload.subagent
+    if payload.field_corrections is not None:
+        job_payload["field_corrections"] = payload.field_corrections
+    # Carry instructions in the legacy slot so the existing worker still
+    # reads them while the saver-driven rewrite is in flight.
+    if payload.notes:
+        job_payload["instructions"] = payload.notes
+    await enqueue_outbox_job(
+        db,
+        case_id=case_id,
+        job_type=PipelineJobType.gate_run,
+        payload=job_payload,
+    )
+    await db.commit()
+    return MessageResponse(message=f"Re-running {current_gate}")
 
 
 @router.post(

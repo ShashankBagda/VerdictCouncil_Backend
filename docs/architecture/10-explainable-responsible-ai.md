@@ -2,7 +2,7 @@
 
 VerdictCouncil is a decision-support system for a **judicial** context — the highest-stakes use of AI this course will touch. Every design decision in the backend is filtered through an Explainable & Responsible AI (ERAI) lens. This document maps our practices to each life-cycle stage and to the IMDA Model AI Governance Framework.
 
-> **Live vs target.** This document describes the canonical architecture that underwrites our ERAI posture (per-agent container topology, NetworkPolicy, HMAC-signed inter-service calls, etc.). The MVP ship state is mono-process; see the **Implementation Status** callouts in [Part 2 §2.2](02-system-architecture.md#22-orchestration-platform), [Part 6 §6.6](06-cicd-pipeline.md#66-kubernetes-manifests), and [Part 8 §8.3.3](08-infrastructure-setup.md#833-node-pool-sizing) for the current gap between canonical and deployed. Controls marked below that depend on the per-agent topology (privilege separation via NetworkPolicy, HMAC-signed dispatch, per-agent NetworkPolicy lateral-movement containment) are in the target tier; logical privilege separation is preserved even in mono-process mode via the `_merge_case` reducer and per-agent schema validation, but the network-layer enforcement is target work.
+> **Live vs target.** This document describes the canonical architecture that underwrites our ERAI posture (per-agent container topology, NetworkPolicy, HMAC-signed inter-service calls, etc.). The MVP ship state is mono-process; see the **Implementation Status** callouts in [Part 2 §2.2](02-system-architecture.md#22-orchestration-platform), [Part 6 §6.5](06-cicd-pipeline.md#65-kubernetes-manifests), and [Part 8 §8.3.3](08-infrastructure-setup.md#833-node-pool-sizing) for the current gap between canonical and deployed. Controls marked below that depend on the per-agent topology (privilege separation via NetworkPolicy, HMAC-signed dispatch, per-agent NetworkPolicy lateral-movement containment) are in the target tier; logical privilege separation is preserved even in mono-process mode via the `_merge_case` reducer and per-agent schema validation, but the network-layer enforcement is target work.
 
 ---
 
@@ -31,9 +31,9 @@ VerdictCouncil is a decision-support system for a **judicial** context — the h
 
 ### 10.2.3 Deployment
 
-- **Per-agent containers with blast-radius limits** (see [Part 6 §6.6](06-cicd-pipeline.md#66-kubernetes-manifests)). A compromised `evidence-analysis` pod cannot reach `hearing-governance` — they are separate Services, gated by NetworkPolicy, and can't discover each other.
+- **Per-agent containers with blast-radius limits** (see [Part 6 §6.5](06-cicd-pipeline.md#65-kubernetes-manifests)). A compromised `evidence-analysis` pod cannot reach `hearing-governance` — they are separate Services, gated by NetworkPolicy, and can't discover each other.
 - **Deployments are trunk-based with gitflow in the backend** (see `CLAUDE.md`). Changes to prompts, schemas, or agent logic land on `main` only after CI (lint + unit + SAST + SCA + DAST + docker build) passes.
-- **Secrets are rendered at deploy time** (see [Part 6 §6.4–§6.5](06-cicd-pipeline.md#64-staging-deploy-workflow-live)) — nothing sensitive lives in the image or the repo.
+- **Secrets are rendered at deploy time** (see [Part 6 §6.4](06-cicd-pipeline.md#64-deploy-workflow-live)) — nothing sensitive lives in the image or the repo.
 
 ### 10.2.4 Monitoring + feedback
 
@@ -100,7 +100,7 @@ Mapping to the IMDA framework's four organising principles:
 
 | Principle | How we address it | Where |
 |---|---|---|
-| **Accountability** | A named judge must sign every decision; admin actions are logged to `admin_events`; per-agent MLflow runs link every inference to a deployed image tag and prompt version | [US-025](01-user-stories.md#us-025--record-the-judicial-decision), `src/models/admin_event.py`, [Part 6 §6.5](06-cicd-pipeline.md#65-production-deploy-workflow-live) |
+| **Accountability** | A named judge must sign every decision; admin actions are logged to `admin_events`; per-agent MLflow runs link every inference to a deployed image tag and prompt version | [US-025](01-user-stories.md#us-025--record-the-judicial-decision), `src/models/admin_event.py`, [Part 6 §6.4](06-cicd-pipeline.md#64-deploy-workflow-live) |
 | **Human Oversight** | Four mandatory review gates with an HITL pause at each. The system is advisory-only; no endpoint exists that emits a binding outcome without judge action | [Part 2 §2.7](02-system-architecture.md#27-security-and-prompt-injection-defenses) "Human-in-the-Loop (4-Gate HITL)" |
 | **Operations Management** | CI/CD gates (lint, unit, SAST, SCA, DAST), K8s Deployment rollout, stuck-case watchdog CronJob, MLflow drift tracking, per-run checkpoints | [Part 6](06-cicd-pipeline.md), [Part 8 §8.12](08-infrastructure-setup.md#812-monitoring--alerting) |
 | **Stakeholder Interaction** | Judge gets full reasoning chain + audit trail + source anchors + what-if + stability scores; admin gets KB controls + cost alerts + system health; UI shows calibration disclaimer next to every AI-produced score | [Part 1 §1.3–§1.10](01-user-stories.md#13-evidence--facts-judge) |

@@ -2,11 +2,43 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from dataclasses import dataclass
+from typing import Annotated, Any, Generic, TypeVar
 
 from typing_extensions import TypedDict
 
+from langchain_core.messages import BaseMessage
+from langgraph.graph.message import add_messages
+
+from src.pipeline.graph.schemas import (
+    AuditOutput,
+    IntakeOutput,
+    ResearchOutput,
+    ResearchPart,
+    SynthesisOutput,
+)
 from src.shared.case_state import AuditEntry, CaseState
+
+_T = TypeVar("_T")
+
+
+@dataclass(frozen=True)
+class Overwrite(Generic[_T]):  # noqa: UP046 — PEP 695 + frozen dataclass interplay is unsettled on 3.12; keep classic Generic syntax
+    """Sentinel that bypasses the parallel-safe ``_merge_case`` semantics.
+
+    The default ``_merge_case`` rule "if update is empty, keep base" is
+    correct for parallel Gate-2 branches that only own a slice of the
+    case — but it actively masks deliberate clears (e.g. the What-If
+    fork seeding a stripped CaseState). Wrapping the update in
+    :class:`Overwrite` instructs the reducer to take the new value
+    verbatim, mirroring LangGraph's documented escape hatch for
+    accumulator-style channels.
+
+    Used by ``services/whatif/fork.create_whatif_fork`` when calling
+    ``aupdate_state(fork_config, {"case": Overwrite(modified)}, …)``.
+    """
+
+    value: _T
 
 
 def _merge_retry_counts(base: dict[str, int], update: dict[str, int]) -> dict[str, int]:
@@ -22,16 +54,42 @@ def _merge_retry_counts(base: dict[str, int], update: dict[str, int]) -> dict[st
     return merged
 
 
-def _merge_dicts(base: dict, update: dict) -> dict:
-    """Reducer for dict fields written by parallel branches: shallow union.
+def _merge_research_parts(
+    base: dict[str, ResearchPart],
+    update: dict[str, ResearchPart],
+) -> dict[str, ResearchPart]:
+    """Reducer for the dict-keyed `research_parts` accumulator (1.A1.5 / SA F-2).
 
-    Later writes for the same key win. Prevents parallel Gate-2 nodes from
-    clobbering each other's entries via last-writer-wins.
+    Each research subagent writes `{"research_parts": {scope: ResearchPart(...)}}`.
+    The reducer is a shallow dict union keyed by scope name, so re-running a
+    single scope (e.g. judge-driven rerun) naturally overwrites that key
+    without a sentinel reset. Out-of-band wholesale resets go through
+    `update_state(..., values, as_node=...)` with `Overwrite`.
     """
     return {**base, **update}
 
 
-def _merge_case(base: CaseState, update: CaseState) -> CaseState:
+def _merge_source_ids(
+    base: dict[str, list[str]],
+    update: dict[str, list[str]],
+) -> dict[str, list[str]]:
+    """Reducer for `retrieved_source_ids` — dict-keyed by scope/phase (Sprint 3 3.B.5).
+
+    Each phase or research-scope agent contributes a list of citation
+    source_ids it retrieved via tool calls, keyed by its own
+    scope/phase name (`law`, `evidence`, `intake`, `synthesis`, …).
+    Re-running a single scope (judge-driven /rerun) overwrites that
+    key — stale source_ids cannot accumulate across runs and the
+    research_join validator's supported-citation check stays tight.
+
+    Mirrors the dict-by-scope contract on `research_parts`: each scope
+    owns its slot, so a rerun resets the scope without leaking
+    stale data into other parallel branches.
+    """
+    return {**base, **update}
+
+
+def _merge_case(base: CaseState, update: CaseState | Overwrite[CaseState]) -> CaseState:
     """Reducer for the 'case' field in GraphState.
 
     Sequential nodes: update contains the full new state; changed fields are applied.
@@ -44,7 +102,16 @@ def _merge_case(base: CaseState, update: CaseState) -> CaseState:
     4. Both differ and both non-empty → apply update (sequential override, last-writer-wins).
 
     audit_log is always extended with entries not already present in base (dedup by equality).
+
+    The :class:`Overwrite` sentinel short-circuits the merge — the
+    wrapped value replaces base entirely. Used by What-If fork seeding
+    where the judge's modifications must land verbatim, including
+    deliberate field clears that the parallel-safe rules would otherwise
+    discard.
     """
+    if isinstance(update, Overwrite):
+        return update.value
+
     base_data = base.model_dump()
     update_data = update.model_dump()
     merged: dict[str, Any] = dict(base_data)
@@ -88,7 +155,7 @@ class GraphState(TypedDict):
 
     case: Annotated[CaseState, _merge_case]
 
-    # Passed through from the dispatch call — used by nodes for MLflow and SSE
+    # Passed through from the dispatch call — used by nodes for tracing and SSE
     run_id: str
 
     # Per-agent extra instructions injected at retry time
@@ -101,12 +168,46 @@ class GraphState(TypedDict):
     # Set by any node that escalates or halts the pipeline
     halt: dict[str, Any] | None
 
-    # MLflow run IDs written by each node after its agent_run() context manager exits
-    # Value is (mlflow_run_id, experiment_id)
-    mlflow_run_ids: Annotated[dict[str, tuple[str, str]], _merge_dicts]
+    # Research fan-out accumulator (1.A1.5). Subagents write
+    # `{scope: ResearchPart(...)}`; the reducer dict-merges by scope so
+    # parallel branches and judge-driven reruns coexist cleanly.
+    research_parts: Annotated[dict[str, ResearchPart], _merge_research_parts]
+
+    # Citation source_ids retrieved by every tool call across the run
+    # (Sprint 3 3.B.5). Dict-keyed by scope/phase so a judge-driven
+    # rerun of a single scope overwrites only that scope's source_ids
+    # without orphaning stale entries the validator would otherwise
+    # accept. Research_join flattens dict.values() before passing to
+    # the validator's set-membership check.
+    retrieved_source_ids: Annotated[dict[str, list[str]], _merge_source_ids]
+
+    # Output of `research_join_node` (1.A1.5). Default LWW semantics — the
+    # join writes once per pipeline run and a re-entered join overwrites.
+    research_output: ResearchOutput | None
+
+    # Phase-output state slots (1.A1.7). Written by `make_phase_node(...)`
+    # via the factory's `{phase}_output` return shape; consumed by gate
+    # pauses (snapshot-for-judge) and by Sprint 2 case-state integration.
+    # LWW semantics — each phase writes once per pipeline run.
+    intake_output: IntakeOutput | None
+    synthesis_output: SynthesisOutput | None
+    audit_output: AuditOutput | None
+
+    # Carrier for the judge's gate decision (1.A1.7). The pause node writes
+    # the `interrupt()` return value here; the apply node reads it, derives
+    # the next-node target, and clears the slot. LWW.
+    pending_action: dict[str, Any] | None
 
     # True when resuming from a checkpoint (skip already-completed gates)
     is_resume: bool
 
     # When set, graph execution begins from this node instead of case_processing
     start_agent: str | None
+
+    # Append-only chat log between agents and the judge (Q1.11 chat-steering).
+    # AIMessages are agent questions raised via the `ask_judge` tool; HumanMessages
+    # are judge replies posted to /respond with action="message". Phase agents
+    # surface this list in their input payload so prior thread context survives
+    # across gates. Reducer is `add_messages` (LangGraph stdlib): dedupes by id,
+    # appends otherwise — replay-safe by construction.
+    judge_messages: Annotated[list[BaseMessage], add_messages]
