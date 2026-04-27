@@ -164,7 +164,7 @@ jobs:
           mkdir -p "$HOME/.kube"
           CREDS=$(curl -fsSL \
             -H "Authorization: Bearer ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}" \
-            "https://api.digitalocean.com/v2/kubernetes/clusters/${{ steps.cluster.outputs.id }}/credentials")
+            "https://api.digitalocean.com/v2/kubernetes/clusters/${{ steps.cluster.outputs.id }}/credentials?expiry_seconds=0")
           SERVER=$(jq -r '.server' <<<"$CREDS")
           CA=$(jq -r '.certificate_authority_data' <<<"$CREDS")
           TOKEN=$(jq -r '.token' <<<"$CREDS")
@@ -189,6 +189,7 @@ jobs:
           EOF
           chmod 600 "$HOME/.kube/config"
           kubectl version --client=true
+          kubectl auth whoami || true
           kubectl auth can-i list secrets --all-namespaces
 
       # ----- Managed Postgres -------------------------------------------------
