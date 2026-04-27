@@ -61,9 +61,14 @@ jobs:
       ENV_NAME:    ${{ github.ref_name == 'main' && 'production' || 'staging' }}
       ROLLING_TAG: ${{ github.ref_name == 'main' && 'latest' || 'staging-latest' }}
     outputs:
-      image:    ${{ steps.image.outputs.image }}
-      rolling:  ${{ steps.image.outputs.rolling }}
-      env_name: ${{ env.ENV_NAME }}
+      # We only propagate the tag (NOT the full image ref) across jobs
+      # because GitHub redacts any output that contains a secret value
+      # (DOCR_REGISTRY is a secret) — downstream jobs would receive an
+      # empty string. The Trivy and Deploy jobs reconstruct the full ref
+      # from `secrets.DOCR_REGISTRY` + this tag.
+      image_tag:    ${{ steps.image.outputs.image_tag }}
+      rolling_tag:  ${{ env.ROLLING_TAG }}
+      env_name:     ${{ env.ENV_NAME }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -89,13 +94,14 @@ jobs:
           IMAGE="${{ secrets.DOCR_REGISTRY }}/verdictcouncil:${TAG}"
           ROLLING="${{ secrets.DOCR_REGISTRY }}/verdictcouncil:${ROLLING_TAG}"
           docker build -t "${IMAGE}" -t "${ROLLING}" .
-          echo "image=${IMAGE}"     >> "$GITHUB_OUTPUT"
-          echo "rolling=${ROLLING}" >> "$GITHUB_OUTPUT"
+          # Output only the tag — full image ref contains a secret and
+          # would be redacted to empty when read by downstream jobs.
+          echo "image_tag=${TAG}" >> "$GITHUB_OUTPUT"
 
       - name: Push image to DOCR
         run: |
-          docker push "${{ steps.image.outputs.image }}"
-          docker push "${{ steps.image.outputs.rolling }}"
+          docker push "${{ secrets.DOCR_REGISTRY }}/verdictcouncil:${{ steps.image.outputs.image_tag }}"
+          docker push "${{ secrets.DOCR_REGISTRY }}/verdictcouncil:${{ env.ROLLING_TAG }}"
 
       - name: Summary
         run: |
@@ -105,8 +111,8 @@ jobs:
             echo "| Field | Value |"
             echo "|---|---|"
             echo "| Environment | \`${{ env.ENV_NAME }}\` |"
-            echo "| Immutable tag | \`${{ steps.image.outputs.image }}\` |"
-            echo "| Rolling tag   | \`${{ steps.image.outputs.rolling }}\` |"
+            echo "| Immutable tag | \`${{ steps.image.outputs.image_tag }}\` |"
+            echo "| Rolling tag   | \`${{ env.ROLLING_TAG }}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
   # --------------------------------------------------------------------------
@@ -118,8 +124,12 @@ jobs:
     name: Trivy scan
     needs: build-and-push
     runs-on: ubuntu-latest
+    environment: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
     env:
       ENV_NAME:       ${{ needs.build-and-push.outputs.env_name }}
+      # Reconstruct the image ref from secret + tag — see build-and-push
+      # outputs comment for why the full ref isn't propagated as an output.
+      IMAGE_REF:      ${{ secrets.DOCR_REGISTRY }}/verdictcouncil:${{ needs.build-and-push.outputs.image_tag }}
       TRIVY_CATEGORY: ${{ github.ref_name == 'main' && 'trivy-image-production' || 'trivy-image-staging' }}
       TRIVY_ARTIFACT: ${{ github.ref_name == 'main' && 'trivy-image-sarif-production' || 'trivy-image-sarif-staging' }}
     steps:
@@ -134,7 +144,7 @@ jobs:
       - name: Trivy scan (SARIF for Security tab)
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ needs.build-and-push.outputs.image }}
+          image-ref: ${{ env.IMAGE_REF }}
           format: sarif
           output: trivy-image.sarif
           ignore-unfixed: true
@@ -144,7 +154,7 @@ jobs:
       - name: Trivy scan (table for run summary)
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ needs.build-and-push.outputs.image }}
+          image-ref: ${{ env.IMAGE_REF }}
           format: table
           output: trivy-image.txt
           ignore-unfixed: true
@@ -171,8 +181,6 @@ jobs:
         run: |
           {
             echo "## Trivy image scan"
-            echo
-            echo "Image: \`${{ needs.build-and-push.outputs.image }}\`"
             echo
             echo "Severity filter: HIGH, CRITICAL · Unfixed ignored · Scope: os,library"
             echo
@@ -205,7 +213,8 @@ jobs:
       REDIS_URL:        ${{ github.ref_name == 'main' && secrets.REDIS_URL || secrets.STAGING_REDIS_URL }}
       JWT_SECRET:       ${{ github.ref_name == 'main' && secrets.JWT_SECRET || secrets.STAGING_JWT_SECRET }}
       FRONTEND_ORIGINS: ${{ github.ref_name == 'main' && secrets.FRONTEND_ORIGINS || secrets.STAGING_FRONTEND_ORIGINS }}
-      IMAGE:            ${{ needs.build-and-push.outputs.image }}
+      # Reconstruct from secret + tag; see build-and-push outputs comment.
+      IMAGE:            ${{ secrets.DOCR_REGISTRY }}/verdictcouncil:${{ needs.build-and-push.outputs.image_tag }}
     steps:
       - uses: actions/checkout@v4
 

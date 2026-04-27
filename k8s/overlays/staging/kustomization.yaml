@@ -10,7 +10,7 @@ patches:
     patch: |
       - op: replace
         path: /spec/rules/0/host
-        value: staging-api.verdictcouncil.sg
+        value: 165.245.144.28.nip.io
       - op: replace
         path: /spec/tls/0/hosts/0
-        value: staging-api.verdictcouncil.sg
+        value: 165.245.144.28.nip.io

@@ -12,10 +12,10 @@ spec:
   ingressClassName: nginx
   tls:
     - hosts:
-        - api.verdictcouncil.sg
+        - 165.245.144.28.nip.io
       secretName: verdictcouncil-tls
   rules:
-    - host: api.verdictcouncil.sg
+    - host: 165.245.144.28.nip.io
       http:
         paths:
           - path: /api/v1

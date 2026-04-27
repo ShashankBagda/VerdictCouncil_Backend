@@ -276,7 +276,7 @@ jobs:
           spec:
             acme:
               server: https://acme-v02.api.letsencrypt.org/directory
-              email: ops@verdictcouncil.sg
+              email: team@ezpz.fi
               privateKeySecretRef:
                 name: letsencrypt-prod-account-key
               solvers:
@@ -333,7 +333,7 @@ jobs:
             echo
             echo "### Next steps"
             echo
-            echo "1. Create a DNS A record pointing the relevant hostname (\`staging-api.verdictcouncil.sg\` or \`api.verdictcouncil.sg\`) at \`${{ steps.lb.outputs.ip }}\`."
+            echo "1. The Ingress is configured for \`<lb-ip>.nip.io\` — that hostname resolves automatically; no DNS record needed. If you later register a real domain, point an A record at \`${{ steps.lb.outputs.ip }}\` and update \`k8s/base/ingress.yaml\` + the FE's \`VITE_API_URL\`."
             echo "2. Set the human-input secrets if not already present:"
             echo "   \`OPENAI_API_KEY\`, \`OPENAI_VECTOR_STORE_ID\`, \`JWT_SECRET\` (or \`STAGING_JWT_SECRET\`), \`FRONTEND_ORIGINS\` (or \`STAGING_FRONTEND_ORIGINS\`), \`LANGSMITH_API_KEY\` (optional)."
             echo "3. Push to \`development\` (staging) or \`main\` (production) to trigger a deploy."
