@@ -61,6 +61,7 @@ def _make_case(created_by: uuid.UUID, **overrides) -> MagicMock:
         "hearing_analyses": [],
         "reopen_requests": [],
         "audit_logs": [],
+        "judicial_decision": None,
     }
     defaults.update(overrides)
     case = MagicMock(spec=Case)

@@ -228,12 +228,33 @@ def _make_divergence_aware_phase_factory():
                     for e in case.evidence_analysis.evidence_items
                 )
             verdict = "not_liable" if excluded else "liable"
+            # Re-seed extracted_facts / evidence_analysis: research_join_node
+            # mirrors the (empty) ResearchOutput onto the case and the
+            # _merge_case reducer takes the empty container as last-writer.
+            # Synthesis is the terminal node, so seeding here gives
+            # ``identify_perturbations`` something to work with.
+            existing_facts = case.extracted_facts.facts if case.extracted_facts else []
+            existing_evidence = (
+                case.evidence_analysis.evidence_items if case.evidence_analysis else []
+            )
+            facts_payload = existing_facts or [
+                {"id": "f-1", "status": "agreed"},
+                {"id": "f-2", "status": "disputed"},
+            ]
+            evidence_payload = existing_evidence or [
+                {"id": "e-1"},
+                {"id": "e-2"},
+            ]
             new_case = case.model_copy(
                 update={
                     "hearing_analysis": HearingAnalysis(
                         preliminary_conclusion=verdict,
                         confidence_score=80,
-                    )
+                    ),
+                    "extracted_facts": ExtractedFacts(facts=facts_payload),
+                    "evidence_analysis": EvidenceAnalysis(
+                        evidence_items=evidence_payload
+                    ),
                 }
             )
             return {"case": new_case}

@@ -221,7 +221,7 @@ class TestSearchDomainGuidanceTool:
         mock_fn.assert_called_once_with(
             query="speed limits",
             vector_store_id="vs-abc",
-            max_results=5,
+            max_results=25,
         )
         # content_and_artifact: ainvoke({args}) surfaces only the content string.
         # Full artifact path is exercised in test_tool_artifact.

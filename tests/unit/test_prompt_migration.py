@@ -64,7 +64,11 @@ def test_push_one_unchanged_when_remote_matches_local() -> None:
     local = _load_local("intake.md")
 
     # Mock the remote pull to return a template that wraps the same content.
-    fake_template = ChatPromptTemplate.from_messages([("system", local)])
+    # Mustache format mirrors `_build_template` so JSON braces in the prompt
+    # body are not parsed as f-string placeholders.
+    fake_template = ChatPromptTemplate.from_messages(
+        [("system", local)], template_format="mustache"
+    )
     client.pull_prompt.return_value = fake_template
 
     action = _push_one(

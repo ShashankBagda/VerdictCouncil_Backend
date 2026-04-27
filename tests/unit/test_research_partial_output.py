@@ -13,6 +13,7 @@ from datetime import datetime
 import pytest
 
 from src.pipeline.graph.research import research_join_node
+from src.shared.case_state import CaseState
 from src.pipeline.graph.schemas import (
     EvidenceResearch,
     FactsResearch,
@@ -132,6 +133,7 @@ def test_join_node_with_three_of_four_parts_yields_partial_output():
             "facts": _facts_part(),
             "law": _law_part(),
         },
+        "case": CaseState(case_id="case-three-of-four"),
     }
     update = research_join_node(state)
     out = update["research_output"]
@@ -150,6 +152,7 @@ def test_join_node_with_all_four_parts_yields_complete_output():
             "witnesses": _witnesses_part(),
             "law": _law_part(),
         },
+        "case": CaseState(case_id="case-all-four"),
     }
     update = research_join_node(state)
     out = update["research_output"]

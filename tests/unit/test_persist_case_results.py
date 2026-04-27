@@ -104,10 +104,11 @@ async def test_commits_and_clears_all_child_tables_first():
 
     assert session.committed is True
     assert session.rolled_back is False
-    # 8 child-table clears (Evidence, Fact, Witness, LegalRule, Precedent,
-    # Argument, HearingAnalysis, AuditLog) + 1 terminal
-    # pipeline_checkpoints upsert for what-if rehydration = 9.
-    assert len(session.executed) == 9
+    # 7 child-table clears (Evidence, Fact, Witness, LegalRule, Precedent,
+    # Argument, HearingAnalysis) + 1 terminal pipeline_checkpoints upsert
+    # for what-if rehydration = 8. AuditLog is intentionally append-only
+    # and excluded from _clear_child_rows.
+    assert len(session.executed) == 8
 
 
 @pytest.mark.asyncio
