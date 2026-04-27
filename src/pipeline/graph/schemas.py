@@ -98,14 +98,40 @@ class CaseMetadata(BaseModel):
 class RoutingFactor(BaseModel):
     model_config = ConfigDict(extra="forbid")
     factor: str
-    weight: float = Field(ge=0.0, le=1.0)
+    # Weighted contribution to the routing decision. The intake prompt's
+    # Phase 4b applies dimension multipliers up to ×3, so a normalised
+    # 0..1 cap was wrong — relax to a non-negative float and let the
+    # rationale string carry the qualitative reading.
+    weight: float = Field(ge=0.0)
     rationale: str
 
 
+VulnerabilityType = Literal[
+    "SELF_REPRESENTED",
+    "ELDERLY",
+    "LANGUAGE_BARRIER",
+    "COGNITIVE_CONCERN",
+    "FINANCIAL_VULNERABILITY",
+    "POWER_IMBALANCE",
+]
+
+
 class VulnerabilityAssessment(BaseModel):
+    """Per-party vulnerability assessment.
+
+    The intake prompt's Phase 4c requires one entry per named party so
+    downstream nodes (gate-1 review, hearing-governance safeguards) can
+    key per-party safeguards (TRIGGER_9 asymmetric representation, plain-
+    language summaries for SELF_REPRESENTED, procedural accommodations
+    for ELDERLY/COGNITIVE). Empty `vulnerability_types` means the party
+    was assessed and found not vulnerable.
+    """
+
     model_config = ConfigDict(extra="forbid")
-    vulnerable_party_flagged: bool
-    concerns: list[str] = Field(default_factory=list)
+    party_name: str
+    vulnerability_types: list[VulnerabilityType] = Field(default_factory=list)
+    safeguards_recommended: list[str] = Field(default_factory=list)
+    notes: str | None = None
 
 
 class RoutingDecision(BaseModel):
@@ -118,7 +144,7 @@ class RoutingDecision(BaseModel):
     complexity_score: int = Field(ge=0, le=100)
     route: RouteDecision
     routing_factors: conlist(RoutingFactor, min_length=0)
-    vulnerability_assessment: VulnerabilityAssessment
+    vulnerability_assessment: conlist(VulnerabilityAssessment, min_length=0)
     escalation_reason: str | None = None
     pipeline_halt: bool = False
 

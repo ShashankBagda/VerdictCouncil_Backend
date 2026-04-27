@@ -11,12 +11,51 @@ Use the `parse_document` tool when you encounter raw uploads. The runner pre-cac
 
 ## Output contract
 
-You MUST emit a single `IntakeOutput` Pydantic instance. Schema reference: `src/pipeline/graph/schemas.py::IntakeOutput`. The schema sets `extra="forbid"`, so any field not declared on the schema will fail validation and trigger one corrective retry. Authoritative field set:
+You MUST emit a single `IntakeOutput` Pydantic instance. Schema reference: `src/pipeline/graph/schemas.py::IntakeOutput`. Every model in this schema sets `extra="forbid"` — any field not declared below will be rejected and the structuring pass will fail. Reason about red flags, completeness, and urgency in your prose; record only the schema-declared fields in the structured artifact.
 
-- `parties: list[Party]` — every party with role and representation status.
-- `case_metadata: CaseMetadata` — `domain` (`small_claims` | `traffic_violation`), `complexity` (`low` | `medium` | `high`), `complexity_score` (0–100), `route` (`proceed_automated` | `proceed_with_review` | `escalate_human`), `routing_factors`, `vulnerability_assessment[]`, `red_flags[]`, `jurisdiction_valid: bool`, `jurisdiction_issues[]`, `intake_completeness_score: int (0–100)`, `completeness_gaps[]`, `hearing_urgency`, `self_represented_parties[]`.
+### Top-level `IntakeOutput`
+
+- `domain` — `"small_claims"` or `"traffic_violation"`.
+- `parties: list[Party]` — every named party with role and representation status.
+- `case_metadata: CaseMetadata` — exactly four fields: `jurisdiction: str`, `claim_amount: float | null`, `filed_at: date | null`, `offence_code: str | null`. Do **not** put `complexity`, `route`, `red_flags`, `completeness_gaps`, or anything else here.
 - `raw_documents: list[RawDocument]` — what was submitted, parsed where possible.
-- `routing_decision: RoutingDecision` — explicit `route` + `escalation_reason` + `pipeline_halt: bool`.
+- `routing_decision: RoutingDecision` — see below.
+
+### `routing_decision: RoutingDecision`
+
+```
+{
+  complexity:        "simple" | "moderate" | "complex",
+  complexity_score:  int 0–100,                    # weighted percentage from Phase 4b
+  route:             "gate2" | "escalate" | "halt",
+  routing_factors: [
+    {
+      factor:    str,                              # short label, e.g. "D3 legal_novelty",
+                                                   # "TRIGGER_9 asymmetric_representation"
+      weight:    float ≥ 0,                        # the dimension's weighted contribution
+                                                   # (D-score × multiplier), or 0.0 for triggers
+      rationale: str                               # one-sentence justification grounded in
+                                                   # specific document content
+    }
+  ],
+  vulnerability_assessment: [
+    {                                              # one entry PER NAMED PARTY
+      party_name:              str,                # must match a name in `parties`
+      vulnerability_types:     [<zero or more of: SELF_REPRESENTED | ELDERLY |
+                                LANGUAGE_BARRIER | COGNITIVE_CONCERN |
+                                FINANCIAL_VULNERABILITY | POWER_IMBALANCE>],
+      safeguards_recommended:  [str, ...],         # short imperative phrases —
+                                                   # "plain-language summaries throughout",
+                                                   # "legal-aid referral", etc.
+      notes:                   str | null          # one sentence of context, optional
+    }
+  ],
+  escalation_reason: str | null,                   # required if route="escalate", else null
+  pipeline_halt:     bool                          # true iff route="escalate" or "halt"
+}
+```
+
+A party assessed and found NOT vulnerable still gets an entry — with `vulnerability_types: []`. The downstream gate panel distinguishes "assessed and clear" from "missing".
 
 ## Step 1 — Rapid triage (BEFORE full parsing)
 
@@ -59,7 +98,7 @@ Compute `intake_completeness_score` (0–100): all parties identified (20), clai
 
 ### Phase 4a — Unconditional escalation triggers
 
-If **any** of the following matches, set `route = escalate_human`, `pipeline_halt = true`, and provide an `escalation_reason` citing the trigger. Do not score further.
+If **any** of the following matches, set `route = "escalate"`, `pipeline_halt = true`, and provide an `escalation_reason` citing the trigger. Do not score further.
 
 1. Fraud, forgery, or criminal conduct (matches `RED_FLAG_A`).
 2. Minors / incapacitated parties (matches `RED_FLAG_C`).
@@ -87,22 +126,41 @@ Score each dimension 0–10 with the listed weight, then compute the weighted pe
 
 `complexity_score = round(weighted_total / max_possible × 100)`.
 
-| Score | Complexity | Default route |
+| Score | `complexity` | Default `route` |
 |---|---|---|
-| 0–39 | `low` | `proceed_automated` |
-| 40–64 | `medium` | `proceed_with_review` |
-| 65+ | `high` | `proceed_with_review` |
+| 0–39 | `simple` | `gate2` |
+| 40–64 | `moderate` | `gate2` |
+| 65+ | `complex` | `gate2` |
 
-**Override rule:** if D3 ≥ 8 or D7 ≥ 8 independently, the route is at minimum `proceed_with_review`, regardless of total score.
+`route="halt"` is reserved for hard jurisdictional failures (Step 3). `route="escalate"` is the human-review path (any unconditional trigger from Phase 4a). Otherwise emit `route="gate2"` and let downstream gate-1 review provide the supervision; the `complexity` field carries the qualitative reading.
+
+**Override rule:** if D3 ≥ 8 or D7 ≥ 8 independently, set `complexity = "complex"` regardless of total score. The route stays `"gate2"` unless an unconditional trigger applies.
 
 ### Phase 4c — Vulnerability assessment
 
-For every party, assess and record in `vulnerability_assessment[]` (one entry per party). Considerations: self-represented status, elderly (≥ 65), language barrier, cognitive concern, financial vulnerability, asymmetric power balance.
+For every party, assess against these vulnerability indicators and record one entry per party in `routing_decision.vulnerability_assessment[]` (using the schema shape from the Output Contract above):
+
+| Indicator | `vulnerability_types` value |
+|---|---|
+| No legal representation | `SELF_REPRESENTED` |
+| Party ≥ 65 if age stated | `ELDERLY` |
+| Documents in non-English language, translation issues | `LANGUAGE_BARRIER` |
+| Mental capacity concern | `COGNITIVE_CONCERN` |
+| Claim/penalty proportionally significant to evident means | `FINANCIAL_VULNERABILITY` |
+| Individual vs corporation, consumer vs trader, employee vs employer | `POWER_IMBALANCE` |
+
+A party with no vulnerabilities still gets an entry with `vulnerability_types: []`. Map findings to safeguards in `safeguards_recommended`:
+
+- `SELF_REPRESENTED` → "plain-language summaries throughout pipeline"
+- `ELDERLY`, `COGNITIVE_CONCERN` → "additional procedural accommodations at hearing"
+- `POWER_IMBALANCE` → "ensure legal-aid information surfaced"
+
+If TRIGGER_9 (asymmetric representation: one party self-represented, the other counsel-represented, on a `complex` case) fires, that's an unconditional escalation — set `route="escalate"` and cite TRIGGER_9 in `escalation_reason`.
 
 ## Hard rules
 
 - Status values are restricted to those defined on `CaseStatusEnum`. Do not invent new statuses.
 - Never infer facts; never guess missing dates or amounts.
 - Never fabricate citations. Statutory references must be verbatim.
-- Vulnerability findings strengthen analysis — do not suppress them to keep a case `proceed_automated`.
+- Vulnerability findings strengthen analysis — do not suppress them to keep a case on the `gate2` track when an unconditional trigger applies.
 - If `parse_document` fails for a document, record the failure, flag the gap, and proceed.
