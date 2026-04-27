@@ -303,7 +303,15 @@ def _insert_legal_rules(db: AsyncSession, case_id: UUID, state: CaseState) -> No
     for item in state.legal_rules or []:
         if not isinstance(item, dict):
             continue
-        statute = (item.get("statute_name") or item.get("name") or "").strip()
+        # The pipeline `LegalRule` schema emits `citation` / `text` /
+        # `applicability` (plus `rule_id` and `jurisdiction`); the legacy
+        # DB column is `statute_name`. Without the `citation` fallback
+        # every row from the new research-law agent landed empty and was
+        # silently skipped, leaving the dossier "Law & Statutes" panel
+        # blank despite the agent + vector store working correctly.
+        statute = (
+            item.get("statute_name") or item.get("citation") or item.get("name") or ""
+        ).strip()
         if not statute:
             continue
         relevance = item.get("relevance_score")
@@ -311,10 +319,10 @@ def _insert_legal_rules(db: AsyncSession, case_id: UUID, state: CaseState) -> No
             LegalRule(
                 case_id=case_id,
                 statute_name=statute,
-                section=item.get("section"),
+                section=item.get("section") or item.get("jurisdiction"),
                 verbatim_text=item.get("verbatim_text") or item.get("text"),
                 relevance_score=float(relevance) if isinstance(relevance, (int, float)) else None,
-                application=item.get("application"),
+                application=item.get("application") or item.get("applicability"),
             )
         )
 
