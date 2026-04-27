@@ -47,6 +47,33 @@ jobs:
           docker push ${ROLLING}
           echo "IMAGE=${IMAGE}" >> $GITHUB_ENV
 
+      # Trivy: container image vulnerability scan (advisory — does not gate deploy)
+      - name: Trivy image scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.IMAGE }}
+          format: sarif
+          output: trivy-image.sarif
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+        continue-on-error: true
+
+      - name: Upload Trivy SARIF to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-image.sarif
+          category: trivy-image-production
+        continue-on-error: true
+
+      - name: Upload Trivy SARIF artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: trivy-image-sarif-production
+          path: trivy-image.sarif
+
       - name: Configure kubectl
         run: doctl kubernetes cluster kubeconfig save ${{ secrets.DOKS_PRODUCTION_CLUSTER_ID }}
 
