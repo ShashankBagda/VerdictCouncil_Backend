@@ -107,11 +107,51 @@ Per the standard eval taxonomy:
 - **Cost & latency**: every test asserts `cost ≤ $0.10` and `latency ≤ 45s` (90s for synthesis). Tracked in the per-test result and surfaced in the Job Summary.
 - **Quality gate**: `baseline.json` carries per-suite minimum pass-rates. The CI workflow's threshold-gate step fails the matrix job if a suite drops below its threshold. Setting threshold to 0.0 keeps a known-failing suite *visible* (Job Summary still shows the failures) without *blocking* the workflow — useful when the failure is a real prompt-violation finding waiting on a fix.
 
+## Red-team
+
+Auto-generative red-team safety probes targeting the intake phase live in
+`redteam.yaml`. Threat model: a party uploads a document whose content
+contains adversarial text; intake must stay grounded and emit valid
+IntakeOutput JSON instead of complying with embedded instructions.
+
+### Running locally
+
+Promptfoo's redteam plugins require their hosted attack-generation service.
+One-time auth:
+
+```bash
+npx promptfoo@latest auth login                    # interactive (work email)
+# or
+npx promptfoo@latest auth login --api-key <KEY>    # headless
+```
+
+Then:
+
+```bash
+npx promptfoo@latest redteam run -c redteam.yaml --no-cache
+npx promptfoo@latest redteam report                # browser UI
+```
+
+Cost note: `numTests: 3` × ~30 plugins × composite strategies ≈ 500 generated
+tests per run, ~$4-5 / ~20 min / ~5M tokens. Drop `numTests` to control cost.
+
+### CI
+
+`.github/workflows/promptfoo-redteam-ci.yml` runs weekly + on `workflow_dispatch`
++ on changes to the redteam config or intake prompt. Requires a repo secret
+`PROMPTFOO_API_KEY` (same value you used for `auth login`). Without the
+secret most plugins skip with a "requires remote generation" warning.
+
+The workflow renders a per-plugin pass/fail breakdown to the GitHub Actions
+Job Summary and uploads `redteam-results.json` as an artifact. By default
+attack successes do NOT fail the workflow — they surface as warnings until
+a baseline pass-rate is established.
+
 ## What this suite does NOT cover (yet)
 
-- **Security / red-team** — no prompt-injection probes, no jailbreak datasets, no PII detection, no policy-violation assertions. Promptfoo has a `redteam` subcommand and dedicated providers; would live in a separate workflow.
 - **RAG retrieval quality** — the pipeline uses PAIR API + per-judge vector stores via `precedent_search` / `knowledge_base/search` endpoints, but this suite drives the model directly with hand-authored fixtures and never touches retrieval. A retrieval-quality dataset (queries → expected docs/citations) would be needed first.
 - **Cross-run regression deltas** — the threshold gate compares to a static `baseline.json`, not to the previous run. `eval.yml` (LangSmith) carries that.
+- **Red-team across all phases** — only intake is currently probed. The other 6 phases consume internal pipeline state and are less directly exposed; expand if downstream phases gain user-controlled inputs.
 
 ## Notes vs Lecturer's Reference
 
