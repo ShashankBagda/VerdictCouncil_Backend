@@ -1,0 +1,44 @@
+{
+  "_comment": "Hand-authored upstream SynthesisOutput fixture for traffic-1. Used as upstream context for the audit suite.",
+  "arguments": {
+    "claimant_position": {
+      "party": "claimant",
+      "position": "LTA submits the solid white line at the junction was unobscured and the camera was within calibration tolerances."
+    },
+    "respondent_position": {
+      "party": "respondent",
+      "position": "Accused submits the lane markings were obscured by roadworks signage and that the camera reading should be discounted."
+    },
+    "contested_points": [
+      {
+        "description": "Whether the solid white line was visible at the moment of crossing.",
+        "claimant_view": "LTA enforcement summary asserts the line was unobscured.",
+        "respondent_view": "Driver dashcam footage purports to show obscured markings."
+      }
+    ],
+    "counter_arguments": [
+      "Driver could argue procedural unfairness if calibration certificate is challenged."
+    ]
+  },
+  "preliminary_conclusion": "On the documentary record, the offence under RTA s.65 is likely made out; the obscured-markings defence is weak given the calibration certificate.",
+  "confidence": "medium",
+  "reasoning_chain": [
+    {
+      "step_no": 1,
+      "description": "Camera calibration certificate establishes evidentiary reliability under RTA Schedule 9.",
+      "supports": ["EV-1"]
+    },
+    {
+      "step_no": 2,
+      "description": "LTA enforcement summary places the contested crossing at a junction location distinct from the obscured-markings area.",
+      "supports": ["F-1"]
+    }
+  ],
+  "uncertainty_flags": [
+    {
+      "topic": "dashcam_corroboration",
+      "rationale": "Driver's dashcam footage has not been independently verified for the precise moment of crossing.",
+      "severity": "medium"
+    }
+  ]
+}

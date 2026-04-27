@@ -1,0 +1,34 @@
+{
+  "_comment": "Hand-authored upstream IntakeOutput fixture for traffic-1-improper-lane-change. Used as the 'prior phase produced this' context for downstream phase suites. Plausible-but-minimal — does not need to validate against the IntakeOutput Pydantic model exactly.",
+  "domain": "traffic_violation",
+  "parties": [
+    { "party_id": "P1", "name": "Siti Rahman", "role": "respondent", "contact": null },
+    { "party_id": "P2", "name": "Land Transport Authority", "role": "claimant", "contact": null }
+  ],
+  "case_metadata": {
+    "jurisdiction": "SG-TC",
+    "claim_amount": null,
+    "filed_at": "2025-10-03",
+    "offence_code": "RTA-S65"
+  },
+  "raw_documents": [
+    { "filename": "Driver_Appeal_Statement.pdf", "summary": "Driver claims roadworks obscured lane markings; dashcam available." },
+    { "filename": "Agency_Enforcement_Summary.pdf", "summary": "LTA states solid white line was unobscured at junction; camera calibrated 1 Oct 2025." },
+    { "filename": "Calibration_Certificate.pdf", "summary": "Pass — lane-detection 99.8%, solid-line discrimination 99.6%." }
+  ],
+  "routing_decision": {
+    "complexity": "moderate",
+    "complexity_score": 55,
+    "route": "gate2",
+    "routing_factors": [
+      { "factor": "D2 evidence_complexity", "weight": 1.5, "rationale": "Cross-referencing dashcam, calibration cert, and roadworks signage required." },
+      { "factor": "TRIGGER_9 asymmetric_representation", "weight": 0.0, "rationale": "Self-represented accused vs prosecuting authority." }
+    ],
+    "vulnerability_assessment": [
+      { "party_name": "Siti Rahman", "vulnerability_types": ["SELF_REPRESENTED"], "safeguards_recommended": ["plain-language summary"], "notes": null },
+      { "party_name": "Land Transport Authority", "vulnerability_types": [], "safeguards_recommended": [], "notes": null }
+    ],
+    "escalation_reason": null,
+    "pipeline_halt": false
+  }
+}

@@ -1,0 +1,27 @@
+# yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
+description: 'Research-evidence phase prompt — EvidenceResearch schema (single-case)'
+
+providers:
+  - id: openai:chat:gpt-4.1-mini
+    config:
+      temperature: 0
+      max_tokens: 4096
+      response_format:
+        type: json_object
+
+prompts:
+  - file://prompt_builders/research-evidence.js
+
+defaultTest:
+  options:
+    transform: "output.replace(/^```(?:json)?\\n?|```$/g, '').trim()"
+  assert:
+    - type: is-json
+      value:
+        type: object
+        required: [evidence_items]
+        properties:
+          evidence_items:
+            type: array
+
+tests: file://test_loaders/research-evidence.js

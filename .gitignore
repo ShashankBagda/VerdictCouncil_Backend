@@ -41,3 +41,7 @@ Thumbs.db
 
 # Local planning / agent context (Claude Code skills + AGENTS doc convention)
 .context/
+
+# Promptfoo eval run outputs — transient; CI uploads them as artifacts.
+promptfoo-tests/*-results.json
+promptfoo-tests/.promptfoo_cache/

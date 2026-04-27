@@ -1,0 +1,85 @@
+{
+  "_comment": "Hand-authored upstream ResearchOutput fixture (joined output of all 4 research subagents) for traffic-1. Anchored on golden-case expected.research where possible. Used as upstream context for synthesis + audit suites.",
+  "evidence": {
+    "evidence_items": [
+      {
+        "evidence_id": "EV-1",
+        "evidence_type": "documentary",
+        "strength": "strong",
+        "description": "Camera calibration certificate dated 1 Oct 2025 showing 99.6% solid-line discrimination accuracy.",
+        "linked_claims": ["camera_reliability"]
+      },
+      {
+        "evidence_id": "EV-2",
+        "evidence_type": "documentary",
+        "strength": "moderate",
+        "description": "Driver dashcam footage purportedly showing obscured lane markings.",
+        "linked_claims": ["obscured_markings_defence"]
+      }
+    ]
+  },
+  "facts": {
+    "facts": [
+      {
+        "fact_id": "F-1",
+        "description": "On 3 Oct 2025 at 14:32:15 vehicle SJK 4521E crossed a solid white line at Tampines Ave 4 Junction 12.",
+        "event_date": "2025-10-03",
+        "confidence": "high",
+        "status": "established"
+      }
+    ],
+    "timeline": [
+      {
+        "event_date": "2025-10-01",
+        "description": "TC-TA4-0892 calibration completed by LTA Field Operations."
+      },
+      {
+        "event_date": "2025-10-03",
+        "description": "Alleged improper lane change captured by camera TC-TA4-0892."
+      }
+    ]
+  },
+  "witnesses": {
+    "witnesses": []
+  },
+  "law": {
+    "legal_rules": [
+      {
+        "rule_id": "RTA-S65",
+        "jurisdiction": "SG",
+        "citation": "Road Traffic Act 1961 s.65",
+        "text": "Improper lane change offence.",
+        "applicability": "Applies to vehicles crossing solid lane markings on public roads.",
+        "supporting_sources": ["placeholder-rta-s65:01650c9481ad"]
+      },
+      {
+        "rule_id": "RTA-SCH9",
+        "jurisdiction": "SG",
+        "citation": "Road Traffic Act 1961 Schedule 9",
+        "text": "Camera calibration standard for traffic enforcement.",
+        "applicability": "Sets accuracy thresholds for camera-derived evidence.",
+        "supporting_sources": ["placeholder-rta-sch9:440e890a2f87"]
+      }
+    ],
+    "precedents": [
+      {
+        "case_name": "Public Prosecutor v Khong Hor Hee",
+        "citation": "PP v Khong Hor Hee",
+        "jurisdiction": "SG",
+        "holding": "Camera evidence is admissible where calibration is properly documented.",
+        "relevance_rationale": "Directly addresses admissibility of camera-derived evidence under RTA Schedule 9."
+      }
+    ],
+    "precedent_source_metadata": {
+      "source": "pair",
+      "query": "improper lane change Singapore camera calibration",
+      "retrieved_at": "2026-04-25T00:00:00Z"
+    },
+    "legal_elements_checklist": [
+      { "element": "Vehicle crossed a solid lane marking", "satisfied": true, "rationale": "Camera footage corroborated by calibration cert." },
+      { "element": "Markings were visible at moment of crossing", "satisfied": true, "rationale": "LTA enforcement summary states junction line was unobscured." }
+    ],
+    "suppressed_citations": []
+  },
+  "partial": false
+}

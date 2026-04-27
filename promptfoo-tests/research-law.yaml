@@ -1,0 +1,35 @@
+# yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
+description: 'Research-law phase prompt — LawResearch schema (single-case)'
+
+providers:
+  - id: openai:chat:gpt-4.1-mini
+    config:
+      temperature: 0
+      max_tokens: 4096
+      response_format:
+        type: json_object
+
+prompts:
+  - file://prompt_builders/research-law.js
+
+defaultTest:
+  options:
+    transform: "output.replace(/^```(?:json)?\\n?|```$/g, '').trim()"
+  assert:
+    - type: is-json
+      value:
+        type: object
+        required: [legal_rules, precedents, precedent_source_metadata, legal_elements_checklist, suppressed_citations]
+        properties:
+          legal_rules:
+            type: array
+          precedents:
+            type: array
+          precedent_source_metadata:
+            type: object
+          legal_elements_checklist:
+            type: array
+          suppressed_citations:
+            type: array
+
+tests: file://test_loaders/research-law.js

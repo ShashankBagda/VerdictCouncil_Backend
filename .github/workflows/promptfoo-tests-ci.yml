@@ -1,0 +1,131 @@
+name: PromptFoo Tests
+
+# Per-phase prompt regression suite. Mirrors the lecturer-reference layout
+# (flat YAMLs under promptfoo-tests/, one per phase) but drives the model
+# directly via openai:chat — VerdictCouncil's phase prompts run in the arq
+# worker, not behind a sync HTTP endpoint, so an HTTP provider would require
+# a test-only route. See promptfoo-tests/PROMPTFOO_INSTRUCTIONS.md.
+#
+# Complementary to eval.yml (LangSmith golden-set regression gate). This
+# workflow catches prompt-edit regressions cheaply at the per-phase level
+# before the heavier pipeline eval runs.
+#
+# Coverage: intake runs all 10 golden cases; the 6 downstream phases run
+# a single representative case (traffic-1) because the goldens carry no
+# upstream-context fixtures for those phases. Full per-case regression for
+# downstream phases lives in eval.yml.
+
+on:
+  push:
+    branches: [main, development]
+    paths:
+      - 'prompts/**'
+      - 'promptfoo-tests/**'
+      - 'src/pipeline/graph/schemas.py'
+      - '.github/workflows/promptfoo-tests-ci.yml'
+  pull_request:
+    branches: [main, development]
+    paths:
+      - 'prompts/**'
+      - 'promptfoo-tests/**'
+      - 'src/pipeline/graph/schemas.py'
+      - '.github/workflows/promptfoo-tests-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+jobs:
+  promptfoo-eval:
+    name: PromptFoo Evaluation
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        suite:
+          - intake
+          - research-evidence
+          - research-facts
+          - research-law
+          - research-witnesses
+          - synthesis
+          - audit
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Validate config
+        working-directory: promptfoo-tests
+        run: npx promptfoo@latest validate -c ${{ matrix.suite }}.yaml
+
+      - name: Eval — ${{ matrix.suite }}
+        id: eval
+        working-directory: promptfoo-tests
+        timeout-minutes: 8
+        continue-on-error: true
+        run: |
+          npx promptfoo@latest eval \
+            -c ${{ matrix.suite }}.yaml \
+            -o ${{ matrix.suite }}-results.json \
+            --no-cache
+
+      - name: Render Job Summary
+        if: always() && hashFiles(format('promptfoo-tests/{0}-results.json', matrix.suite)) != ''
+        working-directory: promptfoo-tests
+        env:
+          SUITE: ${{ matrix.suite }}
+        run: |
+          node -e "
+            const fs = require('fs');
+            const suite = process.env.SUITE;
+            const r = JSON.parse(fs.readFileSync(suite + '-results.json', 'utf8'));
+            const tests = r.results?.results ?? [];
+            const stats = r.results?.stats ?? {};
+            const lines = [];
+            lines.push('## ' + suite);
+            lines.push('');
+            lines.push('| metric | value |');
+            lines.push('|---|---|');
+            lines.push('| tests | ' + tests.length + ' |');
+            lines.push('| passes | ' + (stats.successes ?? 0) + ' |');
+            lines.push('| failures | ' + (stats.failures ?? 0) + ' |');
+            lines.push('| errors | ' + (stats.errors ?? 0) + ' |');
+            lines.push('| total tokens | ' + (stats.tokenUsage?.total ?? 0) + ' |');
+            lines.push('| cost (USD) | ' + (stats.tokenUsage?.cost ?? 0).toFixed(4) + ' |');
+            lines.push('');
+            const fails = tests.filter(t => !t.success);
+            if (fails.length) {
+              lines.push('### Failures');
+              lines.push('');
+              for (const t of fails) {
+                lines.push('- **' + (t.testCase?.description || 'unnamed') + '**');
+                const crs = t.gradingResult?.componentResults || [];
+                for (const cr of crs.filter(c => !c.pass).slice(0, 3)) {
+                  const reason = String(cr.reason || '').split('\n')[0].slice(0, 140);
+                  lines.push('  - \`' + (cr.assertion?.type || '?') + '\` — ' + reason);
+                }
+              }
+              lines.push('');
+            }
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join('\n') + '\n');
+          "
+
+      - name: Fail job if eval failed
+        if: steps.eval.outcome != 'success'
+        run: exit 1
+
+      - name: Upload eval report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: promptfoo-results-${{ matrix.suite }}
+          path: promptfoo-tests/${{ matrix.suite }}-results.json
+          if-no-files-found: warn

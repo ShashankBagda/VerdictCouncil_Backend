@@ -1,0 +1,30 @@
+# yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
+description: 'Audit phase prompt — AuditOutput schema (single-case)'
+
+providers:
+  - id: openai:chat:gpt-4.1-mini
+    config:
+      temperature: 0
+      max_tokens: 4096
+      response_format:
+        type: json_object
+
+prompts:
+  - file://prompt_builders/audit.js
+
+defaultTest:
+  options:
+    transform: "output.replace(/^```(?:json)?\\n?|```$/g, '').trim()"
+  assert:
+    - type: is-json
+      value:
+        type: object
+        required: [fairness_check, status, should_rerun]
+        properties:
+          fairness_check:
+            type: object
+            required: [critical_issues_found, audit_passed]
+          should_rerun:
+            type: boolean
+
+tests: file://test_loaders/audit.js

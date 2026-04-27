@@ -1,0 +1,54 @@
+# yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
+description: 'Intake phase prompt — IntakeOutput schema + golden-case parity'
+
+providers:
+  - id: openai:chat:gpt-4.1-mini
+    config:
+      temperature: 0
+      max_tokens: 4096
+      response_format:
+        type: json_object
+
+prompts:
+  - file://prompt_builders/intake.js
+
+defaultTest:
+  options:
+    transform: "output.replace(/^```(?:json)?\\n?|```$/g, '').trim()"
+  assert:
+    - type: is-json
+      value:
+        type: object
+        required: [domain, parties, case_metadata, raw_documents, routing_decision]
+        properties:
+          domain:
+            enum: [small_claims, traffic_violation]
+          parties:
+            type: array
+          case_metadata:
+            type: object
+            required: [jurisdiction]
+          raw_documents:
+            type: array
+          routing_decision:
+            type: object
+            required: [complexity, complexity_score, route, routing_factors, vulnerability_assessment]
+            properties:
+              complexity:
+                enum: [simple, moderate, complex]
+              complexity_score:
+                type: integer
+                minimum: 0
+                maximum: 100
+              route:
+                enum: [gate2, escalate, halt]
+    - type: javascript
+      value: |
+        const parsed = JSON.parse(output);
+        return Array.isArray(parsed.routing_decision.routing_factors);
+    - type: javascript
+      value: |
+        const parsed = JSON.parse(output);
+        return Array.isArray(parsed.routing_decision.vulnerability_assessment);
+
+tests: file://test_loaders/intake.js

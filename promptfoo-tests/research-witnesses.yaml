@@ -1,0 +1,27 @@
+# yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
+description: 'Research-witnesses phase prompt — WitnessesResearch schema (single-case)'
+
+providers:
+  - id: openai:chat:gpt-4.1-mini
+    config:
+      temperature: 0
+      max_tokens: 4096
+      response_format:
+        type: json_object
+
+prompts:
+  - file://prompt_builders/research-witnesses.js
+
+defaultTest:
+  options:
+    transform: "output.replace(/^```(?:json)?\\n?|```$/g, '').trim()"
+  assert:
+    - type: is-json
+      value:
+        type: object
+        required: [witnesses]
+        properties:
+          witnesses:
+            type: array
+
+tests: file://test_loaders/research-witnesses.js
