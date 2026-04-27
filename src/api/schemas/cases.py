@@ -283,10 +283,17 @@ class ArgumentResponse(BaseModel):
 
 class HearingAnalysisResponse(BaseModel):
     id: UUID
-    reasoning_chain: dict[str, Any] | None = Field(None, description="Structured reasoning chain")
+    # `reasoning_chain` and `uncertainty_flags` are JSONB columns the
+    # synthesis mirror writes as lists of structured dicts (one per
+    # ReasoningStep / UncertaintyFlag). Same shape-tolerance rationale
+    # as ArgumentResponse / EvidenceResponse — locking to dict-only
+    # 500s GET /cases/{id} and tears down the workspace.
+    reasoning_chain: dict[str, Any] | list[Any] | None = Field(
+        None, description="Structured reasoning chain (object or list of steps)"
+    )
     preliminary_conclusion: str | None = Field(None, description="Preliminary conclusion")
-    uncertainty_flags: dict[str, Any] | None = Field(
-        None, description="Uncertainty flags and pivot factors"
+    uncertainty_flags: dict[str, Any] | list[Any] | None = Field(
+        None, description="Uncertainty flags (object or list of flag entries)"
     )
     confidence_score: int | None = Field(None, description="Confidence score (0-100)")
 
