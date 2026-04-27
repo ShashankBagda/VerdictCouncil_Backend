@@ -36,7 +36,8 @@ def _experiment_scores(client, name: str) -> dict[str, float]:
     """
     results = client.get_experiment_results(name=name)
     feedback_stats = (
-        results.get("feedback_stats") if isinstance(results, dict)
+        results.get("feedback_stats")
+        if isinstance(results, dict)
         else getattr(results, "feedback_stats", None)
     ) or {}
 
