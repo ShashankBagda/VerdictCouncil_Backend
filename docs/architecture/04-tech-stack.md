@@ -15,7 +15,7 @@
 | **Background Workers** | arq | `~=0.26` | Redis-backed async task queue; runs the pipeline graph off the request path with outbox-claim semantics |
 | **Database** | DigitalOcean Managed PostgreSQL | 16 | Automated daily backups, point-in-time recovery, read replicas, connection pooling; accessed via private VPC networking |
 | **ORM** | SQLAlchemy (async) + Alembic | `>=2.0.35` / `>=1.14` | Async ORM via asyncpg; Alembic for schema migrations, run as a K8s one-shot Job (`alembic-migrate`) before each Deployment roll |
-| **Cache / Queue** | DigitalOcean Managed Redis | 7 | arq job queue, precedent-search result cache, PAIR rate-limit token bucket |
+| **Cache / Queue** | DigitalOcean Managed Valkey (Redis-compatible) | 7 | arq job queue, precedent-search result cache, PAIR rate-limit token bucket. Provisioned via `infra-bootstrap.yml` with `--engine valkey`; the `redis://` driver is wire-compatible. |
 | **Authentication** | PyJWT | `>=2.10` | HS256 JWT in `vc_token` httpOnly cookie; session hash persisted to Postgres to prevent replay |
 | **HTTP Client** | httpx | `>=0.28` | Async client for the `search_precedents` tool (PAIR Search API at `search.pair.gov.sg`) and other outbound calls |
 | **Observability** | LangSmith + OpenTelemetry | — | LangSmith for graph-level tracing, prompt versioning, and offline eval (`eval.yml`); OTLP exporter ships FastAPI/middleware spans to whatever collector the environment provides |
@@ -57,7 +57,7 @@ Models are overridable per environment via `OPENAI_MODEL_LIGHTWEIGHT`, `OPENAI_M
 | RAG approach | OpenAI Vector Stores | Self-hosted (Chroma, Weaviate, Pinecone) | Zero infrastructure overhead; automatic chunking and embedding; managed hybrid retrieval eliminates tuning |
 | Live precedent source | PAIR Search API only | PAIR + judiciary.gov.sg scraping | judiciary.gov.sg has no usable search API; PAIR indexes the full eLitigation higher court corpus (SGHC, SGCA, SGHCF, SGHCR, SGHC(I), SGHC(A), SGCA(I)) with hybrid BM25 + semantic retrieval. Does not cover SCT or lower State Courts — those decisions are generally unpublished. A curated vector store fills this gap with manually sourced domain-specific content. |
 | Database hosting | DO Managed PostgreSQL | Self-hosted StatefulSet | Automated backups, failover, patching; no K8s StatefulSet to operate; private VPC access |
-| Cache hosting | DO Managed Redis | Self-hosted StatefulSet | Managed HA, TLS by default, no operational overhead; private VPC access |
+| Cache hosting | DO Managed Valkey (Redis-compatible) | Self-hosted StatefulSet | Managed HA, TLS by default, no operational overhead; private VPC access. Wire-compatible with the `redis://` Python driver. |
 | Container registry | DOCR | GHCR, Docker Hub, ECR | Native DOKS integration eliminates image-pull secrets, same-region pull latency, integrated vulnerability scanning |
 | Backend compute | DOKS (Kubernetes) | App Platform, droplets, AWS Fargate | Rubric rewards a Kubernetes deployment, and DOKS gives explicit control over Deployments, Services, Ingress, and CronJobs. App Platform was considered (simpler ops) but trades away too much for this assessment. Trade-off: more provisioning effort than App Platform; acceptable given the rubric |
 | Frontend compute | DigitalOcean App Platform (static site) | GitHub Pages, Cloudflare Pages | The frontend is a Vite static build; App Platform auto-builds on push, serves from a global edge, manages TLS — exactly the shape of the artifact. No reason to put a static site through K8s |

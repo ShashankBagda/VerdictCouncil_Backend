@@ -8,7 +8,7 @@ Covers the test types, scope, tooling, and current results required by the gradi
 
 | Test Type | Scope | Tool / Method | Where | Pass Rate / Result |
 |---|---|---|---|---|
-| **Unit** | Pure-Python logic, agent nodes with faked LLM responses, single-function tools, middleware, schemas | `pytest` + `pytest-asyncio` + `pytest-mock` + `factory-boy` | `tests/unit/` (48 files) | Run in CI `unit-tests` job with `--cov-fail-under=65`; 100% of listed files execute clean on `main`. |
+| **Unit** | Pure-Python logic, agent nodes with faked LLM responses, single-function tools, middleware, schemas | `pytest` + `pytest-asyncio` + `pytest-mock` + `factory-boy` | `tests/unit/` (48 files) | Run in CI `unit-tests` job with `--cov-fail-under=100`; 100% of listed files execute clean on `main`. |
 | **Integration — Pipeline graph** | End-to-end LangGraph run with real reducer + checkpointer, halt / fan-in conditions, SSE stream | `pytest` + live Postgres + in-process graph | `tests/pipeline/graph/` (`test_graph_builder.py`, `test_graph_sse.py`) | Runs locally; skipped in default CI path (no Postgres service yet) — target: dedicated `integration-tests` CI job. |
 | **Integration — Infrastructure** | Halt conditions, pipeline-outbox claim semantics under concurrent load, stuck-case watchdog against a real DB, data-model migration 0019 | `pytest` + `testcontainers` (Postgres) | `tests/integration/test_halt_conditions.py`, `test_pipeline_jobs_outbox_pg.py`, `test_stuck_case_watchdog_pg.py`, `test_migration_0019.py` | Runs under `INTEGRATION_TESTS=1` locally. Target CI: `integration-tests` job with Postgres service. |
 | **End-to-End (evaluation)** | Three curated test cases (two Traffic, one SCT) exercised through the full pipeline with expected per-agent outputs and what-if assertions | Bespoke runner: `tests/eval/eval_runner.py` driven by `fixtures.py` | `tests/eval/` | Run pre-demo and pre-release; results stored in MLflow experiment `verdictcouncil-pipeline`. See [Part 7 Appendix D](07-contestable-judgment-mode.md#appendix-d-evaluation-framework). |
@@ -74,7 +74,7 @@ CI reproduces `make test` plus the SAST/SCA/DAST matrix.
 ### Known limitations (tracked for follow-up)
 
 - Integration tests are not run in CI; target is a dedicated `integration-tests` job with Postgres + Redis services.
-- Coverage gate is 65%, target is 80%.
+- Coverage gate is 100% in CI (`--cov-fail-under=100`); the prior 65 → 80 ramp is closed.
 - SAST/SCA/DAST jobs run in advisory mode; target is hard failure on medium+ findings.
 - Remote-dispatch mode (the canonical target architecture) has no dedicated tests yet — those depend on the per-agent Service skeleton landing in `src/agents/main.py`.
 - No fuzz testing of the document ingestion pipeline against deliberately malformed inputs beyond the regex corpus.
@@ -86,7 +86,7 @@ CI reproduces `make test` plus the SAST/SCA/DAST matrix.
 
 The release checklist (target; not enforced by CI yet) before a `release/*` → `main` merge:
 
-- [ ] `make test-cov` passes locally with ≥ 80% coverage.
+- [ ] `make test-cov` passes locally with 100% coverage (CI enforces `--cov-fail-under=100`).
 - [ ] `make test` passes in CI.
 - [ ] SAST/SCA reports reviewed; any medium+ findings triaged or waived with justification.
 - [ ] Evaluation suite (`tests/eval/`) run against staging; expected outputs match within tolerance for the three fixtures.

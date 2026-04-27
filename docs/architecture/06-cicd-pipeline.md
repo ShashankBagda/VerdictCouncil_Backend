@@ -12,7 +12,7 @@
 > | Cluster topology | `api-service` Deployment + `arq-worker` Deployment + `stuck-case-watchdog` CronJob | unchanged; HPA on `api-service` is a follow-up |
 > | Agent topology | All agents in-process inside the LangGraph `StateGraph` (no per-agent Deployment) | Unchanged. Earlier drafts proposed 9 agent microservices; that design was decommissioned with the SAM/Solace removal |
 > | Smoke / canary tests | Not implemented | Post-deploy smoke (staging) + canary (prod) |
-> | Coverage gate | `--cov-fail-under=65` enforced | 80 |
+> | Coverage gate | `--cov-fail-under=100` enforced | 100 (met) |
 > | SAST / SCA / DAST | Advisory (`continue-on-error: true`) | SAST hard fail; DAST gated on a live FastAPI + Postgres |
 > | Release tagging / GitHub Release | Not automated | `gh release create` on successful prod deploy |
 
@@ -27,7 +27,7 @@ VerdictCouncil deploys to **DigitalOcean**:
 | **DOKS** (DigitalOcean Kubernetes Service) | Container orchestration | Managed control plane, automatic upgrades, integrated load balancer |
 | **DOCR** (DigitalOcean Container Registry) | Docker image storage | Native DOKS integration, no image pull secrets needed |
 | **DO Managed PostgreSQL 16** | Case records, graph checkpoints, audit logs | Automated backups, failover, connection pooling |
-| **DO Managed Redis 7** | arq queue, precedent cache, PAIR rate-limit tokens | Managed HA, TLS, eviction policies |
+| **DO Managed Valkey 7** (Redis-compatible) | arq queue, precedent cache, PAIR rate-limit tokens | Managed HA, TLS, eviction policies. Provisioned via `infra-bootstrap.yml` with `--engine valkey`; the `redis://` driver is wire-compatible. |
 | **DO Load Balancer** | HTTPS ingress | Auto-provisioned by NGINX ingress controller; Let's Encrypt via cert-manager |
 | **DO Spaces** | Backup storage, CI artifacts | S3-compatible object storage |
 
@@ -37,7 +37,7 @@ VerdictCouncil deploys to **DigitalOcean**:
 
 | Workflow | Trigger | Purpose | Target |
 |---|---|---|---|
-| `ci.yml` | Push to any branch; PR into `development` or `main` | lint → unit tests (65% cov) → SAST (bandit + semgrep) → SCA (pip-audit + safety + cyclonedx-bom SBOM) → DAST (smoke FastAPI behind a Postgres service, header + contract checks) → docker build verification → security summary → LangSmith eval gate (PR-only, path-filtered) | — |
+| `ci.yml` | Push to any branch; PR into `development` or `main` | lint → unit tests (100% cov) → property tests → SAST (bandit + semgrep) → SCA (pip-audit + safety + cyclonedx-bom SBOM) → DAST (smoke FastAPI behind a Postgres service, header + contract checks) → load tests (Locust 30s smoke, advisory) → docker build + Trivy SARIF → security summary → LangSmith eval gate (PR-only, path-filtered) | — |
 | `deploy.yml` | Push to `development` → staging; push to `main` → production; `workflow_dispatch` for either | Build single image, push to DOCR (`rc-{sha}`/`staging-latest` for staging; `v{semver}`/`latest` for production), Trivy-scan, render secrets, `kubectl apply` the overlay with the pinned image tag, run Alembic, roll `api-service` + `arq-worker` | DOKS `verdictcouncil-staging` (development branch) / DOKS `verdictcouncil` (main branch) |
 | `promptfoo-tests-ci.yml` | Push / PR (path-filtered) + dispatch | Per-phase prompt regression suite — deterministic JS asserts, llm-rubric groundedness, cost/latency budgets, baseline.json threshold gate | — |
 | `promptfoo-redteam-ci.yml` | Weekly cron + dispatch + on redteam-config changes | Auto-generative red-team safety probes against the intake prompt (prompt injection, jailbreak, PII, hallucination, hijacking, harmful) | — |
@@ -79,7 +79,7 @@ permissions:
 jobs:
   changes:              # dorny/paths-filter — gates the eval job on prompt/pipeline changes only
   lint:                 # ruff check + ruff format --check on src/ and tests/
-  unit-tests:           # pytest --cov=src --cov-fail-under=65 (OPENAI_API_KEY blanked)
+  unit-tests:           # pytest --cov=src --cov-fail-under=100 (OPENAI_API_KEY blanked)
   property-tests:       # Hypothesis property-based tests (HYPOTHESIS_PROFILE=ci)
   sast:                 # bandit -r src/ + semgrep (p/security-audit, p/owasp-top-ten) → SARIF upload
   sca:                  # pip-audit --desc + cyclonedx-bom SBOM
@@ -103,7 +103,7 @@ least-privilege.
 | Area | Today | Target |
 |---|---|---|
 | Type checking | Not run | `mypy src/` in `lint` job |
-| Coverage gate | 65 | 80 |
+| Coverage gate | 100 | 100 (met) |
 | SAST enforcement | `continue-on-error: true` on bandit + semgrep | Hard failure on medium+ findings |
 | Integration tests | Not run in CI (run locally via `INTEGRATION_TESTS=1`) | Dedicated `integration-tests` job with Postgres + Redis services |
 | Frontend snapshot diffing | N/A here | See frontend repo |
@@ -523,9 +523,9 @@ flowchart TB
 
     subgraph Managed[DO Managed Services]
         PGP[(Postgres prod)]
-        RDP[(Redis prod)]
+        RDP[(Valkey prod)]
         PGS[(Postgres staging)]
-        RDS[(Redis staging)]
+        RDS[(Valkey staging)]
     end
 
     REPO -->|push development| GHA
