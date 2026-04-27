@@ -30,6 +30,11 @@ htmlcov/
 # Runtime logs
 *.log
 
+# LangGraph dev-server checkpoint store (langgraph_api). Local-only;
+# carries case state and embedded vectors that must not enter git.
+.langgraph_api/
+*.pckl
+
 # OS
 .DS_Store
 Thumbs.db
