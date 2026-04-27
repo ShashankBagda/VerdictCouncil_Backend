@@ -86,6 +86,15 @@ class Settings(BaseSettings):
     # without splitting the project. Values: "dev" | "staging" | "prod".
     app_env: str = "dev"
 
+    # In-memory IP rate limiter — disabled by default. The dossier loader
+    # fans out ~12 parallel requests on mount; combined with auth/session
+    # polling and SSE-fallback polling the SPA easily exceeded the legacy
+    # 60 rpm hard-coded ceiling, surfacing as 429s on routine reloads.
+    # Operators can enable it explicitly via RATE_LIMIT_ENABLED=true and
+    # tune the per-minute ceiling via RATE_LIMIT_PER_MINUTE.
+    rate_limit_enabled: bool = False
+    rate_limit_per_minute: int = 600
+
     # LangGraph runtime selector (Sprint 1 1.DEP1.3). "in_process" runs
     # the compiled graph in this Python process (current behaviour);
     # "cloud" routes through the LangGraph Cloud HTTP API (wired in

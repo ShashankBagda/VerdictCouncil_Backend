@@ -174,7 +174,11 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     app.add_middleware(MetricsMiddleware)
-    app.add_middleware(RateLimitMiddleware)
+    app.add_middleware(
+        RateLimitMiddleware,
+        requests_per_minute=settings.rate_limit_per_minute,
+        enabled=settings.rate_limit_enabled,
+    )
     # TraceContext runs first (last added → first executed) so handlers and
     # downstream middleware can read `request.state.trace_id`.
     app.add_middleware(TraceContextMiddleware)
