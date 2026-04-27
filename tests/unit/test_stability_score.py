@@ -252,9 +252,7 @@ def _make_divergence_aware_phase_factory():
                         confidence_score=80,
                     ),
                     "extracted_facts": ExtractedFacts(facts=facts_payload),
-                    "evidence_analysis": EvidenceAnalysis(
-                        evidence_items=evidence_payload
-                    ),
+                    "evidence_analysis": EvidenceAnalysis(evidence_items=evidence_payload),
                 }
             )
             return {"case": new_case}

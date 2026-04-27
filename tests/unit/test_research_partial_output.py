@@ -13,7 +13,6 @@ from datetime import datetime
 import pytest
 
 from src.pipeline.graph.research import research_join_node
-from src.shared.case_state import CaseState
 from src.pipeline.graph.schemas import (
     EvidenceResearch,
     FactsResearch,
@@ -23,6 +22,7 @@ from src.pipeline.graph.schemas import (
     ResearchPart,
     WitnessesResearch,
 )
+from src.shared.case_state import CaseState
 
 
 def _evidence_part() -> ResearchPart:
