@@ -277,6 +277,42 @@ jobs:
             --from-literal=FASTAPI_PORT=8001 \
             --dry-run=client -o yaml | kubectl apply -f -
 
+      - name: Run database migrations
+        # Migrations run before the new image is rolled out so the old pods
+        # are stable (not mid-rollout) while DDL locks are acquired.
+        # All recent migrations are additive (nullable columns / new tables)
+        # so the running old code is safe against the new schema.
+        # alembic/env.py sets lock_timeout=30s so a blocked DDL fails fast
+        # rather than hanging until this step's timeout fires.
+        run: |
+          kubectl delete job alembic-migrate --namespace "${NAMESPACE}" --ignore-not-found
+          sed "s|verdictcouncil:latest|${IMAGE}|g" k8s/base/job-alembic-migrate.yaml \
+            | kubectl apply --namespace "${NAMESPACE}" -f -
+
+          # Poll for Complete or Failed — kubectl wait only watches for Complete
+          # and will sit at the timeout if the job fails instead of fast-failing.
+          i=0
+          while [ $i -lt 60 ]; do
+            COND=$(kubectl get job alembic-migrate -n "${NAMESPACE}" \
+              -o jsonpath='{.status.conditions[?(@.status=="True")].type}' 2>/dev/null || true)
+            if [ "$COND" = "Complete" ]; then
+              echo "Migration completed successfully"
+              exit 0
+            fi
+            if [ "$COND" = "Failed" ]; then
+              echo "Migration job reached Failed status" >&2
+              break
+            fi
+            sleep 5
+            i=$((i + 1))
+          done
+
+          echo "=== alembic-migrate pod logs ===" >&2
+          kubectl logs -l job-name=alembic-migrate -n "${NAMESPACE}" \
+            --tail=200 --prefix 2>&1 || true
+          kubectl describe job/alembic-migrate -n "${NAMESPACE}" 2>&1 || true
+          exit 1
+
       - name: Apply manifests with pinned image
         # Rewrite the placeholder `verdictcouncil:latest` everywhere it
         # appears in the rendered overlay (api-service + arq-worker
@@ -286,14 +322,6 @@ jobs:
           kubectl kustomize "k8s/overlays/${OVERLAY}/" \
             | sed "s|image: verdictcouncil:latest|image: ${IMAGE}|g" \
             | kubectl apply -f -
-
-      - name: Run database migrations
-        run: |
-          kubectl delete job alembic-migrate --namespace "${NAMESPACE}" --ignore-not-found
-          sed "s|verdictcouncil:latest|${IMAGE}|g" k8s/base/job-alembic-migrate.yaml \
-            | kubectl apply --namespace "${NAMESPACE}" -f -
-          kubectl wait --for=condition=complete job/alembic-migrate \
-            --namespace "${NAMESPACE}" --timeout=300s
 
       - name: Wait for rollouts
         run: |
