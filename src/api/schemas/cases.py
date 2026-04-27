@@ -262,12 +262,20 @@ class ArgumentResponse(BaseModel):
     id: UUID
     side: ArgumentSide = Field(..., description="Which side the argument supports")
     legal_basis: str = Field(..., description="Legal basis for the argument")
-    supporting_evidence: dict[str, Any] | None = Field(
-        None, description="Supporting evidence chain"
+    # `supporting_evidence` and `suggested_questions` are JSONB columns
+    # the synthesis mirror fills with whichever shape best fits — the
+    # current SynthesisOutput projection emits a list of SourceRef dicts
+    # under supporting_evidence, but earlier dict-shaped payloads still
+    # exist on older case rows. Same shape-tolerance rationale as
+    # EvidenceResponse / FactResponse: locking to dict-only here returns
+    # 500 from /cases/{id}/arguments and Gate 3 silently renders "No
+    # arguments constructed yet."
+    supporting_evidence: dict[str, Any] | list[Any] | None = Field(
+        None, description="Supporting evidence chain (object or list of refs)"
     )
     weaknesses: str | None = Field(None, description="Identified weaknesses")
-    suggested_questions: dict[str, Any] | None = Field(
-        None, description="Suggested judicial questions"
+    suggested_questions: dict[str, Any] | list[Any] | None = Field(
+        None, description="Suggested judicial questions (object or bullet list)"
     )
 
     model_config = {"from_attributes": True}
