@@ -2,7 +2,7 @@
 
 This guide covers one-time provisioning of all DigitalOcean resources needed to run VerdictCouncil in staging and production. After completing these steps, the CI/CD workflows in [Part 6](06-cicd-pipeline.md) will handle all ongoing deployments.
 
-> **For local development**, see [Part 9: Local Development](09-local-development.md) — covers the dockerised infra compose + honcho-managed API/Orchestrator/agent processes.
+> **For local development**, see [Part 9: Local Development](09-local-development.md) — covers the dockerised infra compose + honcho-managed `api` and `arq-worker` processes.
 
 ---
 
@@ -86,26 +86,24 @@ doctl kubernetes cluster list --format ID,Name
 
 ### 8.3.3 Node Pool Sizing
 
-The canonical deployment runs **12 application pods** (1 API + 1 Orchestrator + 9 agents + 1 stuck-case-watchdog CronJob pod during its 1-minute run) plus the nginx-ingress controller. The three frontier-tier agents carry the heaviest resource requests.
+The canonical deployment runs **two long-lived Deployments** (`api-service` and `arq-worker`, same image, different `command`/`args`) plus the `stuck-case-watchdog` CronJob pod during its 1-minute run, the `alembic-migrate` Job during deploys, and the nginx-ingress controller. All agent reasoning happens in-process inside the `arq-worker`'s LangGraph runtime — there are no per-agent pods.
 
 | Component | CPU Request | Memory Request | Count |
 |---|---|---|---|
-| `vc-api` | 250m | 256Mi | 2 (HPA min) |
-| `vc-orchestrator` | 500m | 512Mi | 2 (HPA min) |
-| Lightweight agents (case-processing, complexity-routing) | 250m | 256Mi | 2 |
-| Efficient/Strong agents (evidence, fact, witness, legal-knowledge) | 500m | 512Mi | 4 |
-| Frontier agents (argument, hearing-analysis, hearing-governance) | 500m | 768Mi | 3 |
+| `api-service` | 250m | 256Mi | 1 (HPA-ready) |
+| `arq-worker` | 250m | 256Mi | 1 (HPA-ready) |
+| `stuck-case-watchdog` (every 5 min) | 50m | 128Mi | 1 (transient) |
 | nginx-ingress | 100m | 128Mi | 2 |
-| **Total (one replica each + HPA mins)** | **~4.6 vCPU** | **~5.6 Gi** | **15 pods** |
+| **Total (single-replica baseline)** | **~0.8 vCPU** | **~0.9 Gi** | **5 pods** |
 
-**Recommended node size:** `s-4vcpu-8gb` ($48/mo each)
+**Recommended node size:** `s-2vcpu-4gb` ($24/mo each) for the baseline; bump to `s-4vcpu-8gb` if you scale `arq-worker` for concurrent pipeline runs.
 
 | Environment | Nodes | Monthly Cost | Headroom |
 |---|---|---|---|
-| Staging | 2 | $96 | Minimal — sufficient for testing; single replica per role |
-| Production | 3 | $144 | Room for HPA scale-up (frontier agents to 2–3 replicas) and rolling updates |
+| Staging | 2 × `s-2vcpu-4gb` | $48 | Sufficient for one concurrent pipeline run + rolling updates |
+| Production | 2 × `s-4vcpu-8gb` | $96 | Room to scale `arq-worker` to 2–3 replicas under load and roll API updates without disruption |
 
-**MVP today** runs only `vc-api` + nginx-ingress in each cluster; the Orchestrator and agent Deployments are tracked as follow-up rollout steps (see §8.13).
+Earlier drafts of this section sized for a 12-pod fleet (1 API + 1 Orchestrator + 9 agent Deployments). That topology was decommissioned with the SAM/Solace removal — see §6.6 in `06-cicd-pipeline.md`. If we ever need per-agent pods again, the natural scale-up path is to add Deployments + Services beside `api-service` and `arq-worker`, but it is not on the current roadmap.
 
 ### 8.3.4 Connect DOCR to DOKS
 
@@ -353,12 +351,12 @@ kubectl create secret generic verdictcouncil-secrets \
   --from-literal=DATABASE_URL="${PG_URI}" \
   --from-literal=REDIS_URL="${REDIS_URI}" \
   --from-literal=JWT_SECRET="<256-bit-secret>" \
-  --from-literal=AGENT_HMAC_SECRET="<256-bit-secret>" \
   --from-literal=FRONTEND_ORIGINS="https://app.verdictcouncil.sg" \
+  --from-literal=LANGSMITH_API_KEY="<optional, tracing/eval only>" \
   --from-literal=COOKIE_SECURE="true"
 ```
 
-`AGENT_HMAC_SECRET` is the key used by the Orchestrator to sign `POST /invoke` calls; every agent pod reads the same secret so it can verify incoming requests. Rotate annually or on any suspected leak (rotation is a rolling restart of the Orchestrator + all agent Deployments).
+The deploy workflows render this Secret automatically from GitHub Action secrets on every roll — see `.github/workflows/staging-deploy.yml` and `production-deploy.yml`. There is no `AGENT_HMAC_SECRET` because there is no Orchestrator-to-agent HTTP contract — both `api-service` and `arq-worker` invoke agent nodes as in-process Python calls inside the LangGraph runtime.
 
 ---
 
@@ -489,12 +487,10 @@ Complete these steps in order:
 - [ ] Create DO Spaces bucket for backups
 - [ ] Install Prometheus + Grafana monitoring stack
 - [ ] Verify: push a test image to DOCR and pull from DOKS
-- [ ] Roll out `vc-api` Deployment + Service + Ingress
-- [ ] Roll out `vc-orchestrator` Deployment (sets `DISPATCH_MODE=remote`)
-- [ ] Roll out 9 agent Deployments + 9 ClusterIP Services (canonical per-agent-container target)
-- [ ] Apply NetworkPolicy restricting `/invoke` ingress to the Orchestrator pod
-- [ ] Generate + store `AGENT_HMAC_SECRET`; confirm agents reject unsigned requests
-- [ ] Configure HPAs (api on CPU+RPS, orchestrator on queue depth, agents on concurrency/latency)
+- [ ] Roll out `api-service` Deployment + Service + Ingress
+- [ ] Roll out `arq-worker` Deployment (no Service — it consumes the Postgres outbox)
+- [ ] Roll out `stuck-case-watchdog` CronJob
+- [ ] Configure HPAs (api on CPU+RPS, arq-worker on queue depth) — follow-up
 
 ---
 
@@ -503,14 +499,15 @@ Complete these steps in order:
 | Resource | Staging | Production | Notes |
 |---|---|---|---|
 | DOKS Cluster (control plane) | Free | Free | DO does not charge for the control plane |
-| DOKS Nodes | $96 (2× s-4vcpu-8gb) | $144 (3× s-4vcpu-8gb) | Auto-scale up adds $48/node |
+| DOKS Nodes | $48 (2× s-2vcpu-4gb) | $96 (2× s-4vcpu-8gb) | Auto-scale up adds $24–$48/node |
 | Managed PostgreSQL | $30 (s-1vcpu-2gb) | $60 (s-2vcpu-4gb) | +$60 for standby node |
 | Managed Redis | $15 (s-1vcpu-1gb) | $15 (s-1vcpu-2gb) | Sufficient for caching workload |
 | DOCR (Professional) | — | $12 | Shared across environments |
 | DO Load Balancer | $12 | $12 | 1 per cluster (auto-provisioned) |
-| DO Spaces | — | $5 | 250 GB included |
-| **Total** | **~$153/mo** | **~$248/mo** | No broker, no per-pod PVCs |
-| **Combined** | | **~$401/mo** | Excluding LLM API costs |
+| DO App Platform (frontend static site) | $0 | $0 | Free tier covers a single static site |
+| DO Spaces | — | $5 | 250 GB included for backups/artifacts |
+| **Total** | **~$105/mo** | **~$200/mo** | Single image, two Deployments — no per-agent pods |
+| **Combined** | | **~$305/mo** | Excluding LLM API costs |
 
 > LLM API costs are usage-based and estimated at $0.40–$0.55 per case. See [Appendix A](appendices.md#appendix-a-cost-model) for per-case breakdown and monthly projections.
 

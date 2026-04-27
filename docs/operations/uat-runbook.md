@@ -1,9 +1,16 @@
 # UAT Runbook — VerdictCouncil Staging
 
-This runbook walks QA through exercising the full SAM mesh pipeline against
-the `verdictcouncil-staging` DOKS cluster. It assumes `kubectl` is
-configured against the staging cluster and `staging-api.verdictcouncil.sg`
-resolves to the ingress.
+This runbook walks QA through exercising the in-process LangGraph
+pipeline against the `verdictcouncil-staging` DOKS cluster. It assumes
+`kubectl` is configured against the staging cluster and
+`staging-api.verdictcouncil.sg` resolves to the Ingress.
+
+> **Topology note.** Earlier drafts of this runbook described a Solace
+> Agent Mesh (SAM) deployment with a 3-node broker, a `layer2-aggregator`
+> service, and 9 per-agent containers. That design was decommissioned —
+> the live deployment is a single image running as two K8s Deployments
+> (`api-service` and `arq-worker`), with all agents executing in-process
+> inside a LangGraph `StateGraph`. See `docs/architecture/02-system-architecture.md`.
 
 ## Smoke test: cluster health
 
@@ -13,14 +20,16 @@ kubectl get pods -n $NS
 ```
 
 Expected state:
-- `solace-broker-0/1/2` — all Running.
-- `solace-bootstrap-*` — Completed (1/1).
-- 9 agent deployments + `layer2-aggregator` + `api-service` + `web-gateway` — all Ready.
+- `api-service-*` — Running, 1/1 Ready.
+- `arq-worker-*` — Running, 1/1 Ready.
+- `stuck-case-watchdog-*` — Completed (during the last 5-min cron firing) or absent.
+- nginx-ingress controller pods — Running.
 
-If any pod is CrashLoopBackOff, check `docs/operations/solace-ha-runbook.md`
-first — most failure modes trace back to auth or VPN bootstrap.
+If any pod is `CrashLoopBackOff`, `kubectl logs` it and check the env vars
+on the rendered `verdictcouncil-secrets` Secret first — most failure modes
+trace back to a missing `DATABASE_URL` / `REDIS_URL` / `OPENAI_API_KEY`.
 
-## Exercise the mesh pipeline end-to-end
+## Exercise the pipeline end-to-end
 
 1. Authenticate as a judge role:
    ```bash
@@ -37,8 +46,9 @@ first — most failure modes trace back to auth or VPN bootstrap.
      -d @tests/fixtures/sample_case.json | jq -r .id)
    ```
 
-3. Trigger mesh execution (this is the POST endpoint introduced in
-   Phase 2 — all 9 SAM agents run distributed over Solace):
+3. Trigger pipeline execution. The API enqueues the run via the Postgres
+   outbox (`pipeline_jobs`); the `arq-worker` Deployment drains it and
+   runs the LangGraph graph in-process:
    ```bash
    curl -sf -X POST https://staging-api.verdictcouncil.sg/api/v1/cases/$CASE_ID/process \
      -H "Authorization: Bearer $TOKEN"
@@ -49,10 +59,11 @@ first — most failure modes trace back to auth or VPN bootstrap.
    curl -N -H "Authorization: Bearer $TOKEN" \
      https://staging-api.verdictcouncil.sg/api/v1/cases/$CASE_ID/status/stream
    ```
-   Expect a sequence of `PipelineProgressEvent` JSON messages, one per agent,
-   ending with `deliberation` → `governance-verdict` → `pipeline_complete`.
-   The 3-way fan-in (evidence/fact/witness → legal-knowledge) should fire
-   nearly simultaneously, then wait on the aggregator barrier.
+   Expect a sequence of `PipelineProgressEvent` JSON messages spanning the
+   intake → research fan-out (evidence + facts + witnesses + law) →
+   research join → synthesis → audit phases, with a `pipeline_complete`
+   terminator. Each Gate (1–4) emits a `gate_pause` event when the graph
+   stops at `interrupt(...)` waiting for a reviewer decision.
 
 5. Verify the final verdict persisted:
    ```bash
@@ -61,64 +72,77 @@ first — most failure modes trace back to auth or VPN bootstrap.
    ```
 
 Pass criteria:
-- SSE stream delivers events for all 9 agents without gaps.
-- `pipeline_complete` arrives within the UAT SLA (currently 90s for the
-  sample case; raise a bug if slower than 180s without explanation).
+- SSE stream delivers events for all phases (intake → 4 research subagents → synthesis → audit) without gaps.
+- `pipeline_complete` arrives within the UAT SLA (currently 90 s for the
+  sample case; raise a bug if slower than 180 s without explanation).
 - The final case row has `status = decided`, `verdict_recommendation` populated,
-  and at least one row in `pipeline_checkpoints` per agent step (Phase 2
-  mid-pipeline persistence — check via the case detail endpoint's audit fields).
+  and a complete `audit_log` (one entry per agent node + gate decision).
+- LangSmith trace for the run shows the full graph execution
+  (`thread_id` = case `run_id`).
 
-## Failover during a live run
+## HITL gate flow
 
-This validates that the 3-node HA survives a broker outage mid-pipeline.
+The pipeline pauses at four review gates. Each pause is a LangGraph
+`interrupt(...)` and is observable as a `gate_pause` SSE event. To resume:
+
+```bash
+# After observing gate_pause for, e.g., gate2:
+curl -sf -X POST "https://staging-api.verdictcouncil.sg/api/v1/cases/$CASE_ID/gates/gate2/resume" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"decision":"advance"}'
+```
+
+`decision` ∈ `{advance, rerun, halt}`. The graph picks up from the
+checkpoint stored in `langgraph_checkpoint` (Postgres) and continues.
+
+## Worker resilience
+
+This validates that the pipeline survives an `arq-worker` pod restart
+mid-run (which can happen during a deploy, an OOM kill, or a node drain).
 
 1. Start a fresh pipeline (`POST /cases/$ID/process`).
-2. In a second terminal, identify the active Solace pod:
+2. After the SSE stream shows the run has progressed past `intake`, kill
+   the worker pod:
    ```bash
-   kubectl get pod -n $NS -l active=true -o name
+   kubectl delete pod -n $NS -l component=arq-worker
    ```
-3. Kill it before the 3-way fan-in finishes:
-   ```bash
-   kubectl delete pod -n $NS solace-broker-0 --grace-period=15
-   ```
-4. Watch the SSE stream from step 4 above.
+3. Watch the SSE stream.
 
 Pass criteria:
-- SSE stream pauses briefly (10–30s) then resumes.
-- Pipeline eventually reports `pipeline_complete`.
-- No manual intervention required — the mesh runner's `await_response` wrapper retries.
+- The `arq-worker` Deployment recreates the pod within ~30 s.
+- The pipeline either resumes from the last checkpoint (graceful) or the
+  `stuck-case-watchdog` flips the case to `failed_retryable` within the
+  30-min threshold (worst case).
+- No manual intervention required.
 
 ## What-If mode
 
-The Contestable Judgment Mode still uses the in-process runner (see the
-`revert(what-if)` commit on this branch) — what-if scenarios do not
-exercise the mesh path. UAT coverage for what-if is the existing
-`POST /cases/{id}/what-if` + `GET` poll flow. Document any mesh-migration
-attempt for what-if as out of scope for this UAT cycle.
+Contestable Judgment Mode runs through the same in-process LangGraph
+runner. UAT coverage for what-if is the `POST /cases/{id}/what-if` +
+`GET` poll flow. Validate that a what-if scenario produces a
+`thread_id`-scoped sub-run distinct from the original case run.
 
 ## Rollback
 
 If a UAT failure requires reverting to the previous release:
 
 ```bash
-# Find the previous rc tag
+# Find the previous tag
 git tag --sort=-v:refname | grep "v0\." | head -5
-# Re-deploy the prior rc (example)
-git checkout v0.3.0-rc.1
-./scripts/deploy-staging.sh   # or re-run the GH Action on the prior SHA
+
+# Roll back via kubectl
+kubectl set image -n $NS deployment/api-service api-service=${PREV_IMAGE}
+kubectl set image -n $NS deployment/arq-worker  arq-worker=${PREV_IMAGE}
+kubectl rollout status -n $NS deployment/api-service --timeout=300s
+kubectl rollout status -n $NS deployment/arq-worker  --timeout=300s
 ```
 
-Do NOT modify the staging Solace StatefulSet directly — roll back the
-committed manifest instead so the rendered-chart provenance stays intact.
-
-## Known deviations from production parity
-
-- Admin password is still pinned to `admin` in the chart values; production
-  must switch to `usernameAdminPasswordSecretName` before cutover.
-- The SEMPv2 bootstrap uses `publishTopicDefaultAction: allow` / `subscribeTopicDefaultAction: allow` for speed. Production bootstrap must tighten ACLs per the A2A topic convention (see `configs/services/layer2-aggregator.yaml:13-20`).
-- No TLS yet on SMF — staging runs plaintext on `tcp://solace-broker:55555`.
+Do NOT modify the staging deploy manifests directly — roll back via image
+tag so the GitHub Actions audit trail stays consistent.
 
 ## Escalation contacts
 
-- On-call rotation: see `docs/operations/solace-ha-runbook.md` escalation section.
 - UAT blockers: file in Linear under the `VER` project, tag `uat-blocker`.
+- Post-deploy regression: page the on-call via the team rotation channel
+  and link the failing pipeline `thread_id` from LangSmith.

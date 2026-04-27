@@ -1,11 +1,11 @@
 # VerdictCouncil — Backend
 
-FastAPI + 9-agent Solace Agent Mesh (SAM) backend for VerdictCouncil, a judicial AI decision-support system for Singapore lower courts (Small Claims Tribunal and Traffic Violations cases). Judges upload case materials, run multi-agent AI analysis through a 4-gate human-review pipeline, and record their own judicial decisions.
+FastAPI backend for VerdictCouncil, a judicial AI decision-support system for Singapore lower courts (Small Claims Tribunal and Traffic Violations cases). Judges upload case materials, run multi-agent AI analysis through a 4-gate human-review pipeline (powered by an in-process LangGraph `StateGraph`), and record their own judicial decisions.
 
 ## Table of Contents
 
 1. [Architecture at a Glance](#architecture-at-a-glance)
-2. [The 9 Agents](#the-9-agents)
+2. [The Reasoning Graph](#the-reasoning-graph)
 3. [Prerequisites](#prerequisites)
 4. [Local Development](#local-development)
 5. [Environment Variables](#environment-variables)
@@ -21,34 +21,43 @@ FastAPI + 9-agent Solace Agent Mesh (SAM) backend for VerdictCouncil, a judicial
 
 ## Architecture at a Glance
 
-Four cooperating processes form the runtime (see `Procfile.dev`):
+Two long-lived processes form the runtime (see `Procfile.dev`), both built from the same multi-stage Docker image:
 
 | Process | What it does | Port |
 |---------|-------------|------|
-| **FastAPI app** (`src/api/app.py`) | HTTP/JSON API for the frontend; also hosts the what-if controller in-process | 8001 |
-| **SAM web-gateway** (`configs/gateway/web-gateway.yaml`) | HTTP/SSE bridge into the Solace Agent Mesh A2A bus | 8002 |
-| **9 SAM agents** (`configs/agents/*.yaml`) | Specialist AI agents running as separate SAM processes over the Solace broker | — |
-| **layer2-aggregator** (`src/services/layer2_aggregator/`) | Custom SAM app that collects per-agent responses and writes final case state to Redis/PostgreSQL | — |
+| **FastAPI app** (`src/api/app.py`) | HTTP/JSON API for the frontend; hosts the LangGraph runtime for synchronous calls (resume after gate, what-if branching) | 8001 |
+| **arq worker** (`src/workers/worker_settings.py`) | Drains the `pipeline_jobs` Postgres outbox; runs the LangGraph `StateGraph` end-to-end for asynchronous case processing; hosts cron jobs (domain reconciliation) | — |
 
-From the orchestration root, `./dev.sh` starts all four layers. For deeper architecture see [`docs/architecture/02-system-architecture.md`](docs/architecture/02-system-architecture.md) and the full [`docs/architecture/README.md`](docs/architecture/README.md).
+There is **no message broker, no per-agent container, and no Orchestrator service.** Earlier drafts described a Solace Agent Mesh (SAM) topology with 9 per-agent containers and a `layer2-aggregator`; that design was decommissioned. Agents run in-process inside a LangGraph `StateGraph` (`src/pipeline/graph/builder.py`).
+
+From the orchestration root, `./dev.sh` starts both processes plus the frontend. For deeper architecture see [`docs/architecture/02-system-architecture.md`](docs/architecture/02-system-architecture.md) and the full [`docs/architecture/README.md`](docs/architecture/README.md).
 
 ---
 
-## The 9 Agents
+## The Reasoning Graph
 
-| Agent | Description |
-|-------|-------------|
-| **case-processing** | Intake router. Parses incoming submissions, normalises the case schema, classifies domain (SCT or traffic), and validates jurisdiction before the pipeline proceeds. |
-| **complexity-routing** | Classifies case complexity (low/medium/high) and routes to automated processing, judicial review, or human escalation. First halt point for high-complexity cases. |
-| **evidence-analysis** | Impartial evidence examiner. Classifies, scores, and cross-references all submitted evidence; surfaces contradictions, admissibility risks, and evidentiary gaps. |
-| **fact-reconstruction** | Builds a sourced chronological timeline from evidence and witness material; marks disputed facts and their dependency on unresolved testimony. |
-| **witness-analysis** | Assesses witness credibility, anticipates testimony for traffic cases, and flags material inconsistencies for the Judge to resolve at hearing. |
-| **legal-knowledge** | Retrieves applicable statutes and precedents via the curated knowledge base and PAIR Search API; supplies verbatim statutory text and binding higher-court authority. |
-| **argument-construction** | Constructs balanced prosecution/defence (traffic) or claimant/respondent (SCT) arguments for judicial evaluation, noting weaknesses on both sides. |
-| **hearing-analysis** | Hearing preparation core. Produces a step-by-step reasoning chain from evidence to a preliminary conclusion at Gate 3, citing every source and flagging low-confidence steps for the presiding Judge. |
-| **hearing-governance** | Final governance gate (Gate 4). Audits the full pipeline output for bias and logical gaps, then presents a governance summary for the presiding Judge to review before recording their own decision. Does not produce a verdict recommendation. |
+The compiled LangGraph topology has three reasoning phases plus four research subagents (parallel fan-out) and four HITL gates:
 
-Full YAML configurations in `configs/agents/`. See [`docs/architecture/03-agent-configurations.md`](docs/architecture/03-agent-configurations.md) for detailed configuration and tool lists.
+```
+intake → gate1 → research_dispatch ─Send─▶ research_evidence  ┐
+                                          research_facts      │
+                                          research_witnesses  │
+                                          research_law        ┘
+                                          → research_join → gate2
+                                                              → synthesis → gate3 → auditor → gate4 → END
+```
+
+| Phase node | Description |
+|---|---|
+| **intake** | Parses the submission, normalises the case schema, classifies domain (SCT or traffic), validates jurisdiction, and assesses complexity. |
+| **research_evidence** | Impartial evidence examiner. Classifies, scores, and cross-references submitted evidence; surfaces contradictions, admissibility risks, and evidentiary gaps. |
+| **research_facts** | Builds a sourced chronological timeline; marks disputed facts and their dependency on unresolved testimony. |
+| **research_witnesses** | Assesses witness credibility, anticipates testimony for traffic cases, and flags material inconsistencies. |
+| **research_law** | Retrieves applicable statutes and precedents via the curated knowledge base and PAIR Search API; supplies verbatim statutory text and binding higher-court authority. |
+| **synthesis** | Constructs balanced prosecution/defence (traffic) or claimant/respondent (SCT) arguments and a step-by-step reasoning chain to a preliminary conclusion at Gate 3, citing every source. |
+| **auditor** | Final governance gate (Gate 4). Audits the full pipeline output for bias and logical gaps, then presents a governance summary for the presiding Judge to review before recording their own decision. |
+
+Each gate (`gate1` … `gate4`) is a pair of LangGraph nodes: a `*_pause` that calls `interrupt(...)` and a `*_apply` that returns `Command(goto=...)` based on the reviewer's `advance` / `rerun` / `halt` decision. State persists in the Postgres `langgraph_checkpoint` table (`thread_id` = case `run_id`), so a paused run resumes cleanly from the API after the human review. See [`docs/architecture/03-agent-configurations.md`](docs/architecture/03-agent-configurations.md) for prompts, tools, and model tiers.
 
 ---
 
@@ -69,13 +78,12 @@ Full YAML configurations in `configs/agents/`. See [`docs/architecture/03-agent-
 ```bash
 cp .env.example .env          # fill in your secrets (see Environment Variables below)
 make install                  # create .venv, install dependencies
-make infra-up                 # start Postgres, Redis, and Solace broker via Docker
-make solace-bootstrap         # provision VPN + vc-agent user (first run only)
+make infra-up                 # start Postgres + Redis via Docker
 make migrate                  # run Alembic migrations
-make dev                      # start all processes via honcho (Procfile.dev)
+make dev                      # start the API + arq worker via honcho (Procfile.dev)
 ```
 
-`make dev` starts the full local stack: web-gateway, 9 agents, layer2-aggregator, and the FastAPI API on port 8001. From the orchestration root, `./dev.sh` wraps all of the above.
+`make dev` starts the FastAPI API on port 8001 and the arq worker that drains the pipeline outbox. From the orchestration root, `./dev.sh` wraps all of the above plus the frontend.
 
 To stop: `Ctrl+C` in the `dev.sh` terminal, or from the orchestration root:
 
@@ -95,19 +103,15 @@ Copy `.env.example` and fill in the required values. The table below covers requ
 | Variable | Description |
 |----------|-------------|
 | `OPENAI_API_KEY` | OpenAI API key — required for all agents |
-| `SOLACE_BROKER_URL` | Broker SMF URL, e.g. `tcp://localhost:55556` |
-| `SOLACE_BROKER_VPN` | VPN name, e.g. `verdictcouncil` |
-| `SOLACE_BROKER_USERNAME` | Agent credentials user, e.g. `vc-agent` |
-| `SOLACE_BROKER_PASSWORD` | Agent credentials password |
 | `DATABASE_URL` | PostgreSQL DSN, e.g. `postgresql://vc_dev:pwd@localhost:5432/verdictcouncil` |
 | `REDIS_URL` | Redis DSN, e.g. `redis://localhost:6379/0` |
 | `JWT_SECRET` | Secret for signing `vc_token` cookies — use a long random string in production |
 | `COOKIE_SECURE` | `true` in production (HTTPS); `false` for local HTTP |
 | `FRONTEND_ORIGINS` | CORS allow-list, e.g. `http://localhost:5173` |
-| `NAMESPACE` | SAM namespace, e.g. `verdictcouncil` |
+| `NAMESPACE` | Logical environment namespace, e.g. `verdictcouncil` / `verdictcouncil-staging` |
 | `FASTAPI_PORT` | API port (default `8001`) |
-| `WEB_GATEWAY_PORT` | Gateway port (default `8002`) — **must differ from** `FASTAPI_PORT` |
 | `OPENAI_VECTOR_STORE_ID` | ID of the curated judicial knowledge base vector store |
+| `LANGSMITH_API_KEY` | Optional. Enables LangSmith tracing + eval; runtime works without it |
 
 Optional model-tier overrides (`OPENAI_MODEL_LIGHTWEIGHT`, `OPENAI_MODEL_EFFICIENT_REASONING`, `OPENAI_MODEL_STRONG_REASONING`, `OPENAI_MODEL_FRONTIER_REASONING`) default to the values in `.env.example`.
 
@@ -161,8 +165,8 @@ Test layout:
 | Directory | Contents |
 |-----------|----------|
 | `tests/unit/` | Routes, services, tools, pipeline runner, guardrails, rate-limit, sanitization, diff engine, watchdog |
-| `tests/integration/` | SAM mesh smoke, halt conditions, PG-backed watchdog |
-| `tests/eval/` | Eval harness (`eval_runner.py`, fixture cases) |
+| `tests/integration/` | LangGraph end-to-end smoke, gate halt/rerun conditions, PG-backed watchdog |
+| `tests/eval/` | LangSmith eval harness (`eval_runner.py`, fixture cases) |
 
 ---
 
@@ -183,12 +187,12 @@ make smoke-contract     # hit every frontend-used endpoint against a running API
 | Artifact | Location |
 |----------|----------|
 | Container image | `Dockerfile` (multi-stage Python 3.12 slim; WeasyPrint libs included) |
-| Local infra | `docker-compose.infra.yml` (Postgres 16, Redis 7, Solace PubSub+) |
-| Kubernetes | `k8s/base/` — one Deployment per agent, plus gateway, aggregator, and API; HPA, ingress, Solace HA, bootstrap Job, stuck-case CronJob |
+| Local infra | `docker-compose.infra.yml` (Postgres 16, Redis 7) |
+| Kubernetes | `k8s/base/` — `api-service` Deployment, `arq-worker` Deployment, ClusterIP service, NGINX Ingress + cert-manager TLS, Alembic Job, stuck-case-watchdog CronJob |
 | Overlays | `k8s/overlays/staging/` and `k8s/overlays/production/` (kustomize) |
+| CI/CD | `.github/workflows/staging-deploy.yml` and `production-deploy.yml` — build the image, push to DOCR, render secrets, run Alembic, roll both Deployments |
 
-Infrastructure setup: [`docs/architecture/08-infrastructure-setup.md`](docs/architecture/08-infrastructure-setup.md).
-Solace HA runbook: [`docs/operations/solace-ha-runbook.md`](docs/operations/solace-ha-runbook.md).
+Backend deploys to **DOKS** (DigitalOcean Kubernetes); the frontend deploys to **DO App Platform** as a static site (see `../VerdictCouncil_Frontend/.do/`). Infrastructure setup: [`docs/architecture/08-infrastructure-setup.md`](docs/architecture/08-infrastructure-setup.md). K8s layout: [`k8s/README.md`](k8s/README.md).
 
 ---
 

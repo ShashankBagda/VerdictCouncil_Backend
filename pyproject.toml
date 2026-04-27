@@ -93,7 +93,7 @@ ignore_missing_imports = true
 testpaths = ["tests"]
 asyncio_mode = "auto"
 markers = [
-    "integration: marks tests requiring live infrastructure (LLM, broker, Redis) — skipped in CI",
+    "integration: marks tests requiring live infrastructure (LLM, Postgres, Redis) — skipped in CI",
 ]
 
 [dependency-groups]

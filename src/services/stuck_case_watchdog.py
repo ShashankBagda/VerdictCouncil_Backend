@@ -5,23 +5,25 @@ than ``threshold_seconds`` and marks them as ``failed_retryable``.
 
 Why this exists
 ---------------
-``CaseState`` lives in Solace queue messages while a pipeline is running. If
-the broker drops a message (outage, restart, queue corruption), the matching
-``Case`` row stays in ``processing`` forever — the user sees a spinner that
-never resolves. This watchdog gives the user a clear "retry" affordance
-instead of a silent hang. See ``TODOS.md:5`` (Solace HA pivot) and the plan
-at ``~/.claude/plans/breezy-fluttering-dolphin.md`` (Section C) for context.
+``CaseState`` lives inside an in-flight LangGraph run while a pipeline is
+executing. If the arq worker process crashes mid-run (OOM kill, K8s
+SIGTERM during a rollout, exception escaping the retry policy), the
+matching ``Case`` row stays in ``processing`` forever — the user sees a
+spinner that never resolves. This watchdog gives the user a clear "retry"
+affordance instead of a silent hang.
 
 Conservative on purpose: marks as ``failed_retryable`` rather than
-auto-republishing. Republish would require verifying agent idempotency on
-``run_id`` reuse, which is out of scope for this watchdog.
+auto-resuming. Auto-resume would require verifying agent idempotency on
+``thread_id`` reuse against the Postgres checkpointer, which is out of
+scope for this watchdog.
 
 CLI
 ---
     python -m src.services.stuck_case_watchdog [--threshold-seconds N] [--dry-run]
 
-The K8s CronJob in ``k8s/base/cronjob-stuck-case-watchdog.yaml`` invokes the
-default form (5-minute schedule, 30-minute threshold).
+Runs in production as the K8s CronJob in
+``k8s/base/cronjob-stuck-case-watchdog.yaml`` (5-minute schedule,
+30-minute threshold).
 """
 
 from __future__ import annotations
