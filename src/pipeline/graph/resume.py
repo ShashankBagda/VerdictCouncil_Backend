@@ -103,8 +103,10 @@ async def find_pending_interrupt(
 ) -> tuple[str, dict[str, Any]] | None:
     """Return ``(gate, interrupt_payload)`` for the first pending pause task.
 
-    None when the saver has no pending interrupt — the caller treats
-    that as the run-reached-END case.
+    None when the saver has no pending gate-pause interrupt. Chat-steering
+    interrupts (``kind=ask_judge``) are intentionally skipped — they fire
+    mid-tool inside an agent node and are surfaced by
+    :func:`find_pending_chat_interrupt` instead.
     """
     state = await graph.aget_state(cast(RunnableConfig, config))
     for task in state.tasks:
@@ -112,13 +114,8 @@ async def find_pending_interrupt(
             continue
         gate = gate_from_pause_node(task.name)
         if gate is None:
-            # Defensive: an interrupt fired from a non-gate node. We still
-            # want to surface it so the caller can react, but with an
-            # empty gate label so the downstream UPSERT skips.
-            logger.warning(
-                "interrupt fired from non-gate node %r — skipping legacy compat",
-                task.name,
-            )
+            # Non-gate interrupt (e.g. ask_judge). Caller distinguishes via
+            # find_pending_chat_interrupt; we just don't claim it here.
             continue
         first = task.interrupts[0]
         value = getattr(first, "value", None)
@@ -128,7 +125,26 @@ async def find_pending_interrupt(
     return None
 
 
-ResumeOutcome = Literal["interrupt", "terminal"]
+async def find_pending_chat_interrupt(
+    graph: CompiledStateGraph[Any], config: dict[str, Any]
+) -> dict[str, Any] | None:
+    """Return the ``ask_judge`` interrupt payload when one is pending.
+
+    Chat-steering interrupts fire from inside an agent's tool call (today
+    only synthesis), not from a ``gate{N}_pause`` node. They must NOT be
+    treated as gate pauses — the case stays in ``processing`` while the
+    judge replies via the workspace chat panel.
+    """
+    state = await graph.aget_state(cast(RunnableConfig, config))
+    for task in state.tasks:
+        for interrupt in task.interrupts or ():
+            value = getattr(interrupt, "value", None)
+            if isinstance(value, dict) and value.get("kind") == "ask_judge":
+                return value
+    return None
+
+
+ResumeOutcome = Literal["interrupt", "terminal", "chat"]
 
 
 #: Phase → the gate that pauses *after* it. The send-back mechanic
@@ -299,6 +315,11 @@ async def drive_resume(
     - ``("interrupt", gate, interrupt_payload)`` — the run paused at the
       next gate. Caller publishes ``InterruptEvent`` and UPSERTs the
       legacy ``awaiting_review_gateN`` status.
+    - ``("chat", None, ask_judge_payload)`` — the run paused on a
+      chat-steering ``ask_judge`` interrupt mid-phase. The agent's tool
+      already published the question event; caller must NOT close the
+      case or emit a terminal progress event — the chat panel needs the
+      SSE stream alive while the judge composes a reply.
     - ``("terminal", None, None)`` — the run reached END (gate4 advance,
       gate halt, or final phase completion). Caller persists terminal
       case state and emits the legacy ``terminal`` progress event.
@@ -317,6 +338,10 @@ async def drive_resume(
 
     resume = build_resume_payload(payload)
     await graph.ainvoke(Command(resume=resume), cast(RunnableConfig, config))
+
+    chat = await find_pending_chat_interrupt(graph, config)
+    if chat is not None:
+        return "chat", None, chat
 
     pending = await find_pending_interrupt(graph, config)
     if pending is None:

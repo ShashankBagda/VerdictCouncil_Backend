@@ -181,9 +181,19 @@ class EvidenceResponse(BaseModel):
     id: UUID
     evidence_type: EvidenceType = Field(..., description="Type of evidence")
     strength: EvidenceStrength | None = Field(None, description="Assessed strength")
-    admissibility_flags: dict[str, Any] | None = Field(None, description="Admissibility flags")
-    linked_claims: dict[str, Any] | None = Field(
-        None, description="Linked claims, contradictions, or corroboration metadata"
+    # `admissibility_flags` and `linked_claims` are JSONB columns that the
+    # research-evidence agent fills with whichever shape best fits the
+    # claim. In practice we see both `{name: bool}` dicts and bullet-style
+    # `["supports (prosecution): ..."]` lists. The response schema must
+    # accept both — locking to dict-only causes a 500 on the FE's
+    # /cases/{id} call and tears down the entire workspace.
+    admissibility_flags: dict[str, Any] | list[Any] | None = Field(
+        None, description="Admissibility flags (object or bullet list)"
+    )
+    linked_claims: dict[str, Any] | list[Any] | None = Field(
+        None,
+        description="Linked claims, contradictions, or corroboration metadata "
+        "(object or bullet list)",
     )
 
     model_config = {"from_attributes": True}
@@ -196,8 +206,10 @@ class FactResponse(BaseModel):
     event_time: time | None = Field(None, description="Time of the event")
     confidence: FactConfidence | None = Field(None, description="Confidence level")
     status: FactStatus | None = Field(None, description="Agreed or disputed")
-    corroboration: dict[str, Any] | None = Field(
-        None, description="Corroboration or dispute metadata"
+    # Same shape-tolerance rationale as EvidenceResponse — agents emit
+    # both objects and bullet lists; the response must accept both.
+    corroboration: dict[str, Any] | list[Any] | None = Field(
+        None, description="Corroboration or dispute metadata (object or bullet list)"
     )
     source_document_id: UUID | None = Field(None, description="Originating document id")
 
@@ -209,8 +221,8 @@ class WitnessResponse(BaseModel):
     name: str = Field(..., description="Witness name")
     role: str | None = Field(None, description="Witness role")
     credibility_score: int | None = Field(None, description="Credibility score (0-100)")
-    bias_indicators: dict[str, Any] | None = Field(
-        None, description="Bias indicators and credibility factors"
+    bias_indicators: dict[str, Any] | list[Any] | None = Field(
+        None, description="Bias indicators and credibility factors (object or bullet list)"
     )
     simulated_testimony: str | None = Field(
         None, description="Traffic-only simulated testimony summary"

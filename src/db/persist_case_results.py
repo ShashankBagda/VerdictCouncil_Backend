@@ -106,7 +106,16 @@ async def persist_case_results(
 
 
 async def _clear_child_rows(db: AsyncSession, case_id: UUID) -> None:
-    """Delete all pipeline-produced rows for ``case_id`` before re-inserting."""
+    """Delete pipeline-produced derived rows for ``case_id`` before re-inserting.
+
+    AuditLog is intentionally NOT in this list. Audit rows are written by
+    the LangGraph middleware as agents emit tool calls — wiping them on
+    every persist destroys the very signal `_derive_agent_status` reads
+    from to render the Graph Mesh / Building views, leaving the FE stuck
+    on "intake running, everything else pending" forever even though the
+    agents have already produced full output. Audit is append-only by
+    design; per-run dedup happens in `_insert_audit_log`.
+    """
     for model in (
         Evidence,
         Fact,
@@ -115,7 +124,6 @@ async def _clear_child_rows(db: AsyncSession, case_id: UUID) -> None:
         Precedent,
         Argument,
         HearingAnalysis,
-        AuditLog,
     ):
         await db.execute(delete(model).where(model.case_id == case_id))
 
@@ -159,6 +167,24 @@ async def _update_case_row(
 # ---------------------------------------------------------------------------
 
 
+_EVIDENCE_TYPE_ALIASES: dict[str, str] = {
+    # Pipeline EvidenceType Literal vs legacy EvidenceType enum.
+    "document": "documentary",
+    "testimony": "testimonial",
+    "other": "documentary",
+}
+
+_EVIDENCE_STRENGTH_ALIASES: dict[str, str] = {
+    # Pipeline EvidenceStrength Literal vs legacy enum.
+    "moderate": "medium",
+}
+
+_FACT_CONFIDENCE_ALIASES: dict[str, str] = {
+    # ConfidenceLevel enum (high / med / low) vs legacy FactConfidence (high / medium / low / disputed).
+    "med": "medium",
+}
+
+
 def _insert_evidence(db: AsyncSession, case_id: UUID, state: CaseState) -> None:
     data = state.evidence_analysis
     if not data:
@@ -166,18 +192,51 @@ def _insert_evidence(db: AsyncSession, case_id: UUID, state: CaseState) -> None:
     for item in data.evidence_items:
         if not isinstance(item, dict):
             continue
-        ev_type = _coerce_enum(item.get("evidence_type"), EvidenceType)
+        ev_type_raw = item.get("evidence_type")
+        ev_type_norm = _EVIDENCE_TYPE_ALIASES.get(ev_type_raw, ev_type_raw)
+        ev_type = _coerce_enum(ev_type_norm, EvidenceType)
         if ev_type is None:
             continue
+        strength_raw = item.get("strength")
+        strength_norm = _EVIDENCE_STRENGTH_ALIASES.get(strength_raw, strength_raw)
         db.add(
             Evidence(
                 case_id=case_id,
                 evidence_type=ev_type,
-                strength=_coerce_enum(item.get("strength"), EvidenceStrength),
+                strength=_coerce_enum(strength_norm, EvidenceStrength),
                 admissibility_flags=item.get("admissibility_flags"),
                 linked_claims=_as_jsonb(item.get("linked_claims")),
             )
         )
+
+
+def _normalize_fact_status(item: dict[str, Any]) -> str | None:
+    """Honor `status=disputed` only when the agent supplied a real conflict signal.
+
+    The fact-reconstruction prompt has two competing definitions: a 5-bucket
+    confidence scale where DISPUTED means "20-49% confidence / single-source",
+    and the FactStatus enum where `disputed` means "party A says X, party B
+    says not-X". The agent collapses them and writes uncorroborated single-
+    source assertions as `status=disputed`, which the FE then surfaces as
+    "this fact is currently being excluded from automated determinations" —
+    misleading the judge into thinking 12 of 14 facts are contested.
+
+    Only persist `disputed` when the agent provided an explicit dispute
+    reason or a corroboration entry that flags a contradiction. Otherwise
+    default to `agreed`; the judge can mark facts as disputed manually via
+    the DisputedFactsPanel post-intake.
+    """
+    raw = item.get("status")
+    if raw != "disputed":
+        return raw
+    if item.get("dispute_reason"):
+        return raw
+    corroboration = item.get("corroboration") or {}
+    if isinstance(corroboration, dict):
+        for key in ("conflicts", "contradictions", "contests"):
+            if corroboration.get(key):
+                return raw
+    return "agreed"
 
 
 def _insert_facts(db: AsyncSession, case_id: UUID, state: CaseState) -> None:
@@ -196,8 +255,11 @@ def _insert_facts(db: AsyncSession, case_id: UUID, state: CaseState) -> None:
                 event_date=_parse_date(item.get("event_date") or item.get("date")),
                 event_time=_parse_time(item.get("event_time") or item.get("time")),
                 description=description,
-                confidence=_coerce_enum(item.get("confidence"), FactConfidence),
-                status=_coerce_enum(item.get("status"), FactStatus),
+                confidence=_coerce_enum(
+                    _FACT_CONFIDENCE_ALIASES.get(item.get("confidence"), item.get("confidence")),
+                    FactConfidence,
+                ),
+                status=_coerce_enum(_normalize_fact_status(item), FactStatus),
                 corroboration=_as_jsonb(item.get("corroboration")),
             )
         )
@@ -214,15 +276,21 @@ def _insert_witnesses(db: AsyncSession, case_id: UUID, state: CaseState) -> None
         name = (item.get("name") or "").strip()
         if not name:
             continue
-        credibility = item.get("credibility_score")
+        # New WitnessesResearch emits credibility as {"value": float 0..1, "rationale": str};
+        # legacy column is a 0-100 int. Pull `.value` and rescale when the new shape arrives,
+        # otherwise fall through to the flat `credibility_score` field.
+        credibility_raw = item.get("credibility")
+        if isinstance(credibility_raw, dict) and isinstance(credibility_raw.get("value"), (int, float)):
+            credibility = int(round(float(credibility_raw["value"]) * 100))
+        else:
+            cs = item.get("credibility_score")
+            credibility = int(cs) if isinstance(cs, (int, float)) else None
         db.add(
             Witness(
                 case_id=case_id,
                 name=name,
                 role=item.get("role"),
-                credibility_score=int(credibility)
-                if isinstance(credibility, (int, float))
-                else None,
+                credibility_score=credibility,
                 bias_indicators=_as_jsonb(item.get("bias_indicators")),
                 simulated_testimony=item.get("simulated_testimony"),
             )
@@ -274,15 +342,26 @@ def _insert_precedents(db: AsyncSession, case_id: UUID, state: CaseState) -> Non
         )
 
 
+_ARGUMENT_SIDE_ALIASES: dict[str, str] = {
+    # The new SynthesisOutput emits civil-flavored side names; the legacy
+    # ArgumentSide enum is criminal-flavored. Map at insert time so the
+    # data lands in the legacy column without a schema migration.
+    "claimant": "prosecution",
+    "respondent": "defense",
+}
+
+
 def _insert_arguments(db: AsyncSession, case_id: UUID, state: CaseState) -> None:
     arguments = state.arguments or {}
     if not isinstance(arguments, dict):
         return
-    # Agents emit arguments grouped by side ({"prosecution": [...], "defense": [...]})
-    # OR as a flat list under a well-known key. Support both.
+    # Agents emit arguments grouped by side ({"prosecution": [...], "defense": [...]}
+    # for traffic/criminal, {"claimant": [...], "respondent": [...]} for civil-flavored
+    # SynthesisOutput) OR as a flat list under a well-known key. Support both.
     for side_key, values in arguments.items():
         if not isinstance(values, list):
             continue
+        side_key = _ARGUMENT_SIDE_ALIASES.get(side_key, side_key)
         side_enum = _coerce_enum(side_key, ArgumentSide)
         if side_enum is None:
             continue

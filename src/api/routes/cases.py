@@ -1341,6 +1341,40 @@ async def stream_pipeline_status(
     }
     snap_payload = f"event: progress\ndata: {json.dumps(snap_event)}\n\n"
 
+    # Q1.11 chat-steering — snapshot any pending `ask_judge` interrupt so a
+    # client that reconnects after the original SSE event was missed can
+    # still render the chat question. Without this, the AgentChatPanel
+    # stays disabled forever and the judge has no way to reply, leaving
+    # the case stuck mid-synthesis.
+    snap_chat_payload: str | None = None
+    try:
+        from src.pipeline.graph.resume import find_pending_chat_interrupt
+        from src.pipeline.graph.runner import GraphPipelineRunner as _GPR
+
+        _runner = _GPR()
+        if _runner._graph is not None:
+            _chat = await find_pending_chat_interrupt(
+                _runner._graph,
+                {"configurable": {"thread_id": str(case_id)}},
+            )
+            if _chat is not None:
+                snap_chat_event = {
+                    "kind": "interrupt",
+                    "schema_version": 1,
+                    "case_id": str(case_id),
+                    "agent": _chat.get("agent") or "synthesis",
+                    "question": _chat.get("question"),
+                    "interrupt_id": _chat.get("interrupt_id"),
+                    "ts": datetime.now(UTC).isoformat(),
+                }
+                snap_chat_payload = (
+                    f"event: interrupt\ndata: {json.dumps(snap_chat_event)}\n\n"
+                )
+    except Exception:
+        # Snapshot replay must never break the SSE handshake — fall through
+        # silently and rely on the next live event.
+        snap_chat_payload = None
+
     async def event_generator():
         # Snapshot-on-connect: emit current case status so a client that
         # re-subscribes after a gate advance sees the current state
@@ -1348,6 +1382,8 @@ async def stream_pipeline_status(
         # above from a closed short-lived session — no DB calls run
         # while streaming, so the request holds no connection.
         yield snap_payload
+        if snap_chat_payload is not None:
+            yield snap_chat_payload
 
         # Producer-consumer pattern: a background task owns the subscribe()
         # generator for its full lifetime and pushes payloads onto a queue.
@@ -2130,6 +2166,21 @@ async def _handle_message_resume(
     # `ainvoke(Command(resume=...))` has nothing to resume against.
     # `add_messages` (the reducer on judge_messages) appends.
     async def _drive_resume() -> None:
+        from datetime import UTC as _UTC, datetime as _datetime
+
+        from src.api.schemas.pipeline_events import PipelineProgressEvent
+        from src.db.persist_case_results import persist_case_results
+        from src.pipeline.graph.resume import (
+            find_pending_chat_interrupt,
+            find_pending_interrupt,
+        )
+        from src.services.database import async_session
+        from src.services.pipeline_events import (
+            publish_interrupt as _publish_interrupt,
+            publish_progress as _publish_progress,
+        )
+        from src.shared.case_state import CaseStatusEnum as _CaseStatusEnum
+
         try:
             await runner._graph.ainvoke(
                 Command(
@@ -2145,6 +2196,75 @@ async def _handle_message_resume(
                 "ask_judge resume failed for case=%s interrupt_id=%s",
                 case_id,
                 payload.interrupt_id,
+            )
+            return
+
+        # Post-resume: detect what the graph paused on next so the case
+        # row + SSE stream stay coherent. Without this, a chat reply that
+        # triggers gate3_pause would leave case.status=processing forever
+        # because no follow-up path persists the gate state. Mirrors the
+        # outcome handling in workers.tasks._run_gate_via_resume.
+        try:
+            chat = await find_pending_chat_interrupt(runner._graph, config)
+            if chat is not None:
+                # Another ask_judge interrupt — its question event was
+                # published from inside the tool; nothing for us to do.
+                return
+
+            pending = await find_pending_interrupt(runner._graph, config)
+            snapshot = await runner._graph.aget_state(config)
+            final_state = snapshot.values["case"]
+
+            if pending is None:
+                # Run reached terminal (rare from a chat reply — would
+                # require synthesis to be the last node before END).
+                halt = snapshot.values.get("halt") or {}
+                terminal_status = (
+                    _CaseStatusEnum.failed if halt else _CaseStatusEnum.closed
+                )
+                final_state = final_state.model_copy(update={"status": terminal_status})
+                async with async_session() as db_:
+                    await persist_case_results(db_, case_id, final_state)
+                await _publish_progress(
+                    PipelineProgressEvent(
+                        case_id=case_id,
+                        agent="pipeline",
+                        phase="terminal",
+                        ts=_datetime.now(_UTC),
+                        detail={
+                            "reason": halt.get("reason", "completed") if halt else "completed",
+                            "stopped_at": halt.get("gate") if halt else "end",
+                        },
+                    )
+                )
+                return
+
+            gate, interrupt_payload = pending
+            gate_num = int(gate[-1])
+            gate_state_payload = {
+                "current_gate": gate_num,
+                "awaiting_review": True,
+                "rerun_agent": None,
+            }
+            async with async_session() as db_:
+                await persist_case_results(
+                    db_, case_id, final_state, gate_state_payload=gate_state_payload
+                )
+            if interrupt_payload is not None:
+                await _publish_interrupt(case_id, gate, interrupt_payload)
+            await _publish_progress(
+                PipelineProgressEvent(
+                    case_id=case_id,
+                    agent="pipeline",
+                    phase="awaiting_review",
+                    ts=_datetime.now(_UTC),
+                    detail={"gate": gate, "stopped_at": f"awaiting_review_{gate}"},
+                )
+            )
+        except Exception:
+            logger.exception(
+                "post-chat-reply outcome handling failed for case=%s",
+                case_id,
             )
 
     asyncio.create_task(_drive_resume())

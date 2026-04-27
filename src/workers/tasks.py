@@ -215,6 +215,23 @@ async def _run_gate_via_resume(job: PipelineJob, *, trace_id: str | None) -> Non
     snapshot = await runner._graph.aget_state(config)
     final_state = snapshot.values["case"]
 
+    if outcome == "chat":
+        # Q1.11 chat-steering: synthesis (or another phase, eventually)
+        # paused inside an `ask_judge` tool call. The tool already
+        # published the question event from inside its body, so the chat
+        # panel will render. We must NOT override case.status (the API
+        # already set it to `processing` when enqueueing this job) and
+        # we must NOT emit a terminal progress event — the SSE stream
+        # has to stay alive for the chat reply to flow back through.
+        # The post-reply gate3 pause is detected and persisted by
+        # `_handle_message_resume` in the API layer.
+        logger.info(
+            "drive_resume returned chat outcome for case_id=%s — leaving "
+            "status=processing while chat panel awaits judge reply",
+            case_id,
+        )
+        return
+
     if outcome == "interrupt":
         gate_num = int(gate[-1])  # type: ignore[index]
         gate_state_payload = {

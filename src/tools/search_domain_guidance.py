@@ -30,7 +30,7 @@ def _get_client() -> AsyncOpenAI:
 async def search_domain_guidance(
     query: str,
     vector_store_id: str,
-    max_results: int = 5,
+    max_results: int = 25,
 ) -> list[dict]:
     """Query the domain's curated knowledge base.
 
@@ -39,7 +39,10 @@ async def search_domain_guidance(
         vector_store_id: REQUIRED. The domain's OpenAI vector store ID.
             Injected by the runner from CaseState.domain_vector_store_id.
             Agents must not choose this value themselves.
-        max_results: Maximum number of results to return.
+        max_results: Maximum number of results to return. Default is
+            generous (25, OpenAI hard cap 50) — bias toward recall, since
+            missing a controlling statute is worse than reading a few
+            extra chunks of practice directions.
 
     Returns:
         List of result dicts with citation, content, and score fields.
@@ -50,6 +53,9 @@ async def search_domain_guidance(
     """
     if not vector_store_id:
         raise DomainGuidanceUnavailable("Domain has no provisioned vector store")
+
+    # OpenAI file_search hard-caps at 50 per call.
+    max_results = max(1, min(int(max_results or 25), 50))
 
     try:
         client = _get_client()
@@ -77,7 +83,11 @@ async def search_domain_guidance(
                     results.append(
                         {
                             "citation": result.filename or "Unknown",
-                            "content": (result.text or "")[:1000],
+                            # Up from 1000 — clip only egregiously long
+                            # chunks so we don't blow the prompt budget on
+                            # a single retrieval, while still giving the
+                            # agent enough context to reason from.
+                            "content": (result.text or "")[:4000],
                             "score": result.score if result.score else 0,
                             "source": "domain_guidance",
                             "file_id": getattr(result, "file_id", "") or "",

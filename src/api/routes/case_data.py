@@ -88,8 +88,32 @@ async def _get_case_or_404(case_id: UUID, db, current_user) -> Case:
     return case
 
 
+# Gate → agents that run before that gate's pause. Used to back-fill
+# agent status when audit_logs are sparse (e.g. a gate persisted before
+# the audit-clear bug was fixed wiped its agent rows). Without this the
+# Graph Mesh / Building views render every gate as "pending" forever
+# despite the dossier showing the agents already produced output.
+_AGENTS_BY_GATE: dict[int, list[str]] = {
+    1: ["intake"],
+    2: ["research-evidence", "research-facts", "research-witnesses", "research-law"],
+    3: ["synthesis"],
+    4: ["audit"],
+}
+
+
 def _derive_agent_status(case: Case, audit_logs: list[AuditLog]) -> list[dict[str, Any]]:
-    """Derive per-agent status from the case status and audit log entries.
+    """Derive per-agent status from the case state, gate_state, and audit log.
+
+    Three signal sources, in priority order:
+      1. ``case.gate_state`` — the canonical record of which gate just
+         finished. Agents that fed into a finished gate are completed,
+         the agents feeding the current gate are completed when
+         ``awaiting_review=True``, and any later agents are pending.
+      2. Audit log entries written by the LangGraph middleware as agents
+         tool-call. These give per-agent start/end timestamps and finer-
+         grained run/complete signals when present.
+      3. Case-level status (``processing`` / ``failed`` / terminal) for
+         the running-agent indicator and final fallback.
 
     Audit rows written by the LangGraph middleware use the canonical
     LangGraph node IDs (`intake`, `research-evidence`, …); rows written
@@ -103,9 +127,30 @@ def _derive_agent_status(case: Case, audit_logs: list[AuditLog]) -> list[dict[st
         if canonical in agent_actions:
             agent_actions[canonical].append(log)
 
+    # Pull "which gate finished" from gate_state. Treat it as the floor
+    # for completion: every agent that ran before this gate is completed
+    # regardless of whether its audit rows survived.
+    gate_state = case.gate_state if isinstance(case.gate_state, dict) else {}
+    current_gate = gate_state.get("current_gate") if gate_state else None
+    awaiting_review = bool(gate_state.get("awaiting_review")) if gate_state else False
+
+    completed_agents: set[str] = set()
+    if isinstance(current_gate, int) and current_gate >= 1:
+        # All agents in gates strictly before current_gate are done.
+        for g in range(1, current_gate):
+            completed_agents.update(_AGENTS_BY_GATE.get(g, []))
+        # Agents at the current gate are done iff we're paused awaiting
+        # judge review — that's the contract of the gate-pause node.
+        if awaiting_review:
+            completed_agents.update(_AGENTS_BY_GATE.get(current_gate, []))
+    # Terminal states imply every agent finished.
+    if case.status in (CaseStatus.ready_for_review, CaseStatus.closed):
+        completed_agents.update(PIPELINE_AGENTS)
+
     agents = []
     for agent_id in PIPELINE_AGENTS:
         logs = agent_actions[agent_id]
+        # Default state from audit log signal.
         if not logs:
             agent_status = "pending"
             start_time = None
@@ -131,6 +176,12 @@ def _derive_agent_status(case: Case, audit_logs: list[AuditLog]) -> list[dict[st
                 )
             else:
                 elapsed_seconds = None
+
+        # Gate-state floor wins over audit-log silence. Don't downgrade
+        # an agent the audit log says is `failed` though — that's a real
+        # signal we want surfaced even if the gate machine moved on.
+        if agent_id in completed_agents and agent_status not in ("failed",):
+            agent_status = "completed"
 
         agents.append(
             {

@@ -217,7 +217,15 @@ class _SearchDomainGuidanceInput(BaseModel):
     query: str = Field(
         description="Semantic query for statutes, practice directions, or bench books"
     )
-    max_results: int = Field(5, description="Maximum number of guidance results to return")
+    max_results: int = Field(
+        25,
+        description=(
+            "Maximum number of guidance results to return. Bias toward MORE — "
+            "missing a relevant statute is worse than reading a few extra chunks. "
+            "Up to 50."
+        ),
+        le=50,
+    )
 
 
 class _AskJudgeInput(BaseModel):
@@ -425,13 +433,16 @@ def make_tools(
     )
     async def search_domain_guidance_tool(
         query: str,
-        max_results: int = 5,
+        max_results: int = 25,
     ) -> tuple[str, list[Document]]:
         """Query the domain knowledge base for statutes and practice directions.
 
         Use this to retrieve applicable statutes, bench books, and procedural
         rules. Do not pass vector_store_id — it is injected automatically.
         Raises DomainGuidanceUnavailable if the domain store is not configured.
+
+        Recall over precision: prefer MORE results (default 25, max 50). It is
+        cheaper to read a few extra chunks than to miss a controlling statute.
         """
         from src.tools.exceptions import DomainGuidanceUnavailable
         from src.tools.search_domain_guidance import search_domain_guidance

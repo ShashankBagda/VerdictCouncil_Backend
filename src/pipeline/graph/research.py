@@ -123,7 +123,10 @@ def research_join_node(state: dict[str, Any]) -> dict[str, Any]:
     case_updates: dict[str, Any] = {}
     if merged.evidence is not None:
         case_updates["evidence_analysis"] = EvidenceAnalysis(
-            evidence_items=list(merged.evidence.evidence_items),
+            evidence_items=[
+                e.model_dump() if hasattr(e, "model_dump") else e
+                for e in merged.evidence.evidence_items
+            ],
             credibility_scores=dict(merged.evidence.credibility_scores or {}),
         )
     if merged.facts is not None:

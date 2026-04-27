@@ -21,6 +21,39 @@ from src.tools.search_precedents import _get_redis_client
 logger = logging.getLogger(__name__)
 
 
+def _json_safe(value):
+    """Coerce a payload tree into something `json.dumps` can swallow.
+
+    Agent payloads occasionally carry `datetime.date`, `datetime.datetime`,
+    `UUID`, Pydantic models, and other non-JSON-native types — bare
+    `json.dumps` raises `TypeError: Object of type date is not JSON
+    serializable` and the tee-write loses the event. Walking the tree
+    once with a permissive coercion is cheaper and safer than letting
+    SQLAlchemy's JSONB serializer blow up at commit time.
+    """
+    from datetime import date, datetime as _dt, time as _time
+    from uuid import UUID
+
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, (date, _dt, _time)):
+        return value.isoformat()
+    if isinstance(value, UUID):
+        return str(value)
+    if hasattr(value, "model_dump"):
+        try:
+            return _json_safe(value.model_dump(mode="json"))
+        except Exception:
+            return str(value)
+    if hasattr(value, "value") and hasattr(value, "name"):  # enum
+        return value.value
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [_json_safe(v) for v in value]
+    return str(value)
+
+
 async def _tee_write(case_id: str | object, payload: dict) -> None:
     """Fire-and-forget INSERT into pipeline_events; never raises."""
     try:
@@ -35,6 +68,8 @@ async def _tee_write(case_id: str | object, payload: dict) -> None:
         else:
             ts = datetime.now(UTC)
 
+        safe_payload = _json_safe(payload)
+
         async with async_session() as db:
             db.add(
                 PipelineEvent(
@@ -44,7 +79,7 @@ async def _tee_write(case_id: str | object, payload: dict) -> None:
                     schema_version=int(payload.get("schema_version", 1)),
                     agent=payload.get("agent"),
                     ts=ts,
-                    payload=payload,
+                    payload=safe_payload,
                 )
             )
             await db.commit()
