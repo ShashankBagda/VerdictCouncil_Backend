@@ -158,8 +158,9 @@ jobs:
         id: pg
         run: |
           DB="${{ steps.names.outputs.db }}"
-          if doctl databases get-by-name "$DB" -o json >/dev/null 2>&1; then
-            echo "Postgres $DB already exists; reusing."
+          DB_ID=$(doctl databases list -o json | jq -r --arg n "$DB" '.[] | select(.name == $n) | .id' | head -n1)
+          if [ -n "$DB_ID" ]; then
+            echo "Postgres $DB already exists ($DB_ID); reusing."
           else
             echo "Creating Postgres $DB (this takes ~5 minutes)..."
             doctl databases create "$DB" \
@@ -169,8 +170,8 @@ jobs:
               --size db-s-1vcpu-2gb \
               --num-nodes 1 \
               --wait
+            DB_ID=$(doctl databases list -o json | jq -r --arg n "$DB" '.[] | select(.name == $n) | .id' | head -n1)
           fi
-          DB_ID=$(doctl databases get-by-name "$DB" --format ID --no-header)
           # Capture private connection string (uses the VPC the DOKS cluster shares).
           DSN=$(doctl databases connection "$DB_ID" --format URI --no-header --private)
           # Add asyncpg driver suffix for SQLAlchemy async.
@@ -185,8 +186,9 @@ jobs:
         id: redis
         run: |
           REDIS="${{ steps.names.outputs.redis }}"
-          if doctl databases get-by-name "$REDIS" -o json >/dev/null 2>&1; then
-            echo "Redis $REDIS already exists; reusing."
+          REDIS_ID=$(doctl databases list -o json | jq -r --arg n "$REDIS" '.[] | select(.name == $n) | .id' | head -n1)
+          if [ -n "$REDIS_ID" ]; then
+            echo "Redis $REDIS already exists ($REDIS_ID); reusing."
           else
             echo "Creating Redis $REDIS (this takes ~3 minutes)..."
             doctl databases create "$REDIS" \
@@ -196,8 +198,8 @@ jobs:
               --size db-s-1vcpu-1gb \
               --num-nodes 1 \
               --wait
+            REDIS_ID=$(doctl databases list -o json | jq -r --arg n "$REDIS" '.[] | select(.name == $n) | .id' | head -n1)
           fi
-          REDIS_ID=$(doctl databases get-by-name "$REDIS" --format ID --no-header)
           DSN=$(doctl databases connection "$REDIS_ID" --format URI --no-header --private)
           echo "::add-mask::$DSN"
           echo "dsn<<EOF" >> "$GITHUB_OUTPUT"
