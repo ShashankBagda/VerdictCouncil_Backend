@@ -1,8 +1,24 @@
 name: Deploy to Production
 
+# Build the backend Docker image, push to DigitalOcean Container Registry
+# under both a SemVer tag (from `git describe`) and the `latest` tag, then
+# apply the production kustomize overlay, render runtime secrets, run
+# Alembic migrations, and roll both Deployments (api-service and
+# arq-worker — same image, different command).
+#
+# Required GitHub Action secrets:
+#   DIGITALOCEAN_ACCESS_TOKEN        doctl access token (registry + DOKS)
+#   DOCR_REGISTRY                    e.g. registry.digitalocean.com/<registry-name>
+#   DOKS_PRODUCTION_CLUSTER_ID       UUID of the production DOKS cluster
+#   OPENAI_API_KEY, OPENAI_VECTOR_STORE_ID
+#   DATABASE_URL, REDIS_URL, JWT_SECRET
+#   FRONTEND_ORIGINS
+#   LANGSMITH_API_KEY (optional — tracing/eval only)
+
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
   deploy:
@@ -10,6 +26,8 @@ jobs:
     environment: production
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history for git describe
 
       - name: Install doctl
         uses: digitalocean/action-doctl@v2
@@ -23,20 +41,18 @@ jobs:
         run: |
           TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "latest")
           IMAGE=${{ secrets.DOCR_REGISTRY }}/verdictcouncil:${TAG}
-          docker build -t ${IMAGE} .
-          docker tag ${IMAGE} ${{ secrets.DOCR_REGISTRY }}/verdictcouncil:latest
+          ROLLING=${{ secrets.DOCR_REGISTRY }}/verdictcouncil:latest
+          docker build -t ${IMAGE} -t ${ROLLING} .
           docker push ${IMAGE}
-          docker push ${{ secrets.DOCR_REGISTRY }}/verdictcouncil:latest
+          docker push ${ROLLING}
           echo "IMAGE=${IMAGE}" >> $GITHUB_ENV
 
       - name: Configure kubectl
         run: doctl kubernetes cluster kubeconfig save ${{ secrets.DOKS_PRODUCTION_CLUSTER_ID }}
 
-      - name: Apply manifests
-        run: kubectl apply -k k8s/overlays/production/
-
       - name: Render secrets
         run: |
+          kubectl create namespace verdictcouncil --dry-run=client -o yaml | kubectl apply -f -
           kubectl create secret generic verdictcouncil-secrets \
             --namespace verdictcouncil \
             --from-literal=OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }} \
@@ -45,21 +61,34 @@ jobs:
             --from-literal=JWT_SECRET=${{ secrets.JWT_SECRET }} \
             --from-literal=OPENAI_VECTOR_STORE_ID=${{ secrets.OPENAI_VECTOR_STORE_ID }} \
             --from-literal=FRONTEND_ORIGINS=${{ secrets.FRONTEND_ORIGINS }} \
+            --from-literal=LANGSMITH_API_KEY=${{ secrets.LANGSMITH_API_KEY }} \
             --from-literal=COOKIE_SECURE=true \
             --from-literal=NAMESPACE=verdictcouncil \
+            --from-literal=ENVIRONMENT=production \
             --from-literal=FASTAPI_HOST=0.0.0.0 \
             --from-literal=FASTAPI_PORT=8001 \
             --dry-run=client -o yaml | kubectl apply -f -
 
+      - name: Apply manifests with pinned image
+        # Rewrite the placeholder `verdictcouncil:latest` everywhere it
+        # appears in the rendered overlay (api-service + arq-worker
+        # Deployments, stuck-case-watchdog CronJob) so all three pull
+        # the freshly-built DOCR-qualified tag. This also removes the
+        # need for separate `kubectl set image` calls.
+        run: |
+          kubectl kustomize k8s/overlays/production/ \
+            | sed "s|image: verdictcouncil:latest|image: ${IMAGE}|g" \
+            | kubectl apply -f -
+
       - name: Run database migrations
         run: |
           kubectl delete job alembic-migrate --namespace verdictcouncil --ignore-not-found
-          sed "s|verdictcouncil:latest|${IMAGE}|g" k8s/base/job-alembic-migrate.yaml | \
-            kubectl apply --namespace verdictcouncil -f -
+          sed "s|verdictcouncil:latest|${IMAGE}|g" k8s/base/job-alembic-migrate.yaml \
+            | kubectl apply --namespace verdictcouncil -f -
           kubectl wait --for=condition=complete job/alembic-migrate \
             --namespace verdictcouncil --timeout=300s
 
-      - name: Roll image
+      - name: Wait for rollouts
         run: |
-          kubectl set image -n verdictcouncil deployment --all "*=${IMAGE}"
-          kubectl rollout status -n verdictcouncil deployment --timeout=300s
+          kubectl rollout status -n verdictcouncil deployment/api-service --timeout=300s
+          kubectl rollout status -n verdictcouncil deployment/arq-worker  --timeout=300s

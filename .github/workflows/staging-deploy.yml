@@ -1,8 +1,24 @@
 name: Deploy to Staging
 
+# Build the backend Docker image, push to DigitalOcean Container Registry
+# under both a SHA-pinned tag (rc-<sha>) and the rolling staging tag, then
+# apply the kustomize overlay to the staging DOKS cluster, render runtime
+# secrets, run Alembic migrations, and roll both Deployments
+# (api-service and arq-worker — same image, different command).
+#
+# Required GitHub Action secrets:
+#   DIGITALOCEAN_ACCESS_TOKEN     doctl access token (registry + DOKS)
+#   DOCR_REGISTRY                 e.g. registry.digitalocean.com/<registry-name>
+#   DOKS_STAGING_CLUSTER_ID       UUID of the staging DOKS cluster
+#   OPENAI_API_KEY, OPENAI_VECTOR_STORE_ID
+#   STAGING_DATABASE_URL, STAGING_REDIS_URL, STAGING_JWT_SECRET
+#   STAGING_FRONTEND_ORIGINS
+#   LANGSMITH_API_KEY (optional — tracing/eval only, not required for runtime)
+
 on:
   push:
     branches: [development]
+  workflow_dispatch:
 
 jobs:
   deploy:
@@ -22,18 +38,18 @@ jobs:
       - name: Build and push image
         run: |
           IMAGE=${{ secrets.DOCR_REGISTRY }}/verdictcouncil:rc-${{ github.sha }}
-          docker build -t ${IMAGE} .
+          ROLLING=${{ secrets.DOCR_REGISTRY }}/verdictcouncil:staging-latest
+          docker build -t ${IMAGE} -t ${ROLLING} .
           docker push ${IMAGE}
+          docker push ${ROLLING}
           echo "IMAGE=${IMAGE}" >> $GITHUB_ENV
 
       - name: Configure kubectl
         run: doctl kubernetes cluster kubeconfig save ${{ secrets.DOKS_STAGING_CLUSTER_ID }}
 
-      - name: Apply manifests
-        run: kubectl apply -k k8s/overlays/staging/
-
       - name: Render secrets
         run: |
+          kubectl create namespace verdictcouncil-staging --dry-run=client -o yaml | kubectl apply -f -
           kubectl create secret generic verdictcouncil-secrets \
             --namespace verdictcouncil-staging \
             --from-literal=OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }} \
@@ -42,22 +58,34 @@ jobs:
             --from-literal=JWT_SECRET=${{ secrets.STAGING_JWT_SECRET }} \
             --from-literal=OPENAI_VECTOR_STORE_ID=${{ secrets.OPENAI_VECTOR_STORE_ID }} \
             --from-literal=FRONTEND_ORIGINS=${{ secrets.STAGING_FRONTEND_ORIGINS }} \
+            --from-literal=LANGSMITH_API_KEY=${{ secrets.LANGSMITH_API_KEY }} \
             --from-literal=COOKIE_SECURE=true \
-            --from-literal=NAMESPACE=verdictcouncil \
+            --from-literal=NAMESPACE=verdictcouncil-staging \
+            --from-literal=ENVIRONMENT=staging \
             --from-literal=FASTAPI_HOST=0.0.0.0 \
             --from-literal=FASTAPI_PORT=8001 \
             --dry-run=client -o yaml | kubectl apply -f -
 
+      - name: Apply manifests with pinned image
+        # Rewrite the placeholder `verdictcouncil:latest` everywhere it
+        # appears in the rendered overlay (api-service + arq-worker
+        # Deployments, stuck-case-watchdog CronJob) so all three pull
+        # the freshly-built DOCR-qualified tag. This also removes the
+        # need for separate `kubectl set image` calls.
+        run: |
+          kubectl kustomize k8s/overlays/staging/ \
+            | sed "s|image: verdictcouncil:latest|image: ${IMAGE}|g" \
+            | kubectl apply -f -
+
       - name: Run database migrations
         run: |
           kubectl delete job alembic-migrate --namespace verdictcouncil-staging --ignore-not-found
-          sed "s|verdictcouncil:latest|${IMAGE}|g" k8s/base/job-alembic-migrate.yaml | \
-            kubectl apply --namespace verdictcouncil-staging -f -
+          sed "s|verdictcouncil:latest|${IMAGE}|g" k8s/base/job-alembic-migrate.yaml \
+            | kubectl apply --namespace verdictcouncil-staging -f -
           kubectl wait --for=condition=complete job/alembic-migrate \
             --namespace verdictcouncil-staging --timeout=300s
 
-      - name: Roll image
+      - name: Wait for rollouts
         run: |
-          kubectl set image -n verdictcouncil-staging \
-            deployment/api-service api-service=${IMAGE}
-          kubectl rollout status -n verdictcouncil-staging deployment --timeout=300s
+          kubectl rollout status -n verdictcouncil-staging deployment/api-service --timeout=300s
+          kubectl rollout status -n verdictcouncil-staging deployment/arq-worker  --timeout=300s
