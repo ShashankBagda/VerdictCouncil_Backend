@@ -60,6 +60,7 @@ class TestLlmTokenEvent:
     def test_event_literal_is_llm_token_only(self):
         """Discriminator narrowing — anything else is rejected at parse."""
         from pydantic import ValidationError
+
         with pytest.raises(ValidationError):
             LlmTokenEvent.model_validate(
                 {
@@ -159,9 +160,7 @@ class TestConversationalStreamingFlag:
         assert s.pipeline_conversational_streaming_phases == ["intake", "triage"]
 
     def test_flag_strips_whitespace_and_empty_segments(self, monkeypatch):
-        monkeypatch.setenv(
-            "PIPELINE_CONVERSATIONAL_STREAMING_PHASES", " intake ,, triage , "
-        )
+        monkeypatch.setenv("PIPELINE_CONVERSATIONAL_STREAMING_PHASES", " intake ,, triage , ")
         s = Settings(_env_file=None)
         assert s.pipeline_conversational_streaming_phases == ["intake", "triage"]
 

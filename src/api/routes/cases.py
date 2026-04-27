@@ -171,11 +171,7 @@ async def _hydrate_raw_documents(db, documents: list[Document]) -> list[dict[str
                     exc,
                 )
             else:
-                parsed = (
-                    document.parsed_text
-                    if isinstance(document.parsed_text, dict)
-                    else None
-                )
+                parsed = document.parsed_text if isinstance(document.parsed_text, dict) else None
 
         text = (parsed or {}).get("text") or ""
         # Prefer pages from the fresh parse output; fall back to the
@@ -1368,9 +1364,7 @@ async def stream_pipeline_status(
                     "interrupt_id": _chat.get("interrupt_id"),
                     "ts": datetime.now(UTC).isoformat(),
                 }
-                snap_chat_payload = (
-                    f"event: interrupt\ndata: {json.dumps(snap_chat_event)}\n\n"
-                )
+                snap_chat_payload = f"event: interrupt\ndata: {json.dumps(snap_chat_event)}\n\n"
     except Exception:
         # Snapshot replay must never break the SSE handshake — fall through
         # silently and rely on the next live event.
@@ -1711,10 +1705,7 @@ async def process_case(
     if not case.parties and not extraction_fields:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                "Intake confirmation incomplete: complete the intake review "
-                "before processing"
-            ),
+            detail=("Intake confirmation incomplete: complete the intake review before processing"),
         )
 
     flip = await db.execute(
@@ -2188,9 +2179,7 @@ async def _handle_message_resume(
         try:
             await runner._graph.ainvoke(
                 Command(
-                    update={
-                        "judge_messages": [HumanMessage(content=payload.text)]
-                    },
+                    update={"judge_messages": [HumanMessage(content=payload.text)]},
                     resume={"text": payload.text},
                 ),
                 config=config,
@@ -2223,9 +2212,7 @@ async def _handle_message_resume(
                 # Run reached terminal (rare from a chat reply — would
                 # require synthesis to be the last node before END).
                 halt = snapshot.values.get("halt") or {}
-                terminal_status = (
-                    _CaseStatusEnum.failed if halt else _CaseStatusEnum.closed
-                )
+                terminal_status = _CaseStatusEnum.failed if halt else _CaseStatusEnum.closed
                 final_state = final_state.model_copy(update={"status": terminal_status})
                 async with async_session() as db_:
                     await persist_case_results(db_, case_id, final_state)

@@ -97,16 +97,18 @@ async def test_hydrate_falls_back_to_empty_string_on_backfill_failure(caplog):
     doc = _make_doc(parsed_text=None)
     db = MagicMock()
 
-    with patch(
-        "src.api.routes.cases.parse_and_persist_document",
-        new=AsyncMock(side_effect=RuntimeError("OpenAI 500")),
-    ), caplog.at_level(logging.WARNING, logger="src.api.routes.cases"):
+    with (
+        patch(
+            "src.api.routes.cases.parse_and_persist_document",
+            new=AsyncMock(side_effect=RuntimeError("OpenAI 500")),
+        ),
+        caplog.at_level(logging.WARNING, logger="src.api.routes.cases"),
+    ):
         entries = await _hydrate_raw_documents(db, [doc])
 
     assert entries[0]["parsed_text"] == ""
     assert any(
-        "back-fill failed" in rec.message.lower()
-        and str(doc.id) in rec.message
+        "back-fill failed" in rec.message.lower() and str(doc.id) in rec.message
         for rec in caplog.records
     )
 
@@ -187,9 +189,7 @@ def test_intake_phase_start_log_line(caplog):
     with caplog.at_level(logging.INFO, logger="src.api.routes.cases"):
         _log_intake_phase_start(case_id=case_id, raw_documents=raw_documents, parties_count=2)
 
-    matched = [
-        rec for rec in caplog.records if "intake_phase_start" in rec.message
-    ]
+    matched = [rec for rec in caplog.records if "intake_phase_start" in rec.message]
     assert matched
     msg = matched[0].message
     assert f"case_id={case_id}" in msg

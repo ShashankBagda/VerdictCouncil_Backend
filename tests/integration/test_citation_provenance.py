@@ -151,6 +151,27 @@ def test_input_law_research_not_mutated():
     assert law.suppressed_citations == []
 
 
+def test_file_id_only_supporting_source_matches_full_source_id():
+    """Agents copy the `file_id` portion of `source_id` but rarely the
+    `:<content_hash>` suffix. A `file_id`-only citation must still verify
+    against a retrieved `<file_id>:<hash>` entry — this is the "Applicable
+    Law & Statutes empty" regression we hit when the law agent emitted
+    `["file-2LWAW…"]` while retrieval had `"file-2LWAW…:abc123"`.
+    """
+    rule = LegalRule(
+        rule_id="r-fid",
+        jurisdiction="SG",
+        citation="Road Traffic Act s.63",
+        text="…",
+        applicability="…",
+        supporting_sources=["file-stat-001"],
+    )
+    law = _law([rule], [])
+    out = validate_law_citations(law, RETRIEVED)
+    assert [r.rule_id for r in out.legal_rules] == ["r-fid"]
+    assert out.suppressed_citations == []
+
+
 def test_unused_legal_elements_passthrough():
     """The validator only filters citations; element checklist passes through."""
     elements = [LegalElement(element="duty", satisfied=True, rationale="…")]

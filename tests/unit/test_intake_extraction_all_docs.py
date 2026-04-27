@@ -34,12 +34,18 @@ class TestBuildUserPromptDocSet:
         """Notice + witness statement + evidence bundle: every text-bearing
         document must produce its own header + body block."""
         docs = [
-            (_doc(DocumentKind.notice_of_traffic_offence, "notice.pdf"),
-             "NOTICE OF TRAFFIC OFFENCE\nVehicle SGA77F at 70 km/h…"),
-            (_doc(DocumentKind.witness_statement, "officer.pdf"),
-             "I, Officer Rahman Bin Yusof, recorded the vehicle…"),
-            (_doc(DocumentKind.evidence_bundle, "calibration.pdf"),
-             "Calibration certificate dated 2021-01-15…"),
+            (
+                _doc(DocumentKind.notice_of_traffic_offence, "notice.pdf"),
+                "NOTICE OF TRAFFIC OFFENCE\nVehicle SGA77F at 70 km/h…",
+            ),
+            (
+                _doc(DocumentKind.witness_statement, "officer.pdf"),
+                "I, Officer Rahman Bin Yusof, recorded the vehicle…",
+            ),
+            (
+                _doc(DocumentKind.evidence_bundle, "calibration.pdf"),
+                "Calibration certificate dated 2021-01-15…",
+            ),
         ]
         prompt = _build_user_prompt(docs, correction=None)
 
@@ -58,8 +64,7 @@ class TestBuildUserPromptDocSet:
         the LLM gets only docs with extractable text. Caller's job to
         log the gap; not the prompt builder's."""
         docs = [
-            (_doc(DocumentKind.notice_of_traffic_offence, "notice.pdf"),
-             "real text here"),
+            (_doc(DocumentKind.notice_of_traffic_offence, "notice.pdf"), "real text here"),
             (_doc(DocumentKind.witness_statement, "scan.pdf"), ""),
             (_doc(DocumentKind.witness_statement, "blanks.pdf"), "   \n  "),
         ]
@@ -73,8 +78,7 @@ class TestBuildUserPromptDocSet:
         """A judge correction lands as its own block after the documents,
         marked authoritative."""
         docs = [
-            (_doc(DocumentKind.notice_of_traffic_offence, "n.pdf"),
-             "doc text"),
+            (_doc(DocumentKind.notice_of_traffic_offence, "n.pdf"), "doc text"),
         ]
         prompt = _build_user_prompt(docs, correction="The accused is BEN LIM, not BEN LIN.")
 

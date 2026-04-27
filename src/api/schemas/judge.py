@@ -106,8 +106,9 @@ class FairnessAuditResponse(BaseModel):
         "synthetic 'audit passed' entry when no critical issues were found.",
     )
     verdict: str | None = Field(
-        None, description="Auditor's recommendation summary (first recommendation, "
-        "or send-back reason when present)."
+        None,
+        description="Auditor's recommendation summary (first recommendation, "
+        "or send-back reason when present).",
     )
     overall_score: int | None = Field(
         None, description="100 when audit_passed and no critical issues, otherwise 0."

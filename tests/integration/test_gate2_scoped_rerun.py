@@ -129,8 +129,11 @@ def _build_graph(ran_log: list[str]):
     return g.compile(checkpointer=InMemorySaver())
 
 
-def _initial_state(*, extra_instructions: dict[str, str] | None = None,
-                   research_parts: dict[str, ResearchPart] | None = None) -> GraphState:
+def _initial_state(
+    *,
+    extra_instructions: dict[str, str] | None = None,
+    research_parts: dict[str, ResearchPart] | None = None,
+) -> GraphState:
     return GraphState(
         case=CaseState(case_id="00000000-0000-0000-0000-000000000002"),
         run_id="run-2",

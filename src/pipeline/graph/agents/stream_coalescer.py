@@ -111,9 +111,7 @@ class FireAndForgetPublisher:
     async def start(self) -> None:
         """Launch the drain task. Idempotent."""
         if self._task is None:
-            self._task = asyncio.create_task(
-                self._drain(), name=f"stream-publisher-{self._phase}"
-            )
+            self._task = asyncio.create_task(self._drain(), name=f"stream-publisher-{self._phase}")
 
     def submit(self, event: Any) -> bool:
         """Non-blocking enqueue. Returns False on drop (queue full or closed)."""
@@ -132,9 +130,7 @@ class FireAndForgetPublisher:
             try:
                 await self._on_drain(event)
             except Exception:
-                logger.exception(
-                    "fire-and-forget publish failed (phase=%s)", self._phase
-                )
+                logger.exception("fire-and-forget publish failed (phase=%s)", self._phase)
             finally:
                 self._queue.task_done()
 

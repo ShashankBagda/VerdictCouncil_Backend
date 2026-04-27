@@ -38,16 +38,18 @@ from src.shared.config import settings
 _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 # Endpoints that are exempt from CSRF checking
-_EXEMPT_PATHS = frozenset({
-    "/api/v1/auth/csrf-token",
-    "/api/v1/auth/login",   # login issues the CSRF token; exempting avoids chicken-and-egg
-    "/api/v1/auth/logout",  # no state mutation risk; cookie is already present
-    "/health",
-    "/metrics",
-    "/openapi.json",
-    "/docs",
-    "/redoc",
-})
+_EXEMPT_PATHS = frozenset(
+    {
+        "/api/v1/auth/csrf-token",
+        "/api/v1/auth/login",  # login issues the CSRF token; exempting avoids chicken-and-egg
+        "/api/v1/auth/logout",  # no state mutation risk; cookie is already present
+        "/health",
+        "/metrics",
+        "/openapi.json",
+        "/docs",
+        "/redoc",
+    }
+)
 
 CSRF_COOKIE_NAME = "vc_csrf"
 CSRF_HEADER_NAME = "x-csrf-token"
@@ -99,9 +101,9 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         response.set_cookie(
             CSRF_COOKIE_NAME,
             value=token,
-            httponly=False,   # Must be readable by JS to echo in the header
+            httponly=False,  # Must be readable by JS to echo in the header
             samesite="strict",
             secure=self._secure,
             path="/",
-            max_age=3600,     # 1-hour lifetime; renewed on activity
+            max_age=3600,  # 1-hour lifetime; renewed on activity
         )

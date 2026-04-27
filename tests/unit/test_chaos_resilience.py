@@ -29,10 +29,12 @@ from src.shared.retry import MaxRetriesError, retry_with_backoff
 
 def _make_failing_async(exception: Exception, call_count: int = 0):
     """Return an async callable that raises ``exception`` every time."""
+
     async def _fail(*args, **kwargs):
         nonlocal call_count
         call_count += 1
         raise exception
+
     _fail.call_count_ref = lambda: call_count
     return _fail
 
@@ -95,6 +97,7 @@ class TestRetryWithBackoff:
     @pytest.mark.asyncio
     async def test_zero_retries_raises_immediately(self):
         """With max_retries=0 the function is called once and failure propagates."""
+
         @retry_with_backoff(max_retries=0, base_delay=0.0, retryable_exceptions=(Exception,))
         async def always_fail():
             raise RuntimeError("boom")
@@ -108,6 +111,7 @@ class TestRetryWithBackoff:
         sleep_calls: list[float] = []
 
         with patch("asyncio.sleep", side_effect=lambda d: sleep_calls.append(d)):
+
             @retry_with_backoff(
                 max_retries=5,
                 base_delay=10.0,

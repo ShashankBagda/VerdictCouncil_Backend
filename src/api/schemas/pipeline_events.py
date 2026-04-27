@@ -235,9 +235,7 @@ class AgentAwaitingInputEvent(BaseModel):
         ),
     )
     question: str = Field(..., description="The verbatim question text.")
-    interrupt_id: str = Field(
-        ..., description="UUID4 hex minted by the ask_judge tool body."
-    )
+    interrupt_id: str = Field(..., description="UUID4 hex minted by the ask_judge tool body.")
     ts: datetime
     trace_id: str | None = None
 

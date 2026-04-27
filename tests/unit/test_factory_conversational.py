@@ -114,9 +114,7 @@ class TestMakePhaseNodeFlagWiring:
         """Architecture decision A3 — audit's strict-correctness path
         stays JSON-only. Even if an operator sets `audit` in the flag,
         the factory hard-refuses."""
-        monkeypatch.setenv(
-            "PIPELINE_CONVERSATIONAL_STREAMING_PHASES", "intake,audit,synthesis"
-        )
+        monkeypatch.setenv("PIPELINE_CONVERSATIONAL_STREAMING_PHASES", "intake,audit,synthesis")
 
         from src.pipeline.graph.agents import factory
 
@@ -203,6 +201,7 @@ class TestConversationalFlagDefault:
                 async def _gen():
                     yield ("messages", (AIMessageChunk(content="prose"), {}))
                     yield ("values", {"structured_response": {"jurisdiction": "sct"}})
+
                 return _gen()
 
             async def ainvoke(self, *_args, **_kwargs):
@@ -262,6 +261,7 @@ class TestConversationalFlagOn:
                     yield ("messages", (AIMessageChunk(content="Examining "), {}))
                     yield ("messages", (AIMessageChunk(content="the notice."), {}))
                     yield ("values", {"structured_response": None, "messages": []})
+
                 return _gen()
 
             async def ainvoke(self, *_args, **_kwargs):
@@ -303,9 +303,7 @@ class TestConversationalFlagOn:
         assert all(t["message_id"] for t in tokens)
 
     @pytest.mark.asyncio
-    async def test_conversational_emits_tool_call_delta_for_tool_chunks(
-        self, monkeypatch
-    ):
+    async def test_conversational_emits_tool_call_delta_for_tool_chunks(self, monkeypatch):
         """Tool-call chunks from the messages stream emit as
         `tool_call_delta` events so the frontend (Q1.9) can render
         the `<ToolCallChip>` with args streaming in."""
@@ -361,6 +359,7 @@ class TestConversationalFlagOn:
                         ),
                     )
                     yield ("values", {"structured_response": None, "messages": []})
+
                 return _gen()
 
             async def ainvoke(self, *_args, **_kwargs):
@@ -446,6 +445,7 @@ class TestConversationalFlagOn:
                             "structured_response": None,
                         },
                     )
+
                 return _gen()
 
             async def ainvoke(self, *_args, **_kwargs):
@@ -512,6 +512,7 @@ class TestConversationalFlagOn:
                 async def _gen():
                     yield ("messages", (AIMessageChunk(content="x"), {}))
                     yield ("values", {"messages": [], "structured_response": None})
+
                 return _gen()
 
             async def ainvoke(self, *_args, **_kwargs):
@@ -569,6 +570,7 @@ class TestConversationalFlagOn:
                 async def _gen():
                     yield ("messages", (AIMessageChunk(content="x"), {}))
                     yield ("values", {"structured_response": {"jurisdiction": "sct"}})
+
                 return _gen()
 
             async def ainvoke(self, *_args, **_kwargs):
@@ -589,9 +591,7 @@ class TestConversationalFlagOn:
         assert struct_called["count"] == 0
 
     @pytest.mark.asyncio
-    async def test_conversational_message_id_changes_across_assistant_turns(
-        self, monkeypatch
-    ):
+    async def test_conversational_message_id_changes_across_assistant_turns(self, monkeypatch):
         """A new assistant turn (separated by a tool result in the
         message stream) gets a fresh `message_id` so the consumer
         renders distinct bubbles."""
@@ -617,6 +617,7 @@ class TestConversationalFlagOn:
                     )
                     yield ("messages", (AIMessageChunk(content="Step 2."), {}))
                     yield ("values", {"structured_response": None, "messages": []})
+
                 return _gen()
 
             async def ainvoke(self, *_args, **_kwargs):

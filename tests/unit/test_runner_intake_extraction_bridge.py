@@ -100,11 +100,7 @@ def test_empty_case_parties_filled_from_intake_extraction_fields():
 def test_non_empty_case_parties_win_over_intake_extraction():
     """Q-B: judge-confirmed authority. Case.parties non-empty →
     CaseState.parties = Case columns; extraction does NOT overwrite."""
-    extraction = {
-        "fields": {
-            "parties": [{"name": "ExtractionAlice", "role": "claimant"}]
-        }
-    }
+    extraction = {"fields": {"parties": [{"name": "ExtractionAlice", "role": "claimant"}]}}
     case = _make_case(
         parties=[_party("ConfirmedAlice", "claimant")],
         intake_extraction=extraction,
@@ -164,9 +160,7 @@ def test_extraction_with_empty_fields_does_not_break_anything():
     overrides = _build_initial_state_overrides(case)
 
     assert overrides["intake_extraction"] == {"fields": {}, "citations": []}
-    assert overrides["parties"] == [
-        {"name": "Alice", "role": "claimant", "contact_info": None}
-    ]
+    assert overrides["parties"] == [{"name": "Alice", "role": "claimant", "contact_info": None}]
 
 
 def test_intake_extraction_not_a_dict_treated_as_absent():

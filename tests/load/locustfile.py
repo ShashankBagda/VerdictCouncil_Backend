@@ -58,15 +58,16 @@ VC_PASSWORD = os.environ.get("VC_LOAD_PASSWORD", "TestPassword123!")
 VC_CASE_ID = os.environ.get("VC_LOAD_CASE_ID", "")
 
 # Performance thresholds (milliseconds) — from 12-testing-summary.md
-_THRESHOLD_CASE_PROCESS = 5_000      # p95 ≤ 5 s
-_THRESHOLD_EVIDENCE = 30_000         # p95 ≤ 30 s
-_THRESHOLD_ARGUMENTS = 45_000        # p95 ≤ 45 s
-_THRESHOLD_FULL_PIPELINE = 180_000   # p95 ≤ 3 min
+_THRESHOLD_CASE_PROCESS = 5_000  # p95 ≤ 5 s
+_THRESHOLD_EVIDENCE = 30_000  # p95 ≤ 30 s
+_THRESHOLD_ARGUMENTS = 45_000  # p95 ≤ 45 s
+_THRESHOLD_FULL_PIPELINE = 180_000  # p95 ≤ 3 min
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _rand_str(n: int = 8) -> str:
     return "".join(random.choices(string.ascii_lowercase, k=n))
@@ -147,7 +148,9 @@ class CaseCRUDTasks(TaskSet):
             if resp.status_code == 200:
                 elapsed = resp.elapsed.total_seconds() * 1000
                 if elapsed > _THRESHOLD_CASE_PROCESS:
-                    resp.failure(f"list_cases p95 exceeded: {elapsed:.0f}ms > {_THRESHOLD_CASE_PROCESS}ms")
+                    resp.failure(
+                        f"list_cases p95 exceeded: {elapsed:.0f}ms > {_THRESHOLD_CASE_PROCESS}ms"
+                    )
                 else:
                     resp.success()
             else:
@@ -286,14 +289,10 @@ def assert_performance_thresholds(environment, **kwargs):
     """Fail the run if p95 latency or error rate exceed configured thresholds."""
     stats = environment.runner.stats
 
-    error_rate = (
-        stats.total.num_failures / max(stats.total.num_requests, 1)
-    )
+    error_rate = stats.total.num_failures / max(stats.total.num_requests, 1)
     if error_rate > 0.05:
         environment.process_exit_code = 1
-        print(
-            f"\n[LOAD TEST FAIL] Error rate {error_rate:.1%} exceeds 5% threshold"
-        )
+        print(f"\n[LOAD TEST FAIL] Error rate {error_rate:.1%} exceeds 5% threshold")
 
     # Check p95 for the most critical endpoints
     for name in ("[cases] list", "[cases] get", "[health] check"):

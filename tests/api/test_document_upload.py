@@ -115,10 +115,7 @@ def _client() -> AsyncClient:
 
 
 def _files_payload(n: int) -> list:
-    return [
-        ("files", (f"doc{i}.pdf", b"%PDF-fake content", "application/pdf"))
-        for i in range(n)
-    ]
+    return [("files", (f"doc{i}.pdf", b"%PDF-fake content", "application/pdf")) for i in range(n)]
 
 
 @pytest.mark.asyncio

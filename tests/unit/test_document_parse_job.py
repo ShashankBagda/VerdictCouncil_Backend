@@ -93,10 +93,13 @@ async def test_parse_failure_is_soft_and_leaves_column_null(caplog) -> None:
     doc = _make_doc()
     db = _make_db(doc)
 
-    with patch(
-        "src.services.document_parse.parse_document",
-        new=AsyncMock(side_effect=DocumentParseError("OpenAI 500")),
-    ), caplog.at_level(logging.WARNING, logger="src.services.document_parse"):
+    with (
+        patch(
+            "src.services.document_parse.parse_document",
+            new=AsyncMock(side_effect=DocumentParseError("OpenAI 500")),
+        ),
+        caplog.at_level(logging.WARNING, logger="src.services.document_parse"),
+    ):
         await parse_and_persist_document(db, document_id=doc.id)
 
     assert doc.parsed_text is None
@@ -111,10 +114,13 @@ async def test_unexpected_exception_propagates() -> None:
     doc = _make_doc()
     db = _make_db(doc)
 
-    with patch(
-        "src.services.document_parse.parse_document",
-        new=AsyncMock(side_effect=RuntimeError("disk full")),
-    ), pytest.raises(RuntimeError):
+    with (
+        patch(
+            "src.services.document_parse.parse_document",
+            new=AsyncMock(side_effect=RuntimeError("disk full")),
+        ),
+        pytest.raises(RuntimeError),
+    ):
         await parse_and_persist_document(db, document_id=doc.id)
 
     assert doc.parsed_text is None

@@ -146,9 +146,7 @@ async def test_process_returns_409_when_no_parties_and_no_intake_extraction():
         case_id = case.id
 
     app.dependency_overrides[get_current_user] = _override_user(user)
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         r = await client.post(f"/api/v1/cases/{case_id}/process")
 
     assert r.status_code == 409
@@ -171,9 +169,10 @@ async def test_upload_inserts_document_parse_outbox_row_with_target_id():
         ("files", ("notice.pdf", b"%PDF-1.4 fake", "application/pdf")),
         ("files", ("witness.pdf", b"%PDF-1.4 fake", "application/pdf")),
     ]
-    async with _patched_openai_files(["file-a", "file-b"]), AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with (
+        _patched_openai_files(["file-a", "file-b"]),
+        AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client,
+    ):
         r = await client.post(
             f"/api/v1/cases/{case_id}/documents",
             files=files_payload,
@@ -232,13 +231,8 @@ async def test_hydrate_uses_cached_parsed_text_against_real_session():
 
     async with async_session() as session:
         case_loaded = (
-            (
-                await session.execute(
-                    select(Case).where(Case.id == case_id).order_by(Case.created_at)
-                )
-            )
-            .scalar_one()
-        )
+            await session.execute(select(Case).where(Case.id == case_id).order_by(Case.created_at))
+        ).scalar_one()
         documents = (
             (
                 await session.execute(
@@ -254,9 +248,7 @@ async def test_hydrate_uses_cached_parsed_text_against_real_session():
             doc = await session.get(Document, miss_id)
             doc.parsed_text = {
                 "text": "back-filled evidence",
-                "pages": [
-                    {"page_number": 1, "text": "back-filled evidence", "tables": []}
-                ],
+                "pages": [{"page_number": 1, "text": "back-filled evidence", "tables": []}],
                 "tables": [],
             }
             await session.commit()
@@ -279,9 +271,7 @@ async def test_hydrate_uses_cached_parsed_text_against_real_session():
         reloaded = await session.get(Document, miss_id)
         assert reloaded.parsed_text == {
             "text": "back-filled evidence",
-            "pages": [
-                {"page_number": 1, "text": "back-filled evidence", "tables": []}
-            ],
+            "pages": [{"page_number": 1, "text": "back-filled evidence", "tables": []}],
             "tables": [],
         }
 

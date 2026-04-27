@@ -26,10 +26,7 @@ def _walk(node, path: str = ""):
     if isinstance(node, dict):
         if node.get("type") == "array" and "items" not in node:
             yield path or "/", "array missing items"
-        if (
-            node.get("type") == "object"
-            and node.get("additionalProperties") is True
-        ):
+        if node.get("type") == "object" and node.get("additionalProperties") is True:
             yield path or "/", "additionalProperties is true"
         for k, v in node.items():
             yield from _walk(v, f"{path}/{k}")

@@ -34,8 +34,29 @@ from src.pipeline.graph.schemas import (
 )
 
 
-def _is_supported(supporting_sources: list[str], retrieved: set[str]) -> bool:
-    return any(src in retrieved for src in supporting_sources)
+def _is_supported(
+    supporting_sources: list[str],
+    retrieved_full: set[str],
+    retrieved_file_ids: set[str],
+) -> bool:
+    """A citation is supported when any claimed source matches retrieval.
+
+    The retrieval layer stamps `source_id = "<file_id>:<content_hash>"` on
+    every Document (`tools.py:104,135`). Agents reliably copy the `file_id`
+    portion but not the chunk-level `content_hash`, so an exact-membership
+    check would suppress every well-grounded citation. We accept either:
+    a full `source_id` match (chunk-level provenance) or a `file_id`-only
+    match (document-level provenance). Both still verify the rule traces
+    to a document the run actually retrieved — the no-hallucination guard
+    that empty `supporting_sources` already enforces stays intact.
+    """
+    for src in supporting_sources:
+        if src in retrieved_full:
+            return True
+        head = src.split(":", 1)[0]
+        if head in retrieved_file_ids:
+            return True
+    return False
 
 
 def validate_law_citations(
@@ -49,13 +70,14 @@ def validate_law_citations(
     lists and the suppressed list appended (preserving any pre-existing
     entries the agent itself produced).
     """
-    retrieved = set(retrieved_source_ids)
+    retrieved_full = set(retrieved_source_ids)
+    retrieved_file_ids = {sid.split(":", 1)[0] for sid in retrieved_full}
     kept_rules: list[LegalRule] = []
     kept_precedents: list[Precedent] = []
     suppressed: list[SuppressedCitation] = list(law.suppressed_citations)
 
     for rule in law.legal_rules:
-        if _is_supported(rule.supporting_sources, retrieved):
+        if _is_supported(rule.supporting_sources, retrieved_full, retrieved_file_ids):
             kept_rules.append(rule)
         else:
             suppressed.append(
@@ -63,7 +85,7 @@ def validate_law_citations(
             )
 
     for precedent in law.precedents:
-        if _is_supported(precedent.supporting_sources, retrieved):
+        if _is_supported(precedent.supporting_sources, retrieved_full, retrieved_file_ids):
             kept_precedents.append(precedent)
         else:
             suppressed.append(

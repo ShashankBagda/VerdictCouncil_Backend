@@ -96,9 +96,7 @@ class ResumePayload(BaseModel):
         send_back_only = (self.to_phase,)
         message_only = (self.text, self.interrupt_id)
 
-        if action == "advance" and (
-            any(rerun_only) or any(send_back_only) or any(message_only)
-        ):
+        if action == "advance" and (any(rerun_only) or any(send_back_only) or any(message_only)):
             raise ValueError(
                 "action='advance' must not carry phase/subagent/field_corrections/to_phase/text/interrupt_id"
             )
@@ -110,9 +108,7 @@ class ResumePayload(BaseModel):
             if self.phase is None:
                 raise ValueError("action='rerun' requires 'phase'")
             if any(send_back_only) or any(message_only):
-                raise ValueError(
-                    "action='rerun' must not carry 'to_phase'/'text'/'interrupt_id'"
-                )
+                raise ValueError("action='rerun' must not carry 'to_phase'/'text'/'interrupt_id'")
             if self.subagent is not None and self.phase != "research":
                 raise ValueError("'subagent' is only valid when phase='research'")
         if action == "send_back":

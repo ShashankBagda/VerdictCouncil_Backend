@@ -156,9 +156,7 @@ async def test_publisher_submit_returns_under_5ms_when_drain_is_stalled():
     async def _stalled_drain(_event: dict) -> None:
         await drain_event.wait()  # block forever until the test releases
 
-    publisher = FireAndForgetPublisher(
-        on_drain=_stalled_drain, queue_size=256, phase="intake"
-    )
+    publisher = FireAndForgetPublisher(on_drain=_stalled_drain, queue_size=256, phase="intake")
     await publisher.start()
 
     # Submit a flood of events while the drain is stuck on the first one.
@@ -183,9 +181,7 @@ async def test_publisher_drops_with_metric_when_queue_overflows():
     async def _stalled_drain(_event: dict) -> None:
         await drain_event.wait()
 
-    publisher = FireAndForgetPublisher(
-        on_drain=_stalled_drain, queue_size=8, phase="overflow_test"
-    )
+    publisher = FireAndForgetPublisher(on_drain=_stalled_drain, queue_size=8, phase="overflow_test")
     await publisher.start()
 
     metric_before = metrics_store.get_stream_publish_dropped("overflow_test")

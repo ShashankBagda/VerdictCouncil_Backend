@@ -264,7 +264,9 @@ class TestConfidenceCalcProperties:
         assert result["confidence_score"] < 60
 
     @given(
-        bad_labels=st.lists(st.text(alphabet=string.ascii_letters, min_size=1, max_size=15), max_size=10)
+        bad_labels=st.lists(
+            st.text(alphabet=string.ascii_letters, min_size=1, max_size=15), max_size=10
+        )
     )
     @_CI_SETTINGS
     def test_unknown_labels_do_not_raise(self, bad_labels: list[str]):

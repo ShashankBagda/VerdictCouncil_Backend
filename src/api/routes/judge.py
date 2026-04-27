@@ -231,8 +231,8 @@ async def get_fairness_audit(
     # the audit phase has no tools so it doesn't write its own AuditLog
     # row — the persisted SSE interrupt is the durable record.
     gate4_payload = await _latest_gate4_audit_summary(db, case_id)
-    fairness_check, recommend_send_back, checks, verdict, overall_score = (
-        _shape_fairness_audit(gate4_payload)
+    fairness_check, recommend_send_back, checks, verdict, overall_score = _shape_fairness_audit(
+        gate4_payload
     )
 
     has_fairness_data = bool(governance_checks) or fairness_check is not None
@@ -249,9 +249,7 @@ async def get_fairness_audit(
     )
 
 
-async def _latest_gate4_audit_summary(
-    db: DBSession, case_id: UUID
-) -> dict | None:
+async def _latest_gate4_audit_summary(db: DBSession, case_id: UUID) -> dict | None:
     """Return the most recent gate4 interrupt event's `audit_summary`, or None."""
     result = await db.execute(
         select(PipelineEvent.payload)
