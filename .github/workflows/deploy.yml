@@ -208,17 +208,39 @@ jobs:
         with:
           token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
 
-      - name: Configure kubectl with cluster-admin token
-        # See infra-bootstrap.yml for the rationale: the doctl exec-cred
-        # kubeconfig authenticates as the API-token owner email and lacks
-        # cluster-admin, so we pull the DO API's static-token kubeconfig
-        # which does carry cluster-admin.
+      - name: Configure kubectl with cluster-admin credentials
+        # See infra-bootstrap.yml for the rationale: both kubeconfig save
+        # and /kubeconfig endpoints return exec-cred configs whose user
+        # identity (the API token's email) lacks cluster-admin RBAC.
+        # The /credentials endpoint returns an admin-scoped token mapped
+        # to system:masters.
         run: |
           mkdir -p "$HOME/.kube"
-          curl -fsSL \
+          CREDS=$(curl -fsSL \
             -H "Authorization: Bearer ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}" \
-            "https://api.digitalocean.com/v2/kubernetes/clusters/${DOKS_CLUSTER_ID}/kubeconfig" \
-            -o "$HOME/.kube/config"
+            "https://api.digitalocean.com/v2/kubernetes/clusters/${DOKS_CLUSTER_ID}/credentials")
+          SERVER=$(jq -r '.server' <<<"$CREDS")
+          CA=$(jq -r '.certificate_authority_data' <<<"$CREDS")
+          TOKEN=$(jq -r '.token' <<<"$CREDS")
+          cat > "$HOME/.kube/config" <<EOF
+          apiVersion: v1
+          kind: Config
+          clusters:
+            - name: doks
+              cluster:
+                server: $SERVER
+                certificate-authority-data: $CA
+          users:
+            - name: doks-admin
+              user:
+                token: $TOKEN
+          contexts:
+            - name: doks
+              context:
+                cluster: doks
+                user: doks-admin
+          current-context: doks
+          EOF
           chmod 600 "$HOME/.kube/config"
 
       - name: Render runtime secrets

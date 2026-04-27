@@ -150,23 +150,46 @@ jobs:
         run: |
           doctl kubernetes cluster registry add "${{ steps.cluster.outputs.id }}" || true
 
-      - name: Configure kubectl with cluster-admin token
-        # `doctl kubernetes cluster kubeconfig save` (doctl >= 1.100) writes
-        # an exec-credential kubeconfig that authenticates as the API
-        # token's owner email, which does NOT carry cluster-admin RBAC.
-        # Helm release-discovery (which lists secrets in the target
-        # namespace) then fails with "secrets is forbidden". Fetching the
-        # kubeconfig from the DO API endpoint directly returns a
-        # static-token config that carries cluster-admin.
+      - name: Configure kubectl with cluster-admin credentials
+        # The DOKS kubeconfig endpoint and `doctl kubeconfig save` both
+        # return exec-credential configs that authenticate as the API
+        # token's owner email — that user does NOT have cluster-admin
+        # RBAC on a fresh cluster, so helm/kubectl fail with
+        # "secrets is forbidden".
+        #
+        # The /credentials endpoint returns an explicitly admin-scoped
+        # token + client cert that maps to system:masters; that's what
+        # we need to install controllers and create RBAC.
         run: |
           mkdir -p "$HOME/.kube"
-          curl -fsSL \
+          CREDS=$(curl -fsSL \
             -H "Authorization: Bearer ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}" \
-            "https://api.digitalocean.com/v2/kubernetes/clusters/${{ steps.cluster.outputs.id }}/kubeconfig" \
-            -o "$HOME/.kube/config"
+            "https://api.digitalocean.com/v2/kubernetes/clusters/${{ steps.cluster.outputs.id }}/credentials")
+          SERVER=$(jq -r '.server' <<<"$CREDS")
+          CA=$(jq -r '.certificate_authority_data' <<<"$CREDS")
+          TOKEN=$(jq -r '.token' <<<"$CREDS")
+          cat > "$HOME/.kube/config" <<EOF
+          apiVersion: v1
+          kind: Config
+          clusters:
+            - name: doks
+              cluster:
+                server: $SERVER
+                certificate-authority-data: $CA
+          users:
+            - name: doks-admin
+              user:
+                token: $TOKEN
+          contexts:
+            - name: doks
+              context:
+                cluster: doks
+                user: doks-admin
+          current-context: doks
+          EOF
           chmod 600 "$HOME/.kube/config"
           kubectl version --client=true
-          kubectl cluster-info | head -2
+          kubectl auth can-i list secrets --all-namespaces
 
       # ----- Managed Postgres -------------------------------------------------
       - name: Ensure Managed Postgres exists
