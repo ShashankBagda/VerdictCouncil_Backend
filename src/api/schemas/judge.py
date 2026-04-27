@@ -77,12 +77,44 @@ class GovernanceFairnessEntry(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class FairnessAuditCheck(BaseModel):
+    label: str = Field(..., description="Human-readable description of the check")
+    passed: bool = Field(..., description="Whether this check passed")
+    severity: str | None = Field(
+        None, description="Severity bucket parsed from the issue prefix (CRITICAL/MAJOR/MINOR)"
+    )
+
+
 class FairnessAuditResponse(BaseModel):
     case_id: UUID
-    governance_checks: list[GovernanceFairnessEntry] = Field(
-        default_factory=list,
-        description="Fairness check outputs from governance agent audit logs",
-    )
     has_fairness_data: bool = Field(
         ..., description="Whether any fairness data exists for this case"
+    )
+    # Legacy `hearing-governance` AuditLog projection — kept for back-compat
+    # with older cases produced before the LangGraph topology cutover.
+    governance_checks: list[GovernanceFairnessEntry] = Field(
+        default_factory=list,
+        description="Fairness check outputs from legacy hearing-governance audit logs",
+    )
+    # New-topology fields, sourced from the gate-4 interrupt event payload
+    # (`audit_summary.fairness_check` + `audit_summary.recommend_send_back`).
+    # The audit phase doesn't write its own AuditLog row (no tool calls), so
+    # the persisted SSE interrupt is the durable record we read from.
+    checks: list[FairnessAuditCheck] = Field(
+        default_factory=list,
+        description="One entry per auditor-flagged issue (passed=false) plus a "
+        "synthetic 'audit passed' entry when no critical issues were found.",
+    )
+    verdict: str | None = Field(
+        None, description="Auditor's recommendation summary (first recommendation, "
+        "or send-back reason when present)."
+    )
+    overall_score: int | None = Field(
+        None, description="100 when audit_passed and no critical issues, otherwise 0."
+    )
+    fairness_check: dict[str, Any] | None = Field(
+        None, description="Raw FairnessCheck payload from the audit phase."
+    )
+    recommend_send_back: dict[str, Any] | None = Field(
+        None, description="Auditor's send-back recommendation (target phase + reason)."
     )

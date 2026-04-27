@@ -89,6 +89,7 @@ async def test_fairness_audit_with_all_data():
     mock_db.execute.side_effect = [
         _scalar_one_or_none_result(case),
         _scalars_result([audit_log]),
+        _scalar_one_or_none_result(None),  # gate-4 audit_summary lookup
     ]
 
     app = _app_with_overrides(mock_db, user)
@@ -113,6 +114,7 @@ async def test_fairness_audit_no_governance_data():
     mock_db.execute.side_effect = [
         _scalar_one_or_none_result(case),
         _scalars_result([]),
+        _scalar_one_or_none_result(None),  # gate-4 audit_summary lookup
     ]
 
     app = _app_with_overrides(mock_db, user)
@@ -123,6 +125,8 @@ async def test_fairness_audit_no_governance_data():
     data = resp.json()
     assert data["has_fairness_data"] is False
     assert data["governance_checks"] == []
+    assert data["checks"] == []
+    assert data["fairness_check"] is None
 
 
 async def test_fairness_audit_case_not_found():
@@ -164,6 +168,7 @@ async def test_fairness_audit_governance_log_present_but_no_fairness_data():
     mock_db.execute.side_effect = [
         _scalar_one_or_none_result(case),
         _scalars_result([audit_log]),
+        _scalar_one_or_none_result(None),  # gate-4 audit_summary lookup
     ]
 
     app = _app_with_overrides(mock_db, user)
@@ -173,3 +178,54 @@ async def test_fairness_audit_governance_log_present_but_no_fairness_data():
     assert resp.status_code == 200
     data = resp.json()
     assert data["has_fairness_data"] is True  # governance audit log exists
+
+
+async def test_fairness_audit_reads_gate4_audit_summary():
+    case_id = uuid.uuid4()
+    user = _make_user()
+    case = MagicMock(spec=Case)
+    case.id = case_id
+
+    # No legacy hearing-governance log; data lives only in pipeline_events.
+    audit_summary = {
+        "fairness_check": {
+            "audit_passed": False,
+            "critical_issues_found": True,
+            "issues": [
+                "CRITICAL [L1]: Suppressed citations reused.",
+                "MAJOR [P9]: Reasoning chain incomplete.",
+            ],
+            "recommendations": ["Rerun research to retrieve authoritative text."],
+        },
+        "recommend_send_back": {
+            "to_phase": "synthesis",
+            "reason": "Governance G1 violation: preliminary_conclusion is set.",
+        },
+    }
+
+    # The endpoint pulls `PipelineEvent.payload` (a full SSE interrupt
+    # frame) and indexes into `audit_summary` itself. Mirror that shape.
+    event_payload = {"gate": "gate4", "audit_summary": audit_summary}
+
+    mock_db = _build_mock_session()
+    mock_db.execute.side_effect = [
+        _scalar_one_or_none_result(case),
+        _scalars_result([]),
+        _scalar_one_or_none_result(event_payload),
+    ]
+
+    app = _app_with_overrides(mock_db, user)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        resp = await ac.get(f"/api/v1/cases/{case_id}/fairness-audit")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["has_fairness_data"] is True
+    assert data["overall_score"] == 0
+    assert len(data["checks"]) == 2
+    assert data["checks"][0]["passed"] is False
+    assert data["checks"][0]["severity"] == "CRITICAL"
+    assert data["checks"][1]["severity"] == "MAJOR"
+    assert "Send back to synthesis" in data["verdict"]
+    assert data["fairness_check"]["audit_passed"] is False
+    assert data["recommend_send_back"]["to_phase"] == "synthesis"
