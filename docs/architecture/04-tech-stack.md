@@ -26,7 +26,7 @@
 | **Compute Platform (frontend)** | DigitalOcean App Platform | — | Static-site deploy of the Vite build. Auto-builds on push, served from DO's global edge with managed TLS. See `../../VerdictCouncil_Frontend/.do/app.production.yaml` |
 | **Load Balancer** | DigitalOcean Load Balancer | — | Auto-provisioned by the NGINX Ingress controller; HTTPS termination via cert-manager, HTTP→HTTPS redirect, health checks |
 | **Object Storage** | DigitalOcean Spaces | — | S3-compatible storage for database backups and CI artifacts (currently unused at runtime — documents are stored as `bytea` in Postgres) |
-| **CI/CD** | GitHub Actions + doctl | — | `digitalocean/action-doctl@v2` for DOCR + DOKS auth. `staging-deploy.yml` and `production-deploy.yml` build the image, push to DOCR, render the `verdictcouncil-secrets` Secret, run `alembic upgrade head` as a Job, then roll both Deployments |
+| **CI/CD** | GitHub Actions + doctl | — | `digitalocean/action-doctl@v2` for DOCR + DOKS auth. `deploy.yml` (single workflow; branch determines env: development → staging, main → production) builds the image, pushes to DOCR, renders the `verdictcouncil-secrets` Secret, runs `alembic upgrade head` as a Job, then rolls both Deployments |
 | **Monitoring** | DO Monitoring + Prometheus + LangSmith | — | DO provides cluster-level metrics; Prometheus scrapes `/metrics` on `api-service`; LangSmith captures graph-level traces |
 | **Logging** | Structured stdout (JSON) | — | DOKS collects stdout via log drivers; the graph runner emits per-node entries (node name, duration, token usage) that also flow to LangSmith |
 | **Code Quality** | ruff + mypy | `>=0.8` / `>=1.14` | Fast linting (ruff) and static type checking (mypy) enforced in CI |

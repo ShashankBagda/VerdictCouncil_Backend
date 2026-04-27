@@ -356,7 +356,7 @@ kubectl create secret generic verdictcouncil-secrets \
   --from-literal=COOKIE_SECURE="true"
 ```
 
-The deploy workflows render this Secret automatically from GitHub Action secrets on every roll — see `.github/workflows/staging-deploy.yml` and `production-deploy.yml`. There is no `AGENT_HMAC_SECRET` because there is no Orchestrator-to-agent HTTP contract — both `api-service` and `arq-worker` invoke agent nodes as in-process Python calls inside the LangGraph runtime.
+The deploy workflow renders this Secret automatically from GitHub Action secrets on every roll — see `.github/workflows/deploy.yml` (single workflow, branch-derived env). There is no `AGENT_HMAC_SECRET` because there is no Orchestrator-to-agent HTTP contract — both `api-service` and `arq-worker` invoke agent nodes as in-process Python calls inside the LangGraph runtime.
 
 ---
 

@@ -15,8 +15,12 @@ Cross-references:
 
 ## Eval gate (4.D3.2 / 4.D3.3 / 4.D3.4)
 
-The `.github/workflows/eval.yml` workflow is committed but inert until
-the operator wires it up.
+The `eval` job inside `.github/workflows/ci.yml` (folded in from a
+former separate `eval.yml` on 2026-04-27) is committed but inert until
+the operator wires it up. The job is path-gated and PR-only — it
+skips on push events and when the changeset doesn't touch
+`src/pipeline/**`, `src/agents/**`, `tests/eval/**`, `**/prompts.py`,
+or `src/tools/**`.
 
 ### 1. Repo secrets (Settings → Secrets and variables → Actions → Secrets)
 
@@ -47,7 +51,7 @@ For `main`, `release/*`, `development`:
   - `Lint`
   - `Unit Tests`
   - `Security`
-  - **`Eval Gate`** ← from `.github/workflows/eval.yml`
+  - **`LangSmith Eval Gate`** ← `eval` job in `.github/workflows/ci.yml`
   - `Docker Build` (if applicable)
 - ☑ Require conversation resolution before merging
 

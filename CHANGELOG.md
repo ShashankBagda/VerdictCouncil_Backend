@@ -6,7 +6,7 @@ All notable changes to VerdictCouncil Backend are documented here.
 
 ### Changed
 
-- **Deployment topology consolidated to a single image, two Deployments.** The production K8s deploy is now `api-service` (uvicorn) + `arq-worker` (arq) — both built from the same `Dockerfile`, differing only in `command`/`args`. Added `k8s/base/deployment-arq-worker.yaml`. The deploy workflows (`staging-deploy.yml`, `production-deploy.yml`) now roll both Deployments after migrations.
+- **Deployment topology consolidated to a single image, two Deployments.** The production K8s deploy is now `api-service` (uvicorn) + `arq-worker` (arq) — both built from the same `Dockerfile`, differing only in `command`/`args`. Added `k8s/base/deployment-arq-worker.yaml`. The deploy workflow (`deploy.yml` — single workflow covering both staging and production, with branch-derived env) rolls both Deployments after migrations.
 - **Documentation aligned with the in-process LangGraph reality.** `02-system-architecture.md`, `04-tech-stack.md`, `06-cicd-pipeline.md`, `08-infrastructure-setup.md`, the backend `README.md`, and `docs/operations/uat-runbook.md` no longer describe the decommissioned 9-agent SAM/Solace topology, the `vc-orchestrator` Deployment, the `/invoke` HTTP contract, or the `AGENT_HMAC_SECRET`.
 
 ### Removed

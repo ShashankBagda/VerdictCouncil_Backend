@@ -190,7 +190,7 @@ make smoke-contract     # hit every frontend-used endpoint against a running API
 | Local infra | `docker-compose.infra.yml` (Postgres 16, Redis 7) |
 | Kubernetes | `k8s/base/` — `api-service` Deployment, `arq-worker` Deployment, ClusterIP service, NGINX Ingress + cert-manager TLS, Alembic Job, stuck-case-watchdog CronJob |
 | Overlays | `k8s/overlays/staging/` and `k8s/overlays/production/` (kustomize) |
-| CI/CD | `.github/workflows/staging-deploy.yml` and `production-deploy.yml` — build the image, push to DOCR, render secrets, run Alembic, roll both Deployments |
+| CI/CD | `.github/workflows/deploy.yml` — single workflow, branch determines env (development → staging, main → production); builds the image, pushes to DOCR, renders secrets, runs Alembic, rolls both Deployments |
 
 Backend deploys to **DOKS** (DigitalOcean Kubernetes); the frontend deploys to **DO App Platform** as a static site (see `../VerdictCouncil_Frontend/.do/`). Infrastructure setup: [`docs/architecture/08-infrastructure-setup.md`](docs/architecture/08-infrastructure-setup.md). K8s layout: [`k8s/README.md`](k8s/README.md).
 
@@ -201,10 +201,12 @@ Backend deploys to **DOKS** (DigitalOcean Kubernetes); the frontend deploys to *
 The Sprint 4 backend cutover landed several features that require human
 configuration before they are live:
 
-- **Eval gate (`.github/workflows/eval.yml`)** — needs repo secrets
-  (`LANGSMITH_API_KEY`, `OPENAI_API_KEY`), repo variable
-  (`EVAL_BASELINE_EXPERIMENT`), and branch-protection rules. The
-  workflow file is committed but inert until the secrets/variable land.
+- **Eval gate (the `eval` job in `.github/workflows/ci.yml`)** — needs
+  repo secrets (`LANGSMITH_API_KEY`, `OPENAI_API_KEY`), repo variable
+  (`EVAL_BASELINE_EXPERIMENT`), and branch-protection rules. The job
+  is committed but inert until the secrets/variable land. Path-gated:
+  only runs on PRs that touch `src/pipeline/**`, `src/agents/**`,
+  `tests/eval/**`, `**/prompts.py`, or `src/tools/**`.
 - **Worker-side `Command(resume=...)` cutover** — the contract layer
   for the `interrupt()`-driven HITL flow is shipped, but the worker
   (`run_gate_job`) still routes through the legacy `runner.run_gate(...)`

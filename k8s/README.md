@@ -1,10 +1,11 @@
 # Kubernetes manifests — live deploy target
 
-These are the **production deployment manifests.** The CI workflows under
-`../.github/workflows/staging-deploy.yml` and `../production-deploy.yml`
-build the Docker image, push it to DigitalOcean Container Registry, and
-then `kubectl apply -k k8s/overlays/<env>/` against a DigitalOcean
-Kubernetes (DOKS) cluster.
+These are the **production deployment manifests.** A single CI workflow
+`../.github/workflows/deploy.yml` (branch determines env: `development`
+→ staging, `main` → production) builds the Docker image, pushes it to
+DigitalOcean Container Registry, and then applies the kustomize overlay
+for the matching env (`k8s/overlays/staging/` or `k8s/overlays/production/`)
+against a DigitalOcean Kubernetes (DOKS) cluster.
 
 ## Layout
 
