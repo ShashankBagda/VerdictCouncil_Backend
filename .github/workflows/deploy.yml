@@ -277,11 +277,31 @@ jobs:
             --from-literal=FASTAPI_PORT=8001 \
             --dry-run=client -o yaml | kubectl apply -f -
 
+      - name: Quiesce arq-worker before migration
+        # arq-worker holds long-running transactions against audit_logs while
+        # processing pipeline phases — the dominant source of lock contention
+        # on ALTER TABLE audit_logs in 0026. Scale to 0 before migrating; the
+        # subsequent kustomize apply restores replicas (manifest specifies 1)
+        # and recreates the pod with the new image.
+        #
+        # terminationGracePeriodSeconds=900 (15 min) would block CI for an
+        # in-flight pipeline. Allow 60s for graceful drain, then force-delete
+        # — arq retries interrupted jobs from its outbox.
+        run: |
+          kubectl scale deployment/arq-worker -n "${NAMESPACE}" --replicas=0
+          if ! kubectl wait --for=delete pod -l component=arq-worker \
+              -n "${NAMESPACE}" --timeout=60s; then
+            echo "arq-worker did not drain in 60s — force deleting" >&2
+            kubectl delete pod -l component=arq-worker -n "${NAMESPACE}" \
+              --force --grace-period=0 --ignore-not-found
+          fi
+
       - name: Run database migrations
         # Migrations run before the new image is rolled out so the old pods
-        # are stable (not mid-rollout) while DDL locks are acquired.
+        # are stable (not mid-rollout) while DDL locks are acquired, and
+        # arq-worker (heaviest audit_logs writer) has been quiesced above.
         # All recent migrations are additive (nullable columns / new tables)
-        # so the running old code is safe against the new schema.
+        # so the surviving api-service pods are safe against the new schema.
         # alembic/env.py sets lock_timeout=30s so a blocked DDL fails fast
         # rather than hanging until this step's timeout fires.
         run: |
