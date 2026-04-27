@@ -150,8 +150,23 @@ jobs:
         run: |
           doctl kubernetes cluster registry add "${{ steps.cluster.outputs.id }}" || true
 
-      - name: Configure kubectl
-        run: doctl kubernetes cluster kubeconfig save "${{ steps.cluster.outputs.id }}"
+      - name: Configure kubectl with cluster-admin token
+        # `doctl kubernetes cluster kubeconfig save` (doctl >= 1.100) writes
+        # an exec-credential kubeconfig that authenticates as the API
+        # token's owner email, which does NOT carry cluster-admin RBAC.
+        # Helm release-discovery (which lists secrets in the target
+        # namespace) then fails with "secrets is forbidden". Fetching the
+        # kubeconfig from the DO API endpoint directly returns a
+        # static-token config that carries cluster-admin.
+        run: |
+          mkdir -p "$HOME/.kube"
+          curl -fsSL \
+            -H "Authorization: Bearer ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}" \
+            "https://api.digitalocean.com/v2/kubernetes/clusters/${{ steps.cluster.outputs.id }}/kubeconfig" \
+            -o "$HOME/.kube/config"
+          chmod 600 "$HOME/.kube/config"
+          kubectl version --client=true
+          kubectl cluster-info | head -2
 
       # ----- Managed Postgres -------------------------------------------------
       - name: Ensure Managed Postgres exists

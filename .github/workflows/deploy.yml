@@ -208,8 +208,18 @@ jobs:
         with:
           token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
 
-      - name: Configure kubectl
-        run: doctl kubernetes cluster kubeconfig save "${DOKS_CLUSTER_ID}"
+      - name: Configure kubectl with cluster-admin token
+        # See infra-bootstrap.yml for the rationale: the doctl exec-cred
+        # kubeconfig authenticates as the API-token owner email and lacks
+        # cluster-admin, so we pull the DO API's static-token kubeconfig
+        # which does carry cluster-admin.
+        run: |
+          mkdir -p "$HOME/.kube"
+          curl -fsSL \
+            -H "Authorization: Bearer ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}" \
+            "https://api.digitalocean.com/v2/kubernetes/clusters/${DOKS_CLUSTER_ID}/kubeconfig" \
+            -o "$HOME/.kube/config"
+          chmod 600 "$HOME/.kube/config"
 
       - name: Render runtime secrets
         run: |
