@@ -1,6 +1,7 @@
 import os
 from logging.config import fileConfig
 
+import sqlalchemy as sa
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
@@ -33,6 +34,9 @@ def run_migrations_online() -> None:
         poolclass=pool.NullPool,
     )
     with connectable.connect() as connection:
+        # Fail fast if DDL can't acquire a table lock within 30 s rather than
+        # hanging indefinitely and timing out the deploy job.
+        connection.execute(sa.text("SET lock_timeout = '30s'"))
         context.configure(connection=connection, target_metadata=target_metadata)
         with context.begin_transaction():
             context.run_migrations()
