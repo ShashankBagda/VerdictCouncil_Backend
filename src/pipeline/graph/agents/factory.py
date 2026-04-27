@@ -37,6 +37,7 @@ from src.pipeline.graph.middleware import (
     CaseAwareState,
     audit_tool_call,
     cancel_check,
+    enforce_synthesis_ask_judge,
     sse_tool_emitter,
     token_usage_emitter,
 )
@@ -117,6 +118,7 @@ PHASE_MIDDLEWARE: list[Any] = [
     sse_tool_emitter,
     audit_tool_call,
     token_usage_emitter,
+    enforce_synthesis_ask_judge,
 ]
 
 
