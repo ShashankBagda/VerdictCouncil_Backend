@@ -190,10 +190,12 @@ jobs:
           if [ -n "$REDIS_ID" ]; then
             echo "Redis $REDIS already exists ($REDIS_ID); reusing."
           else
-            echo "Creating Redis $REDIS (this takes ~3 minutes)..."
+            echo "Creating Valkey $REDIS (this takes ~3 minutes)..."
+            # DO migrated managed Redis to Valkey in late 2024; the Valkey
+            # engine is wire-compatible (rediss:// URL still works) and is
+            # the only Redis-protocol option in regions like sgp1.
             doctl databases create "$REDIS" \
-              --engine redis \
-              --version 7 \
+              --engine valkey \
               --region "${{ inputs.region }}" \
               --size db-s-1vcpu-1gb \
               --num-nodes 1 \
