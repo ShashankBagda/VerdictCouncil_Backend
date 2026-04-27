@@ -540,6 +540,7 @@ def _serialize_case_detail(case: Case) -> dict[str, Any]:
             "domain_has_vector_store": bool(
                 case.domain_ref and case.domain_ref.is_active and case.domain_ref.vector_store_id
             ),
+            "judicial_decision": case.judicial_decision,
         }
     )
     return summary

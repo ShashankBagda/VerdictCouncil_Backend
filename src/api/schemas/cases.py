@@ -381,6 +381,10 @@ class CaseDetailResponse(CaseResponse):
         False,
         description="True when the case's domain has an active vector store (admin-uploaded materials).",  # noqa: E501
     )
+    judicial_decision: dict[str, Any] | None = Field(
+        None,
+        description="Recorded judicial decision payload (verdict_text, ai_engagements, recorded_at, judge_id). None until the judge records a decision.",  # noqa: E501
+    )
 
 
 class GateAdvanceRequest(BaseModel):
