@@ -1,0 +1,297 @@
+name: Infra Bootstrap (one-time provisioning)
+
+# One-shot, manually-triggered provisioning of the DigitalOcean infrastructure
+# the backend deploy workflows assume. Idempotent — safe to re-run; existing
+# resources are detected and reused.
+#
+# What this provisions, per environment:
+#   - DOKS cluster `verdictcouncil-<env>` in the chosen region
+#   - DOCR registry (account-wide, created once if missing) bound to the cluster
+#   - Managed Postgres `verdictcouncil-<env>-pg`
+#   - Managed Redis   `verdictcouncil-<env>-redis`
+#   - In-cluster: nginx-ingress controller + cert-manager + Let's Encrypt
+#     ClusterIssuer (`letsencrypt-prod`)
+#   - Writes the generated values back to repo secrets:
+#       DOKS_<ENV>_CLUSTER_ID, DOCR_REGISTRY,
+#       <ENV>_DATABASE_URL, <ENV>_REDIS_URL
+#     (production uses the unprefixed names: DATABASE_URL, REDIS_URL.)
+#
+# What this does NOT do:
+#   - Set human-input secrets (OPENAI_API_KEY, JWT_SECRET, OPENAI_VECTOR_STORE_ID,
+#     LANGSMITH_API_KEY, FRONTEND_ORIGINS / STAGING_FRONTEND_ORIGINS) — set those
+#     via `gh secret set` or the repo settings UI.
+#   - Manage DNS. Create an A/AAAA record for the chosen domain pointing at the
+#     LoadBalancer IP that nginx-ingress provisions (see job summary).
+#   - Provision the frontend App Platform site — that lives in the frontend
+#     repo's `infra-bootstrap-frontend.yml` workflow.
+#
+# Required GitHub Action secrets:
+#   DIGITALOCEAN_ACCESS_TOKEN  — doctl token with full account access
+#   BOOTSTRAP_GH_PAT           — fine-grained PAT scoped to this repo with
+#                                "Secrets: read/write" permission. Used only
+#                                to write generated values back as repo
+#                                secrets. Rotate every 90 days.
+#
+# COST WARNING: a successful run against production provisions ~US$200/mo of
+# infrastructure. Don't run casually.
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Which environment to bootstrap.
+        type: choice
+        required: true
+        options:
+          - staging
+          - production
+      region:
+        description: DO region slug.
+        type: string
+        required: false
+        default: sgp1
+      node_size:
+        description: DOKS node size slug. Leave blank to default per-env (s-2vcpu-4gb staging / s-4vcpu-8gb prod).
+        type: string
+        required: false
+        default: ""
+      node_count:
+        description: DOKS node count.
+        type: number
+        required: false
+        default: 2
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve env-specific names
+        id: names
+        run: |
+          ENV="${{ inputs.environment }}"
+          if [ "$ENV" = "production" ]; then
+            CLUSTER="verdictcouncil"
+            NS="verdictcouncil"
+            DB="verdictcouncil-pg"
+            REDIS="verdictcouncil-redis"
+            CLUSTER_SECRET="DOKS_PRODUCTION_CLUSTER_ID"
+            DB_SECRET="DATABASE_URL"
+            REDIS_SECRET="REDIS_URL"
+            NODE_SIZE_DEFAULT="s-4vcpu-8gb"
+          else
+            CLUSTER="verdictcouncil-staging"
+            NS="verdictcouncil-staging"
+            DB="verdictcouncil-staging-pg"
+            REDIS="verdictcouncil-staging-redis"
+            CLUSTER_SECRET="DOKS_STAGING_CLUSTER_ID"
+            DB_SECRET="STAGING_DATABASE_URL"
+            REDIS_SECRET="STAGING_REDIS_URL"
+            NODE_SIZE_DEFAULT="s-2vcpu-4gb"
+          fi
+          NODE_SIZE="${{ inputs.node_size }}"
+          [ -z "$NODE_SIZE" ] && NODE_SIZE="$NODE_SIZE_DEFAULT"
+          {
+            echo "cluster=$CLUSTER"
+            echo "namespace=$NS"
+            echo "db=$DB"
+            echo "redis=$REDIS"
+            echo "cluster_secret=$CLUSTER_SECRET"
+            echo "db_secret=$DB_SECRET"
+            echo "redis_secret=$REDIS_SECRET"
+            echo "node_size=$NODE_SIZE"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Install doctl
+        uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+
+      - name: Install helm
+        uses: azure/setup-helm@v4
+        with:
+          version: latest
+
+      # ----- DOCR (account-wide, single registry) -----------------------------
+      - name: Ensure DOCR registry exists
+        id: docr
+        run: |
+          if ! doctl registry get -o json >/dev/null 2>&1; then
+            # Account has no registry yet — create one. Name must be globally
+            # unique within DigitalOcean.
+            REG_NAME="verdictcouncil-$(date +%s)"
+            doctl registry create "$REG_NAME" --subscription-tier basic
+          fi
+          REG_NAME=$(doctl registry get -o json | jq -r '.[0].name')
+          echo "registry=registry.digitalocean.com/${REG_NAME}" >> "$GITHUB_OUTPUT"
+
+      # ----- DOKS cluster -----------------------------------------------------
+      - name: Ensure DOKS cluster exists
+        id: cluster
+        run: |
+          CLUSTER="${{ steps.names.outputs.cluster }}"
+          if doctl kubernetes cluster get "$CLUSTER" -o json >/dev/null 2>&1; then
+            echo "Cluster $CLUSTER already exists; reusing."
+          else
+            echo "Creating cluster $CLUSTER (this takes ~5–8 minutes)..."
+            doctl kubernetes cluster create "$CLUSTER" \
+              --region "${{ inputs.region }}" \
+              --node-pool "name=worker;size=${{ steps.names.outputs.node_size }};count=${{ inputs.node_count }}" \
+              --auto-upgrade=true \
+              --maintenance-window "saturday=18:00" \
+              --wait
+          fi
+          CLUSTER_ID=$(doctl kubernetes cluster get "$CLUSTER" --format ID --no-header)
+          echo "id=$CLUSTER_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Bind DOCR to cluster (idempotent)
+        run: |
+          doctl kubernetes cluster registry add "${{ steps.cluster.outputs.id }}" || true
+
+      - name: Configure kubectl
+        run: doctl kubernetes cluster kubeconfig save "${{ steps.cluster.outputs.id }}"
+
+      # ----- Managed Postgres -------------------------------------------------
+      - name: Ensure Managed Postgres exists
+        id: pg
+        run: |
+          DB="${{ steps.names.outputs.db }}"
+          if doctl databases get-by-name "$DB" -o json >/dev/null 2>&1; then
+            echo "Postgres $DB already exists; reusing."
+          else
+            echo "Creating Postgres $DB (this takes ~5 minutes)..."
+            doctl databases create "$DB" \
+              --engine pg \
+              --version 16 \
+              --region "${{ inputs.region }}" \
+              --size db-s-1vcpu-2gb \
+              --num-nodes 1 \
+              --wait
+          fi
+          DB_ID=$(doctl databases get-by-name "$DB" --format ID --no-header)
+          # Capture private connection string (uses the VPC the DOKS cluster shares).
+          DSN=$(doctl databases connection "$DB_ID" --format URI --no-header --private)
+          # Add asyncpg driver suffix for SQLAlchemy async.
+          DSN_ASYNCPG=${DSN/postgresql:\/\//postgresql+asyncpg://}
+          echo "::add-mask::$DSN_ASYNCPG"
+          echo "dsn<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$DSN_ASYNCPG" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      # ----- Managed Redis ----------------------------------------------------
+      - name: Ensure Managed Redis exists
+        id: redis
+        run: |
+          REDIS="${{ steps.names.outputs.redis }}"
+          if doctl databases get-by-name "$REDIS" -o json >/dev/null 2>&1; then
+            echo "Redis $REDIS already exists; reusing."
+          else
+            echo "Creating Redis $REDIS (this takes ~3 minutes)..."
+            doctl databases create "$REDIS" \
+              --engine redis \
+              --version 7 \
+              --region "${{ inputs.region }}" \
+              --size db-s-1vcpu-1gb \
+              --num-nodes 1 \
+              --wait
+          fi
+          REDIS_ID=$(doctl databases get-by-name "$REDIS" --format ID --no-header)
+          DSN=$(doctl databases connection "$REDIS_ID" --format URI --no-header --private)
+          echo "::add-mask::$DSN"
+          echo "dsn<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$DSN" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      # ----- nginx-ingress + cert-manager (idempotent helm installs) ---------
+      - name: Install nginx-ingress
+        run: |
+          helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx >/dev/null 2>&1 || true
+          helm repo update >/dev/null
+          helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
+            --namespace ingress-nginx --create-namespace \
+            --set controller.publishService.enabled=true \
+            --wait --timeout 5m
+
+      - name: Install cert-manager
+        run: |
+          helm repo add jetstack https://charts.jetstack.io >/dev/null 2>&1 || true
+          helm repo update >/dev/null
+          helm upgrade --install cert-manager jetstack/cert-manager \
+            --namespace cert-manager --create-namespace \
+            --set installCRDs=true \
+            --wait --timeout 5m
+
+      - name: Apply Let's Encrypt ClusterIssuer
+        run: |
+          cat <<'EOF' | kubectl apply -f -
+          apiVersion: cert-manager.io/v1
+          kind: ClusterIssuer
+          metadata:
+            name: letsencrypt-prod
+          spec:
+            acme:
+              server: https://acme-v02.api.letsencrypt.org/directory
+              email: ops@verdictcouncil.sg
+              privateKeySecretRef:
+                name: letsencrypt-prod-account-key
+              solvers:
+                - http01:
+                    ingress:
+                      class: nginx
+          EOF
+
+      - name: Capture LoadBalancer IP
+        id: lb
+        run: |
+          # The LoadBalancer takes ~30–60s to receive an external IP after the
+          # nginx-ingress Service is created.
+          for i in $(seq 1 30); do
+            IP=$(kubectl -n ingress-nginx get svc ingress-nginx-controller \
+              -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)
+            [ -n "$IP" ] && break
+            sleep 10
+          done
+          if [ -z "$IP" ]; then
+            echo "::warning::LoadBalancer IP not available after 5 minutes; check the cluster manually."
+            IP="<pending>"
+          fi
+          echo "ip=$IP" >> "$GITHUB_OUTPUT"
+
+      # ----- Write generated secrets back to GitHub --------------------------
+      - name: Write generated values to repo secrets
+        env:
+          GH_TOKEN: ${{ secrets.BOOTSTRAP_GH_PAT }}
+        run: |
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "::warning::BOOTSTRAP_GH_PAT not set; skipping secret write-back."
+            echo "::warning::Manually set: ${{ steps.names.outputs.cluster_secret }}, DOCR_REGISTRY, ${{ steps.names.outputs.db_secret }}, ${{ steps.names.outputs.redis_secret }}"
+            exit 0
+          fi
+          gh secret set "${{ steps.names.outputs.cluster_secret }}" --body "${{ steps.cluster.outputs.id }}"
+          gh secret set DOCR_REGISTRY                              --body "${{ steps.docr.outputs.registry }}"
+          gh secret set "${{ steps.names.outputs.db_secret }}"     --body "${{ steps.pg.outputs.dsn }}"
+          gh secret set "${{ steps.names.outputs.redis_secret }}"  --body "${{ steps.redis.outputs.dsn }}"
+
+      # ----- Final summary ---------------------------------------------------
+      - name: Job summary
+        run: |
+          {
+            echo "## Bootstrap complete: ${{ inputs.environment }}"
+            echo
+            echo "| Resource | Value |"
+            echo "|---|---|"
+            echo "| DOKS cluster | \`${{ steps.names.outputs.cluster }}\` (\`${{ steps.cluster.outputs.id }}\`) |"
+            echo "| DOCR registry | \`${{ steps.docr.outputs.registry }}\` |"
+            echo "| Postgres | \`${{ steps.names.outputs.db }}\` |"
+            echo "| Redis | \`${{ steps.names.outputs.redis }}\` |"
+            echo "| LoadBalancer IP | \`${{ steps.lb.outputs.ip }}\` |"
+            echo
+            echo "### Next steps"
+            echo
+            echo "1. Create a DNS A record pointing the relevant hostname (\`staging-api.verdictcouncil.sg\` or \`api.verdictcouncil.sg\`) at \`${{ steps.lb.outputs.ip }}\`."
+            echo "2. Set the human-input secrets if not already present:"
+            echo "   \`OPENAI_API_KEY\`, \`OPENAI_VECTOR_STORE_ID\`, \`JWT_SECRET\` (or \`STAGING_JWT_SECRET\`), \`FRONTEND_ORIGINS\` (or \`STAGING_FRONTEND_ORIGINS\`), \`LANGSMITH_API_KEY\` (optional)."
+            echo "3. Push to \`development\` (staging) or \`main\` (production) to trigger a deploy."
+          } >> "$GITHUB_STEP_SUMMARY"
