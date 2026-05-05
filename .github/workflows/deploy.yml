@@ -70,7 +70,7 @@ jobs:
       rolling_tag:  ${{ env.ROLLING_TAG }}
       env_name:     ${{ env.ENV_NAME }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6.0.2
         with:
           # `git describe` on production needs full history.
           fetch-depth: 0
@@ -170,7 +170,7 @@ jobs:
           category: ${{ env.TRIVY_CATEGORY }}
 
       - name: Upload SARIF as artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.1
         if: always()
         with:
           name: ${{ env.TRIVY_ARTIFACT }}
@@ -218,7 +218,7 @@ jobs:
       # Reconstruct from secret + tag; see build-and-push outputs comment.
       IMAGE:            ${{ secrets.DOCR_REGISTRY }}/verdictcouncil:${{ needs.build-and-push.outputs.image_tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6.0.2
 
       - name: Install doctl
         uses: digitalocean/action-doctl@v2
@@ -401,9 +401,9 @@ jobs:
     env:
       BACKEND_URL: ${{ needs.deploy.outputs.backend_url }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6.0.2
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6.2.0
         with:
           python-version: "3.12"
 
@@ -427,7 +427,7 @@ jobs:
         continue-on-error: true
 
       - name: Upload load test report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.1
         if: always()
         with:
           name: load-test-report-${{ github.ref_name == 'main' && 'production' || 'staging' }}
