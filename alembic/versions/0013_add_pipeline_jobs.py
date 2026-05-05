@@ -15,7 +15,7 @@ windows.
 """
 
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import ENUM as PG_ENUM, JSONB, UUID
 
 from alembic import op
 
@@ -59,11 +59,11 @@ def upgrade() -> None:
             sa.ForeignKey("cases.id", ondelete="CASCADE"),
             nullable=False,
         ),
-        sa.Column("job_type", JOB_TYPE_ENUM, nullable=False),
+        sa.Column("job_type", PG_ENUM(name="pipelinejobtype", create_type=False), nullable=False),
         sa.Column("target_id", UUID(as_uuid=True), nullable=True),
         sa.Column(
             "status",
-            JOB_STATUS_ENUM,
+            PG_ENUM(name="pipelinejobstatus", create_type=False),
             nullable=False,
             server_default="pending",
         ),
