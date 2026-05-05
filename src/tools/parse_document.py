@@ -89,14 +89,11 @@ async def parse_document(
 ) -> dict:
     """Parse an uploaded document via the OpenAI Files API.
 
-    D13 NOTE: The in-process pipeline runner short-circuits this call when
-    pages for `file_id` are already hydrated in CaseState.raw_documents
-    (see runner.py:_execute_tool_call / _get_cached_pages).  This function
-    is only reached on a true cache miss, or when called directly by the
-    domain-upload route (which never has state).  No `state` parameter is
-    needed here because there is no SAM DynamicTool wrapping this function
-    — the tool is `function_name: parse_document` (in-process only), so
-    the mesh path never calls it.
+    The `parse_document_tool` closure in `src/pipeline/graph/tools.py` short-circuits
+    this call when `file_id` matches an entry in `CaseState.raw_documents` that already
+    has a non-empty `parsed_text` (pre-parsed by `_hydrate_raw_documents` at pipeline
+    start).  This function is only reached on a true cache miss, or when called directly
+    by the domain-upload route (which has no CaseState).
 
     Args:
         file_id: OpenAI File ID of the uploaded document (e.g., "file-abc123").

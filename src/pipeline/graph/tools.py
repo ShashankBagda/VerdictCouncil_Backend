@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 from typing import Any
 
 from langchain_core.documents import Document
@@ -20,6 +21,8 @@ from pydantic import BaseModel, Field
 
 from src.pipeline.graph.prompts import AGENT_TOOLS
 from src.pipeline.graph.state import GraphState
+
+logger = logging.getLogger(__name__)
 
 
 def _merge_precedent_meta(
@@ -278,6 +281,43 @@ def make_tools(
         Use this to extract text, tables, and metadata from case documents.
         The file_id must be a valid OpenAI File ID already uploaded to the API.
         """
+        # Short-circuit: return pre-parsed text from CaseState without an API call.
+        # _hydrate_raw_documents (cases.py) runs before the pipeline and stores
+        # parsed_text + pages in raw_documents keyed by openai_file_id.
+        for doc in state["case"].raw_documents:
+            if doc.get("openai_file_id") == file_id:
+                parsed_text: str = doc.get("parsed_text") or ""
+                if parsed_text:
+                    from src.shared.sanitization import SanitizationResult
+
+                    pages: list[dict] = doc.get("pages") or [
+                        {"page_number": 1, "text": parsed_text, "tables": []}
+                    ]
+                    tables: list = [t for p in pages for t in (p.get("tables") or [])]
+                    filename: str = doc.get("filename") or ""
+                    logger.debug(
+                        "parse_document cache hit: file_id=%s filename=%s", file_id, filename
+                    )
+                    return {
+                        "file_id": file_id,
+                        "filename": filename,
+                        "content_type": "",
+                        "text": parsed_text,
+                        "pages": pages,
+                        "tables": tables,
+                        "metadata": {"filename": filename, "content_type": ""},
+                        "parsing_notes": [
+                            "Served from CaseState cache (pre-parsed at pipeline start)."
+                        ],
+                        "sanitization": SanitizationResult(
+                            text=parsed_text,
+                            regex_hits=0,
+                            classifier_hits=0,
+                            chunks_scanned=len(pages),
+                        ),
+                    }
+                break  # entry found but not hydrated — fall through to API
+
         from src.tools.parse_document import parse_document
 
         return await parse_document(

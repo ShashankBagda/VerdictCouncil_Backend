@@ -120,3 +120,35 @@ Follow spec Scenarios A–D with `./dev.sh up` from orchestration root:
 - [ ] **Scenario B** — `POST /cases/{id}/cancel` from a second tab: both tabs receive `phase=cancelled` terminal frame; pipeline stops within one inter-turn window; token burn stops
 - [ ] **Scenario C** — open two browser tabs on the same case, close one: the remaining tab keeps receiving events; pipeline continues
 - [ ] **Scenario D** — let `vc_token` cookie expire mid-stream: `auth_expiring` event arrives ≥60s before expiry; frontend redirects to `/login`
+
+---
+
+# parse_document cache short-circuit
+
+## Context
+`parse_document_tool` always calls the OpenAI Responses API even when `_hydrate_raw_documents`
+already pre-parsed and stored the document text in `CaseState.raw_documents` before pipeline
+start. Three research agents (evidence, facts, witnesses) each call `parse_document` on the
+same uploaded files — paying 3× API cost with no caching. The fix lives entirely inside the
+`parse_document_tool` closure in `tools.py` which already captures `state`.
+See `tasks/plan.md` for full design.
+
+## Tasks
+
+- [ ] **T1** — `src/pipeline/graph/tools.py:270–289` — add cache lookup in `parse_document_tool`
+  closure: scan `state["case"].raw_documents` for `openai_file_id == file_id`; if found and
+  `parsed_text` non-empty, return cached dict without calling `parse_document()`; log DEBUG hit.
+
+- [ ] **T2** — `src/tools/parse_document.py:93–99` — update docstring: remove "unimplemented"
+  from D13 note; describe that the tools.py closure now short-circuits on cache hit.
+
+- [ ] **T3** — `tests/unit/test_parse_document_cache.py` (new) — four tests via `make_tools(state)`:
+  cache hit skips API, miss on empty `parsed_text` calls API, miss on absent `file_id` calls API,
+  synthesised pages when `pages=None`.
+
+## Checkpoint
+```bash
+.venv/bin/pytest tests/unit/ tests/api/ -v --tb=short          # 876+ must stay green
+.venv/bin/pytest tests/unit/test_parse_document_cache.py -v    # 4 new tests green
+.venv/bin/ruff format --check src/ tests/                      # lint clean
+```
