@@ -203,6 +203,8 @@ jobs:
     needs: [build-and-push, trivy-scan]
     runs-on: ubuntu-latest
     environment: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
+    outputs:
+      backend_url: ${{ steps.get_url.outputs.backend_url }}
     env:
       IS_PROD:          ${{ github.ref_name == 'main' }}
       ENV_NAME:         ${{ needs.build-and-push.outputs.env_name }}
@@ -353,6 +355,21 @@ jobs:
           kubectl rollout status -n "${NAMESPACE}" deployment/api-service --timeout=600s
           kubectl rollout status -n "${NAMESPACE}" deployment/arq-worker  --timeout=600s
 
+      - name: Resolve backend URL
+        id: get_url
+        run: |
+          # Prefer hostname (DigitalOcean LBs expose a hostname); fall back to IP.
+          HOST=$(kubectl get svc api-service -n "${NAMESPACE}" \
+            -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
+          if [ -z "$HOST" ]; then
+            HOST=$(kubectl get svc api-service -n "${NAMESPACE}" \
+              -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)
+          fi
+          if [ -z "$HOST" ]; then
+            echo "::warning::Could not resolve backend URL from LoadBalancer — load tests will be skipped."
+          fi
+          echo "backend_url=https://${HOST}" >> "$GITHUB_OUTPUT"
+
       - name: Summary
         run: |
           {
@@ -379,9 +396,10 @@ jobs:
     runs-on: ubuntu-latest
     environment: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
     # Only smoke-test staging on push; production is opt-in via workflow_dispatch.
-    if: github.ref_name == 'development' || github.event_name == 'workflow_dispatch'
+    # Skip if the deploy job couldn't resolve the backend URL (e.g. LB not yet assigned).
+    if: (github.ref_name == 'development' || github.event_name == 'workflow_dispatch') && needs.deploy.outputs.backend_url != 'https://'
     env:
-      BACKEND_URL: ${{ github.ref_name == 'main' && secrets.BACKEND_URL || secrets.STAGING_BACKEND_URL }}
+      BACKEND_URL: ${{ needs.deploy.outputs.backend_url }}
     steps:
       - uses: actions/checkout@v4
 
