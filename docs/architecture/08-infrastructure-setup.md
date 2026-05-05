@@ -433,7 +433,19 @@ DO provides built-in monitoring for all managed services:
 
 ### Prometheus + Grafana (Application-Level)
 
-Install the DO Kubernetes Monitoring Stack for deeper observability:
+Install the **DigitalOcean Kubernetes Monitoring Stack** — a 1-click marketplace app — for deeper observability:
+
+> Marketplace listing: <https://marketplace.digitalocean.com/apps/kubernetes-monitoring-stack>
+
+The 1-click app installs the upstream `kube-prometheus-stack` Helm chart (Prometheus + Grafana + Alertmanager + node-exporter + kube-state-metrics) with DO-friendly defaults: `do-block-storage` PVCs for the Prometheus TSDB, persistent Grafana state, and pre-wired ServiceMonitors that pick up DOKS control-plane metrics.
+
+#### Option A · 1-click install (recommended)
+
+From the DOKS dashboard, open **Marketplace → Kubernetes Monitoring Stack → Install App**, choose the `verdict-prod` cluster, accept the defaults (`monitoring` namespace, 20 GiB Prometheus volume, 30-day retention), and rotate the auto-generated Grafana admin password into the cluster's secret store.
+
+#### Option B · Equivalent Helm install (for reproducible bootstrap)
+
+The marketplace app is the same chart under the hood, so a `doctl`-driven bootstrap can reproduce it:
 
 ```bash
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
@@ -447,6 +459,8 @@ helm install monitoring prometheus-community/kube-prometheus-stack \
   --set prometheus.prometheusSpec.storageSpec.volumeClaimTemplate.spec.storageClassName=do-block-storage \
   --set prometheus.prometheusSpec.storageSpec.volumeClaimTemplate.spec.resources.requests.storage=20Gi
 ```
+
+Either path produces the same in-cluster footprint; `infra-bootstrap.yml` uses Option B so a fresh cluster can be reproduced from CI.
 
 ### Alerts to Configure
 
@@ -485,7 +499,7 @@ Complete these steps in order:
 - [ ] Set GitHub Actions secrets
 - [ ] Create GitHub environments (staging, production)
 - [ ] Create DO Spaces bucket for backups
-- [ ] Install Prometheus + Grafana monitoring stack
+- [ ] Install the DO Kubernetes Monitoring Stack (1-click marketplace app — `kubernetes-monitoring-stack`)
 - [ ] Verify: push a test image to DOCR and pull from DOKS
 - [ ] Roll out `api-service` Deployment + Service + Ingress
 - [ ] Roll out `arq-worker` Deployment (no Service — it consumes the Postgres outbox)
