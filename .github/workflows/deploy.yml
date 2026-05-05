@@ -163,7 +163,7 @@ jobs:
         continue-on-error: true
 
       - name: Upload SARIF to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: trivy-image.sarif
@@ -365,4 +365,67 @@ jobs:
             echo "| Namespace | \`${{ env.NAMESPACE }}\` |"
             echo "| Image | \`${{ env.IMAGE }}\` |"
             echo "| Overlay | \`k8s/overlays/${{ env.OVERLAY }}/\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # --------------------------------------------------------------------------
+  # 4. Smoke-level load test against the freshly-deployed backend.
+  #    Runs after rollout completes so requests hit the new image.
+  #    Staging only — skip production to avoid seeded-credential load.
+  #    Required secrets: STAGING_BACKEND_URL (staging env) / BACKEND_URL (prod).
+  # --------------------------------------------------------------------------
+  load-tests:
+    name: Load tests (Locust)
+    needs: deploy
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
+    # Only smoke-test staging on push; production is opt-in via workflow_dispatch.
+    if: github.ref_name == 'development' || github.event_name == 'workflow_dispatch'
+    env:
+      BACKEND_URL: ${{ github.ref_name == 'main' && secrets.BACKEND_URL || secrets.STAGING_BACKEND_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      # 30-second burst: 5 users, ramp 1/s
+      # Failure thresholds enforced in locustfile quitting hook:
+      #   error rate > 5% OR p95 > 5 s for critical endpoints
+      - name: Run Locust load test (headless, 30s)
+        run: |
+          locust -f tests/load/locustfile.py \
+            --headless -u 5 -r 1 -t 30s \
+            --host "${BACKEND_URL}" \
+            --csv tests/load/results \
+            --html tests/load/report.html \
+            --exit-code-on-error 1
+        env:
+          VC_LOAD_USERNAME: judge@verdictcouncil.sg
+          VC_LOAD_PASSWORD: ${{ secrets.LOAD_TEST_PASSWORD }}
+        continue-on-error: true
+
+      - name: Upload load test report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: load-test-report-${{ github.ref_name == 'main' && 'production' || 'staging' }}
+          path: tests/load/
+
+      - name: Render load test summary
+        if: always()
+        run: |
+          {
+            echo "## Load tests"
+            echo
+            if [ -f tests/load/results_stats.csv ]; then
+              echo '```'
+              cat tests/load/results_stats.csv
+              echo '```'
+            else
+              echo "_No stats file generated._"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
