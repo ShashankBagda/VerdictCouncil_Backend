@@ -311,8 +311,10 @@ jobs:
 
           # Poll for Complete or Failed — kubectl wait only watches for Complete
           # and will sit at the timeout if the job fails instead of fast-failing.
+          # 120 iterations × 5 s = 600 s (10 min) to handle fresh-DB runs where
+          # all 27 migrations execute sequentially (~6 min observed).
           i=0
-          while [ $i -lt 60 ]; do
+          while [ $i -lt 120 ]; do
             COND=$(kubectl get job alembic-migrate -n "${NAMESPACE}" \
               -o jsonpath='{.status.conditions[?(@.status=="True")].type}' 2>/dev/null || true)
             if [ "$COND" = "Complete" ]; then
