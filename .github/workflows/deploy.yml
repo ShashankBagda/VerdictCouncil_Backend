@@ -350,8 +350,8 @@ jobs:
 
       - name: Wait for rollouts
         run: |
-          kubectl rollout status -n "${NAMESPACE}" deployment/api-service --timeout=300s
-          kubectl rollout status -n "${NAMESPACE}" deployment/arq-worker  --timeout=300s
+          kubectl rollout status -n "${NAMESPACE}" deployment/api-service --timeout=600s
+          kubectl rollout status -n "${NAMESPACE}" deployment/arq-worker  --timeout=600s
 
       - name: Summary
         run: |
