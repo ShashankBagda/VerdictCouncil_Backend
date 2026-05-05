@@ -9,7 +9,7 @@ Tests pass an `InMemorySaver` directly to `build_graph(checkpointer=...)` and
 do not touch the singleton.
 
 Production wiring (per source-driven audit F-1/F-1b — async backend):
-    async with AsyncPostgresSaver.from_conn_string(database_url) as saver:
+    async with AsyncPostgresSaver.from_conn_string(psycopg_url) as saver:
         await saver.setup()
         set_checkpointer(saver)
         try:
@@ -51,7 +51,10 @@ async def lifespan_checkpointer(database_url: str) -> AsyncIterator[BaseCheckpoi
     """
     from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
-    async with AsyncPostgresSaver.from_conn_string(database_url) as saver:
+    # AsyncPostgresSaver uses psycopg directly; strip the SQLAlchemy +asyncpg
+    # driver prefix so psycopg receives a plain postgresql:// URL.
+    psycopg_url = database_url.replace("postgresql+asyncpg://", "postgresql://")
+    async with AsyncPostgresSaver.from_conn_string(psycopg_url) as saver:
         await saver.setup()
         set_checkpointer(saver)
         try:
