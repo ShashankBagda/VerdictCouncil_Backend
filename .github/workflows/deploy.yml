@@ -324,7 +324,7 @@ jobs:
               echo "Migration completed successfully"
               exit 0
             fi
-            if [ "${FAILED:-0}" -ge 3 ] 2>/dev/null; then
+            if [ "${FAILED:-0}" -ge 1 ] 2>/dev/null; then
               echo "Migration job reached backoff limit" >&2
               break
             fi
