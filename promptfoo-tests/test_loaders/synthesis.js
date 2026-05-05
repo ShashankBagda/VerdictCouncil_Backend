@@ -1,15 +1,13 @@
 const { loadGolden } = require('./_lib');
 
-// Synthesis prompt declares a much richer shape than the schema (drift —
-// see research-facts.js). For traffic cases the prompt asks for
-// arguments.{prosecution, defence}; the schema declares
-// arguments.{claimant_position, respondent_position}. We assert what the
-// prompt actually emits.
+// Synthesis output follows SynthesisOutput schema field names:
+//   arguments.{claimant_arguments, respondent_arguments, contested_points, counter_arguments}
+// The schema aligns prompt and Pydantic since v0.4 (agent rename:
+//   argument-construction + hearing-analysis → synthesis).
 //
-// The prompt also explicitly states:
-//     `preliminary_conclusion` and `confidence_score` MUST be `null`.
-// The schema declares preliminary_conclusion: str (min_length=1) — direct
-// contradiction between prompt and schema. We assert per the prompt.
+// preliminary_conclusion MUST be null — enforced by prompt Hard rules and
+// audited by hearing-governance at prompts.py:1658 (CRITICAL_FLAG on non-null).
+// Schema keeps str | None so ToolStrategy can soft-catch before the auditor logs.
 module.exports = function () {
   const golden = loadGolden('traffic-1-improper-lane-change');
   return [
@@ -18,12 +16,12 @@ module.exports = function () {
       vars: { case_input: golden.inputs },
       assert: [
         {
-          // Traffic-domain arguments shape.
+          // Both sides present under schema field names (claimant = prosecution, respondent = defence).
           type: 'javascript',
           value: `
             const args = JSON.parse(output).arguments || {};
-            return typeof args.prosecution === 'object' && args.prosecution !== null
-                && typeof args.defence === 'object' && args.defence !== null;
+            return Array.isArray(args.claimant_arguments) && args.claimant_arguments.length >= 1
+                && Array.isArray(args.respondent_arguments) && args.respondent_arguments.length >= 1;
           `,
         },
         {
@@ -35,17 +33,16 @@ module.exports = function () {
           `,
         },
         {
-          // Prompt mandates preliminary_conclusion is null.
+          // Prompt mandates preliminary_conclusion is null (three-layer verdict defence).
           type: 'javascript',
           value: 'JSON.parse(output).preliminary_conclusion === null',
         },
         {
-          // Pre-hearing brief — present and non-empty (string or object).
+          // uncertainty_flags is a declared schema field (replaces legacy pre_hearing_brief).
           type: 'javascript',
           value: `
-            const pb = JSON.parse(output).pre_hearing_brief;
-            return pb !== undefined && pb !== null
-                && (typeof pb === 'string' ? pb.length > 0 : Object.keys(pb).length > 0);
+            const flags = JSON.parse(output).uncertainty_flags;
+            return Array.isArray(flags);
           `,
         },
       ],
