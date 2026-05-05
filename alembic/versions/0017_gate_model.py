@@ -60,6 +60,7 @@ def upgrade() -> None:
     # 2. Rebuild casestatus enum with 4 new gate-pause values.
     #    Uses rename-create-alter-drop (same pattern as migration 0018).
     # ------------------------------------------------------------------ #
+    conn.execute(sa.text("ALTER TABLE cases ALTER COLUMN status DROP DEFAULT"))
     conn.execute(sa.text("ALTER TYPE casestatus RENAME TO casestatus_old"))
     conn.execute(
         sa.text(
@@ -74,6 +75,7 @@ def upgrade() -> None:
         )
     )
     conn.execute(sa.text("DROP TYPE casestatus_old"))
+    conn.execute(sa.text("ALTER TABLE cases ALTER COLUMN status SET DEFAULT 'pending'"))
 
     # ------------------------------------------------------------------ #
     # 3. Rebuild pipelinejobtype enum to add gate_run.
@@ -142,6 +144,7 @@ def downgrade() -> None:
             ")"
         )
     )
+    conn.execute(sa.text("ALTER TABLE cases ALTER COLUMN status DROP DEFAULT"))
     conn.execute(sa.text("ALTER TYPE casestatus RENAME TO casestatus_new"))
     conn.execute(
         sa.text(
@@ -156,3 +159,4 @@ def downgrade() -> None:
         )
     )
     conn.execute(sa.text("DROP TYPE casestatus_new"))
+    conn.execute(sa.text("ALTER TABLE cases ALTER COLUMN status SET DEFAULT 'pending'"))

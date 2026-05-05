@@ -73,6 +73,7 @@ def upgrade() -> None:
     #    PostgreSQL does not support DROP VALUE, so we use rename-create-
     #    alter-drop (same approach as migration 0018 for userrole).
     # ------------------------------------------------------------------ #
+    conn.execute(sa.text("ALTER TABLE cases ALTER COLUMN status DROP DEFAULT"))
     conn.execute(sa.text("ALTER TYPE casestatus RENAME TO casestatus_old"))
     conn.execute(
         sa.text(
@@ -85,6 +86,7 @@ def upgrade() -> None:
         )
     )
     conn.execute(sa.text("DROP TYPE casestatus_old"))
+    conn.execute(sa.text("ALTER TABLE cases ALTER COLUMN status SET DEFAULT 'pending'"))
 
     # ------------------------------------------------------------------ #
     # 4. Drop RecommendationType enum (was only used by verdicts)
@@ -118,6 +120,7 @@ def downgrade() -> None:
     op.rename_table("hearing_analyses", "deliberations")
 
     # Restore casestatus enum with decided/rejected
+    conn.execute(sa.text("ALTER TABLE cases ALTER COLUMN status DROP DEFAULT"))
     conn.execute(sa.text("ALTER TYPE casestatus RENAME TO casestatus_new"))
     conn.execute(
         sa.text(
@@ -130,6 +133,7 @@ def downgrade() -> None:
         )
     )
     conn.execute(sa.text("DROP TYPE casestatus_new"))
+    conn.execute(sa.text("ALTER TABLE cases ALTER COLUMN status SET DEFAULT 'pending'"))
 
     # Recreate verdicts table (minimal structure — amendment FKs not restored)
     op.create_table(
