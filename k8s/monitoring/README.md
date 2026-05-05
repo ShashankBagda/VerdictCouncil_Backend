@@ -42,8 +42,20 @@ kubectl port-forward -n kube-prometheus-stack svc/kube-prometheus-stack-alertman
 | Kubernetes objects | kube-state-metrics (auto) |
 | Backend `/metrics` | `servicemonitor-api.yaml` → scrapes `service-api-service:8001/metrics` |
 
-## Staging note
+## Production / staging policy
 
-The staging cluster was originally provisioned with the DigitalOcean Marketplace
-`kubernetes-monitoring-stack` 1-click app. This `values.yaml` reproduces those
-settings for future installs or a fresh bootstrap.
+The live staging and production clusters use the **DigitalOcean Marketplace
+`kubernetes-monitoring-stack` 1-click app** and must continue to be managed
+through the DO control panel — do NOT run `helm upgrade` against these clusters
+without explicit sign-off.
+
+`values.yaml` is kept for two purposes only:
+1. **Documentation** — records the configuration intent so the install is
+   auditable from git.
+2. **Fresh bootstrap** — used when rebuilding a cluster from scratch
+   (`infra-bootstrap.yml`), where the 1-click app is unavailable via
+   automation.
+
+The only manifest safe to `kubectl apply` against the live cluster is
+`servicemonitor-api.yaml`, which adds backend `/metrics` scraping and does
+not modify the existing Prometheus/Grafana/Alertmanager deployment.
