@@ -99,7 +99,14 @@ Close the last argument's `text` with: **"AI-assisted judicial preparation mater
 
 ## Hard rules
 
-- `preliminary_conclusion = null` and `confidence = null`. Always.
+- `preliminary_conclusion = null` and `confidence = null`. Always. The only valid JSON for these fields is:
+  ```json
+  {
+    "preliminary_conclusion": null,
+    "confidence": null
+  }
+  ```
+  Any other value — a string, a percentage, a word like `"guilty"` or `"liable"` — is a verdict recommendation and will be rejected by the downstream audit phase with a CRITICAL_FLAG.
 - Both sides have at least one Argument; both sides' arguments have non-empty `weaknesses`.
 - Every assertion in an Argument's `text` cites at least one `SourceRef` in `supporting_refs`.
 - Never determine guilt, liability, or quantum award.
