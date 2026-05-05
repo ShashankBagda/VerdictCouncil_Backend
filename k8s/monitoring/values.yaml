@@ -1,0 +1,52 @@
+# kube-prometheus-stack Helm values for VerdictCouncil DOKS clusters.
+#
+# Install / upgrade:
+#   helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+#   helm repo update
+#   helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+#     -n kube-prometheus-stack --create-namespace -f k8s/monitoring/values.yaml
+#
+# The Grafana admin password is managed outside this file (DO Marketplace
+# created the existing secret). For a fresh install set it at deploy time:
+#   helm upgrade --install ... --set grafana.adminPassword=<secure-password>
+
+grafana:
+  persistence:
+    enabled: true
+    storageClassName: do-block-storage
+    size: 10Gi
+  # Reference existing secret created by the DO Marketplace 1-click or a prior
+  # helm install. Remove this block and set grafana.adminPassword on fresh
+  # installs where no secret exists yet.
+  admin:
+    existingSecret: kube-prometheus-stack-grafana
+    userKey: admin-user
+    passwordKey: admin-password
+
+prometheus:
+  prometheusSpec:
+    retention: 30d
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: do-block-storage
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 20Gi
+    # Pick up ServiceMonitors from all namespaces (required for the
+    # servicemonitor-api.yaml in verdictcouncil-staging / verdictcouncil).
+    serviceMonitorSelectorNilUsesHelmValues: false
+    serviceMonitorSelector: {}
+    serviceMonitorNamespaceSelector: {}
+
+alertmanager:
+  alertmanagerSpec:
+    storage:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: do-block-storage
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 10Gi

@@ -17,6 +17,10 @@ spec:
       labels:
         app: verdictcouncil
         component: api-service
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8001"
+        prometheus.io/path: "/metrics"
     spec:
       containers:
         - name: api-service
