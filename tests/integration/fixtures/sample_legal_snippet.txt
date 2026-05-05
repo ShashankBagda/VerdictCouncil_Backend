@@ -1,0 +1,11 @@
+Under the Road Traffic Act 1961 s.65, any person who drives or attempts to drive a motor
+vehicle on a road without reasonable consideration for other road users is guilty of an offence
+punishable by a fine not exceeding SGD 1,000 or imprisonment not exceeding 6 months.
+
+Section 65(b) specifically addresses improper lane changes made without signalling, and the
+Traffic Police enforce this provision via demerit points under Schedule 9 of the same Act.
+
+A driver who changes lane abruptly at a junction, causing another vehicle to brake suddenly,
+may be charged under s.65 and face 4 demerit points in addition to the fine.
+
+The unique test identifier for this fixture is: ROUNDTRIP-CANARY-7421.

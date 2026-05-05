@@ -198,4 +198,14 @@ def legal_element_coverage(run: Any, example: Any) -> dict[str, Any]:
 
 
 # Public bundle for run_eval.py (3.D1.3).
-ALL_EVALUATORS: tuple = (citation_accuracy, legal_element_coverage)
+# llm_faithfulness is included only when JUDGE_MODEL or ENABLE_LLM_JUDGE is set
+# so default CI runs never spend OpenAI tokens on the judge.
+def _build_evaluators() -> tuple:
+    from tests.eval.judge import JUDGE_ENABLED, llm_faithfulness  # late import avoids circular
+
+    return (citation_accuracy, legal_element_coverage) + (
+        (llm_faithfulness,) if JUDGE_ENABLED else ()
+    )
+
+
+ALL_EVALUATORS: tuple = _build_evaluators()

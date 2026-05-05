@@ -1,4 +1,4 @@
-.PHONY: install prefetch-sanitizer lint typecheck test migrate reset-db infra-up infra-down dev clean openapi-snapshot openapi-check sse-schema-snapshot sse-schema-check smoke-contract
+.PHONY: install prefetch-sanitizer lint typecheck test test-integration test-judge migrate reset-db infra-up infra-down dev clean openapi-snapshot openapi-check sse-schema-snapshot sse-schema-check smoke-contract
 
 install: ## Install dependencies
 	python3.12 -m venv .venv
@@ -25,6 +25,12 @@ test: ## Run tests
 
 test-cov: ## Run tests with coverage
 	.venv/bin/pytest tests/ -v --cov=src --cov-report=term-missing
+
+test-integration: ## Run live-API integration tests (requires OPENAI_API_KEY)
+	.venv/bin/pytest tests/integration/ -v -m integration --tb=short
+
+test-judge: ## Run LLM-as-judge unit tests (hermetic, no API calls)
+	.venv/bin/pytest tests/eval/test_judge.py -v --tb=short
 
 migrate: ## Run database migrations
 	.venv/bin/python -m alembic upgrade head
