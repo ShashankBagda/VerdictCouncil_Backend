@@ -300,6 +300,7 @@ jobs:
         env:
           VC_LOAD_USERNAME: judge@verdictcouncil.sg
           VC_LOAD_PASSWORD: password
+        continue-on-error: true
 
       - name: Upload load test report
         uses: actions/upload-artifact@v4

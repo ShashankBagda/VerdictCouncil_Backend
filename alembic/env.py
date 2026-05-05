@@ -36,12 +36,17 @@ def run_migrations_online() -> None:
         poolclass=pool.NullPool,
     )
     with connectable.connect() as connection:
-        # Fail fast if DDL can't acquire a table lock within 30 s rather than
-        # hanging indefinitely and timing out the deploy job.
+        # AUTOCOMMIT: ALTER TYPE ADD VALUE is non-transactional in PostgreSQL.
+        # Running in autocommit ensures each migration's type changes are
+        # committed before the next migration runs, preventing
+        # UnsafeNewEnumValueUsage when a later migration references an enum
+        # whose values were added by an earlier migration in the same session.
+        connection = connection.execution_options(isolation_level="AUTOCOMMIT")
+        # SET lock_timeout is a session-level directive; it persists for the
+        # life of the connection across autocommit statements.
         connection.execute(sa.text("SET lock_timeout = '30s'"))
         context.configure(connection=connection, target_metadata=target_metadata)
-        with context.begin_transaction():
-            context.run_migrations()
+        context.run_migrations()
 
 
 if context.is_offline_mode():
