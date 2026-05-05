@@ -309,20 +309,23 @@ jobs:
           sed "s|verdictcouncil:latest|${IMAGE}|g" k8s/base/job-alembic-migrate.yaml \
             | kubectl apply --namespace "${NAMESPACE}" -f -
 
-          # Poll for Complete or Failed — kubectl wait only watches for Complete
-          # and will sit at the timeout if the job fails instead of fast-failing.
-          # 120 iterations × 5 s = 600 s (10 min) to handle fresh-DB runs where
-          # all 27 migrations execute sequentially (~6 min observed).
+          # Use status.succeeded / status.failed counts instead of condition
+          # type strings. K8s 1.26+ jobs can have multiple True conditions
+          # (Complete + SuccessCriteriaMet) which breaks string comparison.
+          # 120 iterations × 5 s = 600 s (10 min) covers image-pull time
+          # (~5 min) plus fresh-DB migration time (~6 min).
           i=0
           while [ $i -lt 120 ]; do
-            COND=$(kubectl get job alembic-migrate -n "${NAMESPACE}" \
-              -o jsonpath='{.status.conditions[?(@.status=="True")].type}' 2>/dev/null || true)
-            if [ "$COND" = "Complete" ]; then
+            SUCCEEDED=$(kubectl get job alembic-migrate -n "${NAMESPACE}" \
+              -o jsonpath='{.status.succeeded}' 2>/dev/null || true)
+            FAILED=$(kubectl get job alembic-migrate -n "${NAMESPACE}" \
+              -o jsonpath='{.status.failed}' 2>/dev/null || true)
+            if [ "${SUCCEEDED:-0}" -ge 1 ] 2>/dev/null; then
               echo "Migration completed successfully"
               exit 0
             fi
-            if [ "$COND" = "Failed" ]; then
-              echo "Migration job reached Failed status" >&2
+            if [ "${FAILED:-0}" -ge 3 ] 2>/dev/null; then
+              echo "Migration job reached backoff limit" >&2
               break
             fi
             sleep 5
