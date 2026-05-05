@@ -17,6 +17,8 @@ target_metadata = Base.metadata
 # Override URL from environment if available
 database_url = os.environ.get("DATABASE_URL")
 if database_url:
+    # alembic uses a sync engine; strip the asyncpg driver prefix if present
+    database_url = database_url.replace("postgresql+asyncpg://", "postgresql://")
     config.set_main_option("sqlalchemy.url", database_url)
 
 

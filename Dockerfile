@@ -23,6 +23,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=builder /install /usr/local
 COPY src/ /app/src/
 COPY configs/ /app/configs/
+COPY alembic.ini /app/alembic.ini
+COPY alembic/ /app/alembic/
 RUN groupadd -r vcagent && useradd -r -g vcagent vcagent
 USER vcagent
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/app
