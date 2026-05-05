@@ -21,7 +21,7 @@ down_revision = "0016"
 branch_labels = None
 depends_on = None
 
-OLD_CASESTATUS_VALUES = (
+_OLD_CASESTATUS_VALUES = (
     "pending",
     "processing",
     "ready_for_review",
@@ -30,7 +30,7 @@ OLD_CASESTATUS_VALUES = (
     "failed",
     "failed_retryable",
 )
-NEW_CASESTATUS_VALUES = (
+_NEW_CASESTATUS_VALUES = (
     "pending",
     "processing",
     "ready_for_review",
@@ -44,14 +44,8 @@ NEW_CASESTATUS_VALUES = (
     "awaiting_review_gate4",
 )
 
-OLD_JOBTYPE_VALUES = ("case_pipeline", "whatif_scenario", "stability_computation")
-NEW_JOBTYPE_VALUES = ("case_pipeline", "whatif_scenario", "stability_computation", "gate_run")
-
-OLD_CASESTATUS = sa.Enum(*OLD_CASESTATUS_VALUES, name="casestatus")
-NEW_CASESTATUS = sa.Enum(*NEW_CASESTATUS_VALUES, name="casestatus")
-
-OLD_JOBTYPE = sa.Enum(*OLD_JOBTYPE_VALUES, name="pipelinejobtype")
-NEW_JOBTYPE = sa.Enum(*NEW_JOBTYPE_VALUES, name="pipelinejobtype")
+_OLD_JOBTYPE_VALUES = ("case_pipeline", "whatif_scenario", "stability_computation")
+_NEW_JOBTYPE_VALUES = ("case_pipeline", "whatif_scenario", "stability_computation", "gate_run")
 
 
 def upgrade() -> None:
@@ -59,39 +53,46 @@ def upgrade() -> None:
 
     # ------------------------------------------------------------------ #
     # 1. Migrate legacy escalated rows → ready_for_review
-    #    With the simplified single-judge model, escalation is no longer
-    #    a valid workflow state. Existing escalated rows are surfaced as
-    #    ready for review so the judge can action them.
     # ------------------------------------------------------------------ #
-    conn.execute(
-        sa.text("UPDATE cases SET status = 'ready_for_review' WHERE status = 'escalated'")
-    )
+    conn.execute(sa.text("UPDATE cases SET status = 'ready_for_review' WHERE status = 'escalated'"))
 
     # ------------------------------------------------------------------ #
     # 2. Rebuild casestatus enum with 4 new gate-pause values.
-    #    PostgreSQL does not support DROP VALUE, so we swap the type using
-    #    the same create-alter-drop pattern as migration 0016.
+    #    Uses rename-create-alter-drop (same pattern as migration 0018).
     # ------------------------------------------------------------------ #
-    NEW_CASESTATUS.create(conn, checkfirst=True)
+    conn.execute(sa.text("ALTER TYPE casestatus RENAME TO casestatus_old"))
     conn.execute(
         sa.text(
-            "ALTER TABLE cases "
-            "ALTER COLUMN status TYPE casestatus USING status::text::casestatus"
+            "CREATE TYPE casestatus AS ENUM ("
+            + ", ".join(f"'{v}'" for v in _NEW_CASESTATUS_VALUES)
+            + ")"
         )
     )
-    OLD_CASESTATUS.drop(conn, checkfirst=False)
+    conn.execute(
+        sa.text(
+            "ALTER TABLE cases ALTER COLUMN status TYPE casestatus USING status::text::casestatus"
+        )
+    )
+    conn.execute(sa.text("DROP TYPE casestatus_old"))
 
     # ------------------------------------------------------------------ #
     # 3. Rebuild pipelinejobtype enum to add gate_run.
     # ------------------------------------------------------------------ #
-    NEW_JOBTYPE.create(conn, checkfirst=True)
+    conn.execute(sa.text("ALTER TYPE pipelinejobtype RENAME TO pipelinejobtype_old"))
+    conn.execute(
+        sa.text(
+            "CREATE TYPE pipelinejobtype AS ENUM ("
+            + ", ".join(f"'{v}'" for v in _NEW_JOBTYPE_VALUES)
+            + ")"
+        )
+    )
     conn.execute(
         sa.text(
             "ALTER TABLE pipeline_jobs "
             "ALTER COLUMN job_type TYPE pipelinejobtype USING job_type::text::pipelinejobtype"
         )
     )
-    OLD_JOBTYPE.drop(conn, checkfirst=False)
+    conn.execute(sa.text("DROP TYPE pipelinejobtype_old"))
 
     # ------------------------------------------------------------------ #
     # 4. Add JSONB columns to cases and documents.
@@ -100,9 +101,7 @@ def upgrade() -> None:
     op.add_column(
         "cases", sa.Column("judicial_decision", sa.dialects.postgresql.JSONB(), nullable=True)
     )
-    op.add_column(
-        "documents", sa.Column("pages", sa.dialects.postgresql.JSONB(), nullable=True)
-    )
+    op.add_column("documents", sa.Column("pages", sa.dialects.postgresql.JSONB(), nullable=True))
 
 
 def downgrade() -> None:
@@ -114,10 +113,15 @@ def downgrade() -> None:
     op.drop_column("cases", "gate_state")
 
     # Restore pipelinejobtype enum without gate_run
-    OLD_JOBTYPE.create(conn, checkfirst=True)
+    conn.execute(
+        sa.text("UPDATE pipeline_jobs SET job_type = 'case_pipeline' WHERE job_type = 'gate_run'")
+    )
+    conn.execute(sa.text("ALTER TYPE pipelinejobtype RENAME TO pipelinejobtype_new"))
     conn.execute(
         sa.text(
-            "UPDATE pipeline_jobs SET job_type = 'case_pipeline' WHERE job_type = 'gate_run'"
+            "CREATE TYPE pipelinejobtype AS ENUM ("
+            + ", ".join(f"'{v}'" for v in _OLD_JOBTYPE_VALUES)
+            + ")"
         )
     )
     conn.execute(
@@ -126,7 +130,7 @@ def downgrade() -> None:
             "ALTER COLUMN job_type TYPE pipelinejobtype USING job_type::text::pipelinejobtype"
         )
     )
-    NEW_JOBTYPE.drop(conn, checkfirst=False)
+    conn.execute(sa.text("DROP TYPE pipelinejobtype_new"))
 
     # Restore casestatus enum without gate-pause values
     conn.execute(
@@ -138,11 +142,17 @@ def downgrade() -> None:
             ")"
         )
     )
-    OLD_CASESTATUS.create(conn, checkfirst=True)
+    conn.execute(sa.text("ALTER TYPE casestatus RENAME TO casestatus_new"))
     conn.execute(
         sa.text(
-            "ALTER TABLE cases "
-            "ALTER COLUMN status TYPE casestatus USING status::text::casestatus"
+            "CREATE TYPE casestatus AS ENUM ("
+            + ", ".join(f"'{v}'" for v in _OLD_CASESTATUS_VALUES)
+            + ")"
         )
     )
-    NEW_CASESTATUS.drop(conn, checkfirst=False)
+    conn.execute(
+        sa.text(
+            "ALTER TABLE cases ALTER COLUMN status TYPE casestatus USING status::text::casestatus"
+        )
+    )
+    conn.execute(sa.text("DROP TYPE casestatus_new"))

@@ -30,8 +30,17 @@ down_revision = "0013"
 branch_labels = None
 depends_on = None
 
-# Old and new casestatus enum values
-OLD_STATUSES = (
+_NEW_STATUSES = (
+    "pending",
+    "processing",
+    "ready_for_review",
+    "escalated",
+    "closed",
+    "failed",
+    "failed_retryable",
+)
+
+_OLD_STATUSES = (
     "pending",
     "processing",
     "ready_for_review",
@@ -42,18 +51,6 @@ OLD_STATUSES = (
     "failed",
     "failed_retryable",
 )
-NEW_STATUSES = (
-    "pending",
-    "processing",
-    "ready_for_review",
-    "escalated",
-    "closed",
-    "failed",
-    "failed_retryable",
-)
-
-NEW_CASESTATUS = sa.Enum(*NEW_STATUSES, name="casestatus")
-OLD_CASESTATUS = sa.Enum(*OLD_STATUSES, name="casestatus")
 
 
 def upgrade() -> None:
@@ -68,27 +65,26 @@ def upgrade() -> None:
     # 2. Map terminal verdict statuses → closed before rebuilding enum
     # ------------------------------------------------------------------ #
     conn.execute(
-        sa.text(
-            "UPDATE cases SET status = 'closed' "
-            "WHERE status IN ('decided', 'rejected')"
-        )
+        sa.text("UPDATE cases SET status = 'closed' WHERE status IN ('decided', 'rejected')")
     )
 
     # ------------------------------------------------------------------ #
-    # 3. Rebuild casestatus enum without decided/rejected
-    #    PostgreSQL does not support DROP VALUE, so we swap the type.
+    # 3. Rebuild casestatus enum without decided/rejected.
+    #    PostgreSQL does not support DROP VALUE, so we use rename-create-
+    #    alter-drop (same approach as migration 0018 for userrole).
     # ------------------------------------------------------------------ #
-    NEW_CASESTATUS.create(conn, checkfirst=True)
-
+    conn.execute(sa.text("ALTER TYPE casestatus RENAME TO casestatus_old"))
     conn.execute(
         sa.text(
-            "ALTER TABLE cases "
-            "ALTER COLUMN status TYPE casestatus USING status::text::casestatus"
+            "CREATE TYPE casestatus AS ENUM (" + ", ".join(f"'{v}'" for v in _NEW_STATUSES) + ")"
         )
     )
-
-    # Drop old enum (now unused)
-    OLD_CASESTATUS.drop(conn, checkfirst=False)
+    conn.execute(
+        sa.text(
+            "ALTER TABLE cases ALTER COLUMN status TYPE casestatus USING status::text::casestatus"
+        )
+    )
+    conn.execute(sa.text("DROP TYPE casestatus_old"))
 
     # ------------------------------------------------------------------ #
     # 4. Drop RecommendationType enum (was only used by verdicts)
@@ -122,14 +118,18 @@ def downgrade() -> None:
     op.rename_table("hearing_analyses", "deliberations")
 
     # Restore casestatus enum with decided/rejected
-    OLD_CASESTATUS.create(conn, checkfirst=True)
+    conn.execute(sa.text("ALTER TYPE casestatus RENAME TO casestatus_new"))
     conn.execute(
         sa.text(
-            "ALTER TABLE cases "
-            "ALTER COLUMN status TYPE casestatus USING status::text::casestatus"
+            "CREATE TYPE casestatus AS ENUM (" + ", ".join(f"'{v}'" for v in _OLD_STATUSES) + ")"
         )
     )
-    NEW_CASESTATUS.drop(conn, checkfirst=False)
+    conn.execute(
+        sa.text(
+            "ALTER TABLE cases ALTER COLUMN status TYPE casestatus USING status::text::casestatus"
+        )
+    )
+    conn.execute(sa.text("DROP TYPE casestatus_new"))
 
     # Recreate verdicts table (minimal structure — amendment FKs not restored)
     op.create_table(
