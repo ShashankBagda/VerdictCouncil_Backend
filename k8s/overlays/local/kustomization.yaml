@@ -1,0 +1,31 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: verdictcouncil-local
+resources:
+  - ../../base
+  - postgres.yaml
+  - redis.yaml
+patches:
+  # Use locally-loaded image; avoid pulling from DOCR in kind.
+  - target:
+      kind: Deployment
+      name: api-service
+    patch: |
+      - op: add
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: IfNotPresent
+  - target:
+      kind: Deployment
+      name: arq-worker
+    patch: |
+      - op: add
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: IfNotPresent
+  # Scale down arq-worker for local single-node cluster.
+  - target:
+      kind: Deployment
+      name: arq-worker
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 1
