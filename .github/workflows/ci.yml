@@ -69,6 +69,7 @@ jobs:
             --cov=src --cov-config=pyproject.toml \
             --cov-report=term-missing --cov-report=xml:coverage.xml \
             --cov-fail-under=60 \
+            --junitxml=junit-unit.xml \
             -m "not integration and not eval and not requires_openai"
         env:
           OPENAI_API_KEY: ""
@@ -76,6 +77,12 @@ jobs:
           DATABASE_URL: "postgresql+asyncpg://unused:unused@localhost:5432/unused"
           REDIS_URL: "redis://localhost:6379"
           JWT_SECRET: "test-secret-for-ci"
+      - name: Upload test report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: unit-test-report
+          path: junit-unit.xml
       - name: Upload coverage report
         uses: codecov/codecov-action@v4
         if: always()
@@ -103,6 +110,7 @@ jobs:
       - name: Run property-based tests
         run: |
           pytest tests/unit/test_property_based.py -v --tb=short \
+            --junitxml=junit-property.xml \
             -m "not integration and not eval"
         env:
           HYPOTHESIS_PROFILE: ci
@@ -111,6 +119,12 @@ jobs:
           DATABASE_URL: "postgresql+asyncpg://unused:unused@localhost:5432/unused"
           REDIS_URL: "redis://localhost:6379"
           JWT_SECRET: "test-secret-for-ci"
+      - name: Upload property test report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: property-test-report
+          path: junit-property.xml
 
   sast:
     runs-on: ubuntu-latest
@@ -252,6 +266,16 @@ jobs:
           python-version: "3.12"
       - run: pip install -e ".[dev]"
 
+      - name: Run database migrations
+        env:
+          DATABASE_URL: postgresql://verdict_user:verdict_password@localhost:5432/verdict_db
+        run: alembic upgrade head
+
+      - name: Seed demo users
+        env:
+          DATABASE_URL: postgresql://verdict_user:verdict_password@localhost:5432/verdict_db
+        run: python -m scripts.seed_users
+
       - name: Start FastAPI server
         env:
           DATABASE_URL: postgresql+asyncpg://verdict_user:verdict_password@localhost:5432/verdict_db
@@ -274,9 +298,8 @@ jobs:
             --html tests/load/report.html \
             --exit-code-on-error 1
         env:
-          VC_LOAD_USERNAME: judge@example.com
-          VC_LOAD_PASSWORD: TestPassword123!
-        continue-on-error: true  # Advisory — does not block merge
+          VC_LOAD_USERNAME: judge@verdictcouncil.sg
+          VC_LOAD_PASSWORD: password
 
       - name: Upload load test report
         uses: actions/upload-artifact@v4

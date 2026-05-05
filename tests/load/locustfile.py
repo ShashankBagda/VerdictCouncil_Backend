@@ -53,8 +53,8 @@ from locust import HttpUser, TaskSet, between, events, task
 # Configuration (override via env)
 # ---------------------------------------------------------------------------
 
-VC_USERNAME = os.environ.get("VC_LOAD_USERNAME", "judge@example.com")
-VC_PASSWORD = os.environ.get("VC_LOAD_PASSWORD", "TestPassword123!")
+VC_USERNAME = os.environ.get("VC_LOAD_USERNAME", "judge@verdictcouncil.sg")
+VC_PASSWORD = os.environ.get("VC_LOAD_PASSWORD", "password")
 VC_CASE_ID = os.environ.get("VC_LOAD_CASE_ID", "")
 
 # Performance thresholds (milliseconds) — from 12-testing-summary.md
@@ -87,7 +87,7 @@ class AuthMixin:
         """Authenticate once and store the JWT cookie."""
         with self.client.post(
             "/api/v1/auth/login",
-            json={"username": VC_USERNAME, "password": VC_PASSWORD},
+            json={"email": VC_USERNAME, "password": VC_PASSWORD},
             catch_response=True,
             name="[auth] login",
         ) as resp:

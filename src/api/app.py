@@ -230,6 +230,11 @@ def create_app() -> FastAPI:
     # Prometheus-compatible metrics (excluded from OpenAPI spec)
     app.routes.append(Route("/metrics", metrics_endpoint, methods=["GET"], include_in_schema=False))
 
+    # Liveness probe — no auth, no DB, used by load tests and k8s health checks
+    @app.get("/health", include_in_schema=False)
+    async def health_check():
+        return {"status": "ok"}
+
     return app
 
 
