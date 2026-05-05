@@ -18,6 +18,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libcairo2 \
     libgdk-pixbuf-2.0-0 \
     fonts-dejavu-core \
+    libpq5 \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /install /usr/local
 COPY src/ /app/src/
