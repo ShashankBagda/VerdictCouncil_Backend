@@ -143,7 +143,6 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install bandit semgrep
-      - run: pip install -e .
 
       # Bandit: Python security issue scanner
       - name: Bandit Security Scan
