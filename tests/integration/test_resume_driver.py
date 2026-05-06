@@ -469,11 +469,13 @@ def test_build_resume_payload_subagent_routes_notes_under_scope_key() -> None:
     }
 
 
-def test_build_resume_payload_subagent_without_notes_omits_notes() -> None:
+def test_build_resume_payload_subagent_without_notes_includes_empty_key() -> None:
+    # The empty-string value scopes the rerun to the named subagent even
+    # when the judge provides no corrective note (routing signal, not content).
     out = build_resume_payload(
         {"resume_action": "rerun", "phase": "research", "subagent": "evidence"}
     )
-    assert out == {"action": "rerun"}
+    assert out == {"action": "rerun", "notes": {"evidence": ""}}
 
 
 @pytest.mark.asyncio
